@@ -18,13 +18,15 @@ function Login() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  // ==========================================
+  // ==============================
   // SEND OTP
-  // ==========================================
-  const sendOtp = async () => {
-    const cleanEmail = email.trim().toLowerCase();
+  // ==============================
+  const sendOtp = async (e) => {
+    if (e) {
+      e.preventDefault();
+    }
 
-    if (!cleanEmail) {
+    if (!email.trim()) {
       setError("Please enter your email address.");
       return;
     }
@@ -34,18 +36,17 @@ function Login() {
       setError("");
       setMessage("");
 
-      console.log("Sending OTP to:", cleanEmail);
+      console.log("SEND OTP:", email);
 
       const response = await axios.post(
         `${API_URL}/api/auth/send-otp`,
         {
-          email: cleanEmail,
+          email: email.trim().toLowerCase(),
         },
         {
           headers: {
             "Content-Type": "application/json",
           },
-          timeout: 30000,
         }
       );
 
@@ -53,12 +54,9 @@ function Login() {
 
       if (response.data?.success) {
         setOtpSent(true);
-
         setMessage(
           "OTP sent successfully. Please check your email."
         );
-
-        setOtp("");
       } else {
         setError(
           response.data?.message ||
@@ -68,94 +66,58 @@ function Login() {
     } catch (err) {
       console.error("SEND OTP ERROR:", err);
 
-      if (err.response) {
-        setError(
-          err.response.data?.message ||
-            `Server error: ${err.response.status}`
-        );
-      } else if (err.request) {
-        setError(
-          "Server is not responding. Please try again."
-        );
-      } else {
-        setError(
+      setError(
+        err.response?.data?.message ||
           err.message ||
-            "Unable to send OTP."
-        );
-      }
+          "Unable to send OTP. Please try again."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // ==========================================
+  // ==============================
   // VERIFY OTP
-  // ==========================================
-  const handleVerifyOtp = async () => {
+  // ==============================
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+
+    console.log("================================");
     console.log("VERIFY BUTTON CLICKED");
+    console.log("EMAIL:", email);
+    console.log("OTP:", otp);
+    console.log("API:", `${API_URL}/api/auth/verify-otp`);
+    console.log("================================");
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanOtp = otp.trim();
-
-    setError("");
-    setMessage("");
-
-    if (!cleanEmail) {
-      setError("Email is missing.");
-      return;
-    }
-
-    if (!cleanOtp) {
-      setError("Please enter the OTP.");
-      return;
-    }
-
-    if (!/^\d{6}$/.test(cleanOtp)) {
+    if (!otp || otp.length !== 6) {
       setError("Please enter the 6-digit OTP.");
       return;
     }
 
     try {
       setLoading(true);
-
+      setError("");
       setMessage("Verifying OTP...");
-
-      console.log("================================");
-      console.log("VERIFY OTP START");
-      console.log("API:", API_URL);
-      console.log("Email:", cleanEmail);
-      console.log("OTP:", cleanOtp);
-      console.log("================================");
 
       const response = await axios.post(
         `${API_URL}/api/auth/verify-otp`,
         {
-          email: cleanEmail,
-          otp: cleanOtp,
+          email: email.trim().toLowerCase(),
+          otp: otp.trim(),
         },
         {
           headers: {
             "Content-Type": "application/json",
           },
-          timeout: 30000,
         }
       );
 
       console.log(
         "VERIFY OTP RESPONSE:",
-        response
-      );
-
-      console.log(
-        "VERIFY OTP DATA:",
         response.data
       );
 
-      if (response.data?.success === true) {
-        console.log(
-          "OTP VERIFIED SUCCESSFULLY"
-        );
-
+      if (response.data?.success) {
         // Save JWT
         if (response.data.token) {
           localStorage.setItem(
@@ -172,76 +134,43 @@ function Login() {
           );
         }
 
-        setError("");
+        setMessage("Login successful.");
 
-        setMessage(
-          "Login successful. Opening dashboard..."
+        console.log(
+          "LOGIN SUCCESS - REDIRECTING TO DASHBOARD"
         );
 
-        // Give UI a moment to show success
-        setTimeout(() => {
-          navigate("/dashboard");
-        }, 500);
-
-        return;
+        navigate("/dashboard");
+      } else {
+        setError(
+          response.data?.message ||
+            "OTP verification failed."
+        );
       }
-
-      // API responded but success=false
-      setMessage("");
-
-      setError(
-        response.data?.message ||
-          "OTP verification failed."
-      );
     } catch (err) {
-      console.error(
-        "================================"
-      );
-
       console.error(
         "VERIFY OTP ERROR:",
         err
       );
 
       console.error(
-        "================================"
+        "VERIFY OTP RESPONSE:",
+        err.response?.data
       );
 
-      setMessage("");
-
-      if (err.response) {
-        console.error(
-          "STATUS:",
-          err.response.status
-        );
-
-        console.error(
-          "DATA:",
-          err.response.data
-        );
-
-        setError(
-          err.response.data?.message ||
-            `Verification failed (${err.response.status})`
-        );
-      } else if (err.request) {
-        setError(
-          "No response from server. Please try again."
-        );
-      } else {
-        setError(
+      setError(
+        err.response?.data?.message ||
           err.message ||
-            "Unable to verify OTP."
-        );
-      }
+          "Invalid OTP. Please try again."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // ==========================================
+  // ==============================
   // CHANGE EMAIL
-  // ==========================================
+  // ==============================
   const changeEmail = () => {
     setOtpSent(false);
     setOtp("");
@@ -249,9 +178,6 @@ function Login() {
     setError("");
   };
 
-  // ==========================================
-  // UI
-  // ==========================================
   return (
     <div className="login-page">
       <div className="login-card">
@@ -260,16 +186,15 @@ function Login() {
           OM
         </div>
 
-        <h1>
-          Office Management
-        </h1>
+        <h1>Office Management</h1>
 
         <p className="subtitle">
           Secure business management system
         </p>
 
         {!otpSent ? (
-          <>
+          <form onSubmit={sendOtp}>
+
             <label htmlFor="email">
               Email Address
             </label>
@@ -279,30 +204,25 @@ function Login() {
               type="email"
               placeholder="Enter your email"
               value={email}
-              disabled={loading}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setError("");
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  sendOtp();
-                }
-              }}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
+              autoComplete="email"
             />
 
             <button
-              type="button"
-              onClick={sendOtp}
+              type="submit"
               disabled={loading}
             >
               {loading
                 ? "Sending..."
                 : "Send OTP"}
             </button>
-          </>
+
+          </form>
         ) : (
-          <>
+          <form onSubmit={handleVerifyOtp}>
+
             <label htmlFor="otp">
               Enter OTP
             </label>
@@ -311,36 +231,22 @@ function Login() {
               id="otp"
               type="text"
               inputMode="numeric"
-              autoComplete="one-time-code"
               maxLength={6}
               placeholder="Enter 6 digit OTP"
               value={otp}
-              disabled={loading}
-              autoFocus
+              autoComplete="one-time-code"
               onChange={(e) => {
                 const value =
-                  e.target.value.replace(
-                    /\D/g,
-                    ""
-                  );
+                  e.target.value
+                    .replace(/\D/g, "")
+                    .slice(0, 6);
 
                 setOtp(value);
-                setError("");
-              }}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  otp.length === 6 &&
-                  !loading
-                ) {
-                  handleVerifyOtp();
-                }
               }}
             />
 
             <button
-              type="button"
-              onClick={handleVerifyOtp}
+              type="submit"
               disabled={
                 loading ||
                 otp.length !== 6
@@ -359,25 +265,22 @@ function Login() {
             >
               Change Email
             </button>
-          </>
+
+          </form>
         )}
 
-        {/* SUCCESS / INFORMATION */}
         {message && (
           <p className="login-message">
             {message}
           </p>
         )}
 
-        {/* ERROR */}
         {error && (
           <p
             className="login-message"
             style={{
               color: "#b42318",
               background: "#fef3f2",
-              border:
-                "1px solid #fecdca",
             }}
           >
             {error}
