@@ -6,10 +6,121 @@ html,
 body,
 #root {
   margin: 0;
+  width: 100%;
   min-height: 100%;
 }
 
 body {
-  font-family: Arial, sans-serif;
-  background: #f5f7fb;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f4f7fb;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: linear-gradient(
+    135deg,
+    #f7f9fc,
+    #e9eef7
+  );
+}
+
+.login-card {
+  width: 100%;
+  max-width: 430px;
+  background: white;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.08);
+}
+
+.login-logo {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: #1f4f8a;
+  color: white;
+  font-size: 22px;
+  font-weight: bold;
+}
+
+.login-card h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 26px;
+  color: #172033;
+}
+
+.subtitle {
+  text-align: center;
+  color: #7a8495;
+  margin: 10px 0 30px;
+}
+
+.login-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #30394a;
+}
+
+.login-card input {
+  width: 100%;
+  padding: 14px 15px;
+  border: 1px solid #d9dfeb;
+  border-radius: 10px;
+  font-size: 15px;
+  outline: none;
+  margin-bottom: 18px;
+}
+
+.login-card input:focus {
+  border-color: #1f4f8a;
+}
+
+.login-card button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  background: #1f4f8a;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  margin-top: 10px;
+  background: #eef2f7 !important;
+  color: #30394a !important;
+}
+
+.login-message {
+  margin-top: 18px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f2f6fb;
+  color: #344054;
+  font-size: 14px;
+  text-align: center;
+}
+
+.login-footer {
+  margin-top: 28px;
+  text-align: center;
+  color: #98a2b3;
+  font-size: 12px;
 }
