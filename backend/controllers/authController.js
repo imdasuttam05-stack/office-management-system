@@ -11,7 +11,6 @@ export const sendOtp = async (req, res) => {
   try {
     const email = req.body.email?.trim().toLowerCase();
 
-    // Validate email
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -19,20 +18,19 @@ export const sendOtp = async (req, res) => {
       });
     }
 
-    // Generate OTP
     const otp = generateOtp();
 
-    // Delete previous OTPs for this email
+    // Delete previous OTP
     await Otp.deleteMany({ email });
 
-    // Create new OTP
+    // Save new OTP
     await Otp.create({
       email,
       otp,
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
-    // Send OTP email
+    // Send email
     await sendOtpEmail(email, otp);
 
     console.log("=================================");
@@ -69,9 +67,9 @@ export const verifyOtp = async (req, res) => {
     console.log("OTP:", otp);
     console.log("=================================");
 
-    // ------------------------------------------
+    // --------------------------------------
     // Validate input
-    // ------------------------------------------
+    // --------------------------------------
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -79,9 +77,9 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ------------------------------------------
-    // Validate OTP format
-    // ------------------------------------------
+    // --------------------------------------
+    // Validate OTP
+    // --------------------------------------
     if (!/^\d{6}$/.test(otp)) {
       return res.status(400).json({
         success: false,
@@ -89,9 +87,9 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ------------------------------------------
-    // Check JWT_SECRET
-    // ------------------------------------------
+    // --------------------------------------
+    // JWT secret
+    // --------------------------------------
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET is NOT configured!");
 
@@ -101,9 +99,9 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ------------------------------------------
+    // --------------------------------------
     // Find OTP
-    // ------------------------------------------
+    // --------------------------------------
     const otpRecord = await Otp.findOne({
       email,
       otp,
@@ -120,9 +118,9 @@ export const verifyOtp = async (req, res) => {
 
     console.log("OTP FOUND IN DATABASE");
 
-    // ------------------------------------------
-    // Check OTP expiry
-    // ------------------------------------------
+    // --------------------------------------
+    // Check expiry
+    // --------------------------------------
     if (otpRecord.expiresAt < new Date()) {
       await Otp.deleteOne({
         _id: otpRecord._id,
@@ -136,19 +134,19 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ------------------------------------------
-    // Find existing user
-    // ------------------------------------------
+    // --------------------------------------
+    // Find user
+    // --------------------------------------
     let user = await User.findOne({ email });
 
-    // ------------------------------------------
-    // Create new user
-    // ------------------------------------------
+    // --------------------------------------
+    // Create user
+    // --------------------------------------
     if (!user) {
       console.log("USER NOT FOUND");
-      console.log("CREATING NEW USER:", email);
+      console.log("CREATING USER:", email);
 
-      user = await User.create({
+      user = new User({
         email,
         role: "Employee",
         isActive: true,
@@ -156,60 +154,57 @@ export const verifyOtp = async (req, res) => {
         lastLogin: new Date(),
       });
 
+      await user.save();
+
       console.log("NEW USER CREATED");
-      console.log("User ID:", user._id.toString());
-      console.log("Role:", user.role);
-    } else {
-      // ------------------------------------------
-      // Existing user
-      // ------------------------------------------
+      console.log("USER ID:", user._id.toString());
+      console.log("ROLE:", user.role);
+    }
+
+    // --------------------------------------
+    // Existing user
+    // --------------------------------------
+    else {
       console.log("EXISTING USER FOUND");
-      console.log("User ID:", user._id.toString());
-      console.log("Current Role:", user.role);
+      console.log("USER ID:", user._id.toString());
+      console.log("OLD ROLE:", user.role);
 
-      // ------------------------------------------
-      // Fix old/invalid role values
-      // ------------------------------------------
-      const validRoles = [
-        "Admin",
-        "Manager",
-        "Employee",
-      ];
+      // Normalize role
+      const currentRole = String(user.role || "")
+        .trim()
+        .toLowerCase();
 
-      if (!validRoles.includes(user.role)) {
-        console.log(
-          "Invalid/old role detected:",
-          user.role,
-          "-> changing to Employee"
-        );
-
+      if (currentRole === "admin") {
+        user.role = "Admin";
+      } else if (currentRole === "manager") {
+        user.role = "Manager";
+      } else if (currentRole === "employee") {
+        user.role = "Employee";
+      } else {
         user.role = "Employee";
       }
 
-      // ------------------------------------------
-      // Update login information
-      // ------------------------------------------
       user.isVerified = true;
-      user.lastLogin = new Date();
-
-      // Make sure account is active
       user.isActive = true;
+      user.lastLogin = new Date();
 
       await user.save();
 
-      console.log("EXISTING USER UPDATED");
-      console.log("Role:", user.role);
+      console.log("USER UPDATED");
+      console.log("NEW ROLE:", user.role);
     }
 
-    // ------------------------------------------
-    // Make sure role is valid before JWT
-    // ------------------------------------------
-    if (
-      !["Admin", "Manager", "Employee"].includes(
-        user.role
-      )
-    ) {
-      console.error("INVALID USER ROLE:", user.role);
+    // --------------------------------------
+    // Final role validation
+    // --------------------------------------
+    const validRoles = [
+      "Admin",
+      "Manager",
+      "Employee",
+    ];
+
+    if (!validRoles.includes(user.role)) {
+      console.error("INVALID ROLE:", user.role);
 
       return res.status(500).json({
         success: false,
@@ -217,18 +212,18 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ------------------------------------------
-    // Delete used OTP
-    // ------------------------------------------
+    // --------------------------------------
+    // Delete OTP
+    // --------------------------------------
     await Otp.deleteOne({
       _id: otpRecord._id,
     });
 
     console.log("OTP DELETED");
 
-    // ------------------------------------------
+    // --------------------------------------
     // Create JWT
-    // ------------------------------------------
+    // --------------------------------------
     const token = jwt.sign(
       {
         userId: user._id.toString(),
@@ -243,9 +238,9 @@ export const verifyOtp = async (req, res) => {
 
     console.log("JWT CREATED SUCCESSFULLY");
 
-    // ------------------------------------------
+    // --------------------------------------
     // Response
-    // ------------------------------------------
+    // --------------------------------------
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
