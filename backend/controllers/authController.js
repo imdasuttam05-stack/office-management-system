@@ -1,12 +1,13 @@
 import jwt from "jsonwebtoken";
-
 import Otp from "../models/Otp.js";
 import { generateOtp } from "../utils/generateOtp.js";
 import { sendOtpEmail } from "../services/emailService.js";
 
-// ==========================================
+
+// =====================================================
 // SEND OTP
-// ==========================================
+// =====================================================
+
 export const sendOtp = async (req, res) => {
   try {
     const email = req.body.email?.trim().toLowerCase();
@@ -18,7 +19,6 @@ export const sendOtp = async (req, res) => {
       });
     }
 
-    // Generate OTP
     const otp = generateOtp();
 
     // Delete previous OTP
@@ -39,6 +39,7 @@ export const sendOtp = async (req, res) => {
       success: true,
       message: "OTP sent successfully",
     });
+
   } catch (error) {
     console.error("Send OTP Error:", error);
 
@@ -49,13 +50,15 @@ export const sendOtp = async (req, res) => {
   }
 };
 
-// ==========================================
+
+// =====================================================
 // VERIFY OTP
-// ==========================================
+// =====================================================
+
 export const verifyOtp = async (req, res) => {
   try {
     const email = req.body.email?.trim().toLowerCase();
-    const otp = String(req.body.otp || "").trim();
+    const otp = req.body.otp?.trim();
 
     if (!email || !otp) {
       return res.status(400).json({
@@ -84,7 +87,7 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // Maximum attempts
+    // Check attempts
     if (otpRecord.attempts >= 5) {
       await Otp.deleteOne({ _id: otpRecord._id });
 
@@ -109,13 +112,17 @@ export const verifyOtp = async (req, res) => {
     // OTP correct
     await Otp.deleteOne({ _id: otpRecord._id });
 
-    // ==========================================
-    // CREATE JWT
-    // ==========================================
+    // JWT secret check
     if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET is not configured");
+      console.error("JWT_SECRET is not configured");
+
+      return res.status(500).json({
+        success: false,
+        message: "JWT configuration is missing",
+      });
     }
 
+    // Create JWT
     const token = jwt.sign(
       {
         email,
@@ -134,6 +141,7 @@ export const verifyOtp = async (req, res) => {
         email,
       },
     });
+
   } catch (error) {
     console.error("Verify OTP Error:", error);
 
