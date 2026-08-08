@@ -20,7 +20,7 @@ export const sendOtp = async (req, res) => {
 
     const otp = generateOtp();
 
-    // Remove previous OTP
+    // Delete previous OTP
     await Otp.deleteMany({ email });
 
     // Create new OTP
@@ -30,8 +30,10 @@ export const sendOtp = async (req, res) => {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
-    // Send email
+    // Send OTP email
     await sendOtpEmail(email, otp);
+
+    console.log(`OTP sent successfully to ${email}`);
 
     return res.status(200).json({
       success: true,
@@ -55,7 +57,13 @@ export const verifyOtp = async (req, res) => {
     const email = req.body.email?.trim().toLowerCase();
     const otp = req.body.otp?.trim();
 
+    console.log("========== VERIFY OTP ==========");
+    console.log("Email:", email);
+    console.log("OTP:", otp);
+
+    // ------------------------------------------
     // Validate input
+    // ------------------------------------------
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -70,20 +78,40 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
+    // ------------------------------------------
+    // Check JWT_SECRET
+    // ------------------------------------------
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is NOT configured!");
+
+      return res.status(500).json({
+        success: false,
+        message: "Server authentication configuration is missing",
+      });
+    }
+
+    // ------------------------------------------
     // Find OTP
+    // ------------------------------------------
     const otpRecord = await Otp.findOne({
       email,
       otp,
     });
 
     if (!otpRecord) {
+      console.log("Invalid OTP");
+
       return res.status(400).json({
         success: false,
         message: "Invalid OTP",
       });
     }
 
+    console.log("OTP found in database");
+
+    // ------------------------------------------
     // Check expiry
+    // ------------------------------------------
     if (otpRecord.expiresAt < new Date()) {
       await Otp.deleteOne({
         _id: otpRecord._id,
@@ -95,12 +123,14 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // FIND OR CREATE USER
-    // ==========================================
+    // ------------------------------------------
+    // Find or create user
+    // ------------------------------------------
     let user = await User.findOne({ email });
 
     if (!user) {
+      console.log("Creating new user:", email);
+
       user = await User.create({
         email,
         role: "employee",
@@ -108,16 +138,18 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // DELETE USED OTP
-    // ==========================================
+    console.log("User:", user.email);
+
+    // ------------------------------------------
+    // Delete used OTP
+    // ------------------------------------------
     await Otp.deleteOne({
       _id: otpRecord._id,
     });
 
-    // ==========================================
-    // CREATE JWT
-    // ==========================================
+    // ------------------------------------------
+    // Create JWT
+    // ------------------------------------------
     const token = jwt.sign(
       {
         userId: user._id.toString(),
@@ -130,25 +162,29 @@ export const verifyOtp = async (req, res) => {
       }
     );
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
+    console.log("JWT created successfully");
+
+    // ------------------------------------------
+    // Response
+    // ------------------------------------------
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
       token,
       user: {
-        id: user._id,
+        id: user._id.toString(),
         email: user.email,
         role: user.role,
       },
     });
   } catch (error) {
-    console.error("Verify OTP Error:", error);
+    console.error("========== VERIFY OTP ERROR ==========");
+    console.error(error);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to verify OTP",
+      message:
+        error.message || "Unable to verify OTP",
     });
   }
 };
