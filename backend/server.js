@@ -1,4 +1,3 @@
-```js
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -10,7 +9,6 @@ import cookieParser from "cookie-parser";
 
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
-
 import connectDB from "./config/db.js";
 
 const app = express();
@@ -53,23 +51,25 @@ app.use(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests without Origin
-      // Example: Render health checks
+      // Render health checks / server-to-server requests
       if (!origin) {
         return callback(null, true);
       }
 
-      // Allow registered frontend URLs
+      // Registered frontend URLs
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      // Allow Vercel preview deployments
+      // Vercel preview deployments
       if (origin.endsWith(".vercel.app")) {
         return callback(null, true);
       }
 
-      console.log("CORS blocked origin:", origin);
+      console.log(
+        "CORS blocked origin:",
+        origin
+      );
 
       return callback(
         new Error(
@@ -310,4 +310,3 @@ app.listen(
     );
   }
 );
-```
