@@ -1,4 +1,3 @@
-```jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -18,14 +17,11 @@ function Dashboard() {
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
-
     navigate("/login", { replace: true });
   };
 
   return (
     <div className="dashboard">
-      {/* ================= HEADER ================= */}
-
       <header className="dashboard-header">
         <div>
           <h1>Office Management</h1>
@@ -44,11 +40,7 @@ function Dashboard() {
         </div>
       </header>
 
-      {/* ================= MAIN ================= */}
-
       <main className="dashboard-content">
-        {/* ================= WELCOME ================= */}
-
         <div className="welcome-card">
           <div>
             <h2>
@@ -62,8 +54,6 @@ function Dashboard() {
             {user.role || "Employee"}
           </div>
         </div>
-
-        {/* ================= STAT CARDS ================= */}
 
         <div className="stats-grid">
           <div className="stat-card">
@@ -91,15 +81,12 @@ function Dashboard() {
           </div>
         </div>
 
-        {/* ================= MODULES ================= */}
-
         <section className="modules-section">
           <h2>Quick Access</h2>
 
           <div className="modules-grid">
             <div className="module-card">
               <div className="module-icon">₹</div>
-
               <div>
                 <h3>Expenses</h3>
                 <p>Manage office expenses</p>
@@ -108,7 +95,6 @@ function Dashboard() {
 
             <div className="module-card">
               <div className="module-icon">✓</div>
-
               <div>
                 <h3>Approvals</h3>
                 <p>Review pending approvals</p>
@@ -117,7 +103,6 @@ function Dashboard() {
 
             <div className="module-card">
               <div className="module-icon">👥</div>
-
               <div>
                 <h3>Employees</h3>
                 <p>Manage employees</p>
@@ -126,7 +111,6 @@ function Dashboard() {
 
             <div className="module-card">
               <div className="module-icon">📊</div>
-
               <div>
                 <h3>Reports</h3>
                 <p>View business reports</p>
@@ -136,8 +120,6 @@ function Dashboard() {
         </section>
       </main>
 
-      {/* ================= CSS ================= */}
-
       <style>{`
         * {
           box-sizing: border-box;
@@ -145,7 +127,7 @@ function Dashboard() {
 
         body {
           margin: 0;
-          font-family: Inter, Arial, sans-serif;
+          font-family: Arial, sans-serif;
           background: #f5f7fb;
           color: #172b4d;
         }
@@ -167,7 +149,6 @@ function Dashboard() {
         .dashboard-header h1 {
           margin: 0;
           font-size: 21px;
-          font-weight: 700;
         }
 
         .dashboard-header p {
@@ -208,10 +189,6 @@ function Dashboard() {
           cursor: pointer;
         }
 
-        .logout-btn:hover {
-          background: #e2eaf2;
-        }
-
         .dashboard-content {
           max-width: 1400px;
           margin: auto;
@@ -219,18 +196,13 @@ function Dashboard() {
         }
 
         .welcome-card {
-          background: linear-gradient(
-            135deg,
-            #245a96,
-            #174579
-          );
+          background: linear-gradient(135deg, #245a96, #174579);
           color: white;
           border-radius: 16px;
           padding: 28px;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          box-shadow: 0 8px 25px rgba(36, 90, 150, 0.15);
         }
 
         .welcome-card h2 {
@@ -240,17 +212,14 @@ function Dashboard() {
 
         .welcome-card p {
           margin: 8px 0 0;
-          opacity: 0.85;
           font-size: 14px;
         }
 
         .role-badge {
           background: rgba(255, 255, 255, 0.15);
-          border: 1px solid rgba(255, 255, 255, 0.25);
           padding: 8px 14px;
           border-radius: 20px;
           font-size: 13px;
-          font-weight: 600;
         }
 
         .stats-grid {
@@ -283,7 +252,6 @@ function Dashboard() {
           display: block;
           margin-top: 6px;
           color: #98a2b3;
-          font-size: 12px;
         }
 
         .modules-section {
@@ -310,12 +278,6 @@ function Dashboard() {
           align-items: center;
           gap: 15px;
           cursor: pointer;
-          transition: 0.2s;
-        }
-
-        .module-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
         }
 
         .module-icon {
@@ -328,7 +290,6 @@ function Dashboard() {
           align-items: center;
           justify-content: center;
           font-weight: 700;
-          font-size: 18px;
           flex-shrink: 0;
         }
 
@@ -363,14 +324,6 @@ function Dashboard() {
             display: none;
           }
 
-          .welcome-card {
-            padding: 20px;
-          }
-
-          .welcome-card h2 {
-            font-size: 19px;
-          }
-
           .stats-grid,
           .modules-grid {
             grid-template-columns: 1fr;
@@ -382,4 +335,3 @@ function Dashboard() {
 }
 
 export default Dashboard;
-```
