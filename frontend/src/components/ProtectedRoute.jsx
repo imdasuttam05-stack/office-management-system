@@ -1,3 +1,4 @@
+import React from "react";
 import { Navigate, Outlet } from "react-router-dom";
 
 export default function ProtectedRoute({ allowedRoles }) {
@@ -9,7 +10,7 @@ export default function ProtectedRoute({ allowedRoles }) {
     return <Navigate to="/login" replace />;
   }
 
-  let user;
+  let user = {};
 
   try {
     user = JSON.parse(userData);
@@ -29,5 +30,6 @@ export default function ProtectedRoute({ allowedRoles }) {
     return <Navigate to="/dashboard" replace />;
   }
 
+  // Authorized
   return <Outlet />;
 }
