@@ -11,6 +11,7 @@ export const sendOtp = async (req, res) => {
   try {
     const email = req.body.email?.trim().toLowerCase();
 
+    // Validate email
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -18,9 +19,10 @@ export const sendOtp = async (req, res) => {
       });
     }
 
+    // Generate OTP
     const otp = generateOtp();
 
-    // Delete previous OTP
+    // Delete previous OTPs for this email
     await Otp.deleteMany({ email });
 
     // Create new OTP
@@ -33,18 +35,22 @@ export const sendOtp = async (req, res) => {
     // Send OTP email
     await sendOtpEmail(email, otp);
 
-    console.log(`OTP sent successfully to ${email}`);
+    console.log("=================================");
+    console.log("OTP SENT SUCCESSFULLY");
+    console.log("Email:", email);
+    console.log("=================================");
 
     return res.status(200).json({
       success: true,
       message: "OTP sent successfully",
     });
   } catch (error) {
-    console.error("Send OTP Error:", error);
+    console.error("========== SEND OTP ERROR ==========");
+    console.error(error);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to send OTP",
+      message: error.message || "Unable to send OTP",
     });
   }
 };
@@ -57,9 +63,11 @@ export const verifyOtp = async (req, res) => {
     const email = req.body.email?.trim().toLowerCase();
     const otp = req.body.otp?.trim();
 
-    console.log("========== VERIFY OTP ==========");
+    console.log("=================================");
+    console.log("VERIFY OTP REQUEST");
     console.log("Email:", email);
     console.log("OTP:", otp);
+    console.log("=================================");
 
     // ------------------------------------------
     // Validate input
@@ -71,6 +79,9 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
+    // ------------------------------------------
+    // Validate OTP format
+    // ------------------------------------------
     if (!/^\d{6}$/.test(otp)) {
       return res.status(400).json({
         success: false,
@@ -99,7 +110,7 @@ export const verifyOtp = async (req, res) => {
     });
 
     if (!otpRecord) {
-      console.log("Invalid OTP");
+      console.log("INVALID OTP");
 
       return res.status(400).json({
         success: false,
@@ -107,15 +118,17 @@ export const verifyOtp = async (req, res) => {
       });
     }
 
-    console.log("OTP found in database");
+    console.log("OTP FOUND IN DATABASE");
 
     // ------------------------------------------
-    // Check expiry
+    // Check OTP expiry
     // ------------------------------------------
     if (otpRecord.expiresAt < new Date()) {
       await Otp.deleteOne({
         _id: otpRecord._id,
       });
+
+      console.log("OTP EXPIRED");
 
       return res.status(400).json({
         success: false,
@@ -124,21 +137,85 @@ export const verifyOtp = async (req, res) => {
     }
 
     // ------------------------------------------
-    // Find or create user
+    // Find existing user
     // ------------------------------------------
     let user = await User.findOne({ email });
 
+    // ------------------------------------------
+    // Create new user
+    // ------------------------------------------
     if (!user) {
-      console.log("Creating new user:", email);
+      console.log("USER NOT FOUND");
+      console.log("CREATING NEW USER:", email);
 
       user = await User.create({
         email,
-        role: "employee",
+        role: "Employee",
         isActive: true,
+        isVerified: true,
+        lastLogin: new Date(),
       });
+
+      console.log("NEW USER CREATED");
+      console.log("User ID:", user._id.toString());
+      console.log("Role:", user.role);
+    } else {
+      // ------------------------------------------
+      // Existing user
+      // ------------------------------------------
+      console.log("EXISTING USER FOUND");
+      console.log("User ID:", user._id.toString());
+      console.log("Current Role:", user.role);
+
+      // ------------------------------------------
+      // Fix old/invalid role values
+      // ------------------------------------------
+      const validRoles = [
+        "Admin",
+        "Manager",
+        "Employee",
+      ];
+
+      if (!validRoles.includes(user.role)) {
+        console.log(
+          "Invalid/old role detected:",
+          user.role,
+          "-> changing to Employee"
+        );
+
+        user.role = "Employee";
+      }
+
+      // ------------------------------------------
+      // Update login information
+      // ------------------------------------------
+      user.isVerified = true;
+      user.lastLogin = new Date();
+
+      // Make sure account is active
+      user.isActive = true;
+
+      await user.save();
+
+      console.log("EXISTING USER UPDATED");
+      console.log("Role:", user.role);
     }
 
-    console.log("User:", user.email);
+    // ------------------------------------------
+    // Make sure role is valid before JWT
+    // ------------------------------------------
+    if (
+      !["Admin", "Manager", "Employee"].includes(
+        user.role
+      )
+    ) {
+      console.error("INVALID USER ROLE:", user.role);
+
+      return res.status(500).json({
+        success: false,
+        message: "User role configuration is invalid",
+      });
+    }
 
     // ------------------------------------------
     // Delete used OTP
@@ -146,6 +223,8 @@ export const verifyOtp = async (req, res) => {
     await Otp.deleteOne({
       _id: otpRecord._id,
     });
+
+    console.log("OTP DELETED");
 
     // ------------------------------------------
     // Create JWT
@@ -162,7 +241,7 @@ export const verifyOtp = async (req, res) => {
       }
     );
 
-    console.log("JWT created successfully");
+    console.log("JWT CREATED SUCCESSFULLY");
 
     // ------------------------------------------
     // Response
@@ -170,7 +249,9 @@ export const verifyOtp = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
+
       token,
+
       user: {
         id: user._id.toString(),
         email: user.email,
@@ -178,8 +259,10 @@ export const verifyOtp = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("========== VERIFY OTP ERROR ==========");
+    console.error("=================================");
+    console.error("VERIFY OTP ERROR");
     console.error(error);
+    console.error("=================================");
 
     return res.status(500).json({
       success: false,
