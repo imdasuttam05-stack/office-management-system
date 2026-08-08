@@ -1,4 +1,3 @@
-```js
 import Expense from "../models/Expense.js";
 
 /* =========================================================
@@ -553,8 +552,4 @@ export async function rejectExpense(
 
     return res.status(500).json({
       success: false,
-      message: "Unable to reject expense.",
-    });
-  }
-}
-```
+      message: "Unable to 
