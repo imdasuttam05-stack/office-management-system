@@ -1,10 +1,10 @@
+```jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
 function Dashboard() {
   const navigate = useNavigate();
 
-  const token = localStorage.getItem("token");
   const userData = localStorage.getItem("user");
 
   let user = {};
@@ -24,65 +24,48 @@ function Dashboard() {
 
   return (
     <div className="dashboard">
-
       {/* ================= HEADER ================= */}
 
       <header className="dashboard-header">
-
         <div>
           <h1>Office Management</h1>
           <p>Business Management System</p>
         </div>
 
         <div className="user-section">
-
           <div className="user-info">
-            <strong>
-              {user.name || "User"}
-            </strong>
-
-            <span>
-              {user.role || "Employee"}
-            </span>
+            <strong>{user.name || "User"}</strong>
+            <span>{user.role || "Employee"}</span>
           </div>
 
-          <button
-            className="logout-btn"
-            onClick={logout}
-          >
+          <button className="logout-btn" onClick={logout}>
             Logout
           </button>
-
         </div>
-
       </header>
 
       {/* ================= MAIN ================= */}
 
       <main className="dashboard-content">
+        {/* ================= WELCOME ================= */}
 
         <div className="welcome-card">
-
           <div>
             <h2>
               Welcome back, {user.name || "User"} 👋
             </h2>
 
-            <p>
-              Your Office Management Dashboard
-            </p>
+            <p>Your Office Management Dashboard</p>
           </div>
 
           <div className="role-badge">
             {user.role || "Employee"}
           </div>
-
         </div>
 
         {/* ================= STAT CARDS ================= */}
 
         <div className="stats-grid">
-
           <div className="stat-card">
             <span>Total Expenses</span>
             <strong>₹0</strong>
@@ -106,25 +89,20 @@ function Dashboard() {
             <strong>0</strong>
             <small>Requires attention</small>
           </div>
-
         </div>
 
         {/* ================= MODULES ================= */}
 
         <section className="modules-section">
-
           <h2>Quick Access</h2>
 
           <div className="modules-grid">
-
             <div className="module-card">
               <div className="module-icon">₹</div>
 
               <div>
                 <h3>Expenses</h3>
-                <p>
-                  Manage office expenses
-                </p>
+                <p>Manage office expenses</p>
               </div>
             </div>
 
@@ -133,9 +111,7 @@ function Dashboard() {
 
               <div>
                 <h3>Approvals</h3>
-                <p>
-                  Review pending approvals
-                </p>
+                <p>Review pending approvals</p>
               </div>
             </div>
 
@@ -144,9 +120,7 @@ function Dashboard() {
 
               <div>
                 <h3>Employees</h3>
-                <p>
-                  Manage employees
-                </p>
+                <p>Manage employees</p>
               </div>
             </div>
 
@@ -155,32 +129,23 @@ function Dashboard() {
 
               <div>
                 <h3>Reports</h3>
-                <p>
-                  View business reports
-                </p>
+                <p>View business reports</p>
               </div>
             </div>
-
           </div>
-
         </section>
-
       </main>
 
       {/* ================= CSS ================= */}
 
       <style>{`
-
         * {
           box-sizing: border-box;
         }
 
         body {
           margin: 0;
-          font-family:
-            Inter,
-            Arial,
-            sans-serif;
+          font-family: Inter, Arial, sans-serif;
           background: #f5f7fb;
           color: #172b4d;
         }
@@ -259,15 +224,13 @@ function Dashboard() {
             #245a96,
             #174579
           );
-
           color: white;
           border-radius: 16px;
           padding: 28px;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          box-shadow:
-            0 8px 25px rgba(36,90,150,0.15);
+          box-shadow: 0 8px 25px rgba(36, 90, 150, 0.15);
         }
 
         .welcome-card h2 {
@@ -282,8 +245,8 @@ function Dashboard() {
         }
 
         .role-badge {
-          background: rgba(255,255,255,0.15);
-          border: 1px solid rgba(255,255,255,0.25);
+          background: rgba(255, 255, 255, 0.15);
+          border: 1px solid rgba(255, 255, 255, 0.25);
           padding: 8px 14px;
           border-radius: 20px;
           font-size: 13px;
@@ -292,8 +255,7 @@ function Dashboard() {
 
         .stats-grid {
           display: grid;
-          grid-template-columns:
-            repeat(4, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 18px;
           margin-top: 24px;
         }
@@ -335,8 +297,7 @@ function Dashboard() {
 
         .modules-grid {
           display: grid;
-          grid-template-columns:
-            repeat(4, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 18px;
         }
 
@@ -354,8 +315,7 @@ function Dashboard() {
 
         .module-card:hover {
           transform: translateY(-2px);
-          box-shadow:
-            0 8px 20px rgba(0,0,0,0.06);
+          box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
         }
 
         .module-icon {
@@ -369,6 +329,7 @@ function Dashboard() {
           justify-content: center;
           font-weight: 700;
           font-size: 18px;
+          flex-shrink: 0;
         }
 
         .module-card h3 {
@@ -383,17 +344,13 @@ function Dashboard() {
         }
 
         @media (max-width: 900px) {
-
           .stats-grid,
           .modules-grid {
-            grid-template-columns:
-              repeat(2, 1fr);
+            grid-template-columns: repeat(2, 1fr);
           }
-
         }
 
         @media (max-width: 600px) {
-
           .dashboard-header {
             padding: 0 16px;
           }
@@ -418,13 +375,11 @@ function Dashboard() {
           .modules-grid {
             grid-template-columns: 1fr;
           }
-
         }
-
       `}</style>
-
     </div>
   );
 }
 
 export default Dashboard;
+```
