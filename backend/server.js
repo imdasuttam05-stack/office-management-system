@@ -1,3 +1,4 @@
+```js
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -8,6 +9,8 @@ import morgan from "morgan";
 import cookieParser from "cookie-parser";
 
 import authRoutes from "./routes/authRoutes.js";
+import expenseRoutes from "./routes/expenseRoutes.js";
+
 import connectDB from "./config/db.js";
 
 const app = express();
@@ -15,16 +18,19 @@ const app = express();
 // ==========================================
 // DATABASE
 // ==========================================
+
 await connectDB();
 
 // ==========================================
 // BASIC CONFIG
 // ==========================================
+
 const PORT = process.env.PORT || 10000;
 
 // ==========================================
 // ALLOWED FRONTEND ORIGINS
 // ==========================================
+
 const allowedOrigins = [
   "https://office-management-system-lilac.vercel.app",
   "https://office-management-system-ff0yh5xl-imdasuttam05-stacks-projects.vercel.app",
@@ -33,6 +39,7 @@ const allowedOrigins = [
 // ==========================================
 // SECURITY
 // ==========================================
+
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -42,6 +49,7 @@ app.use(
 // ==========================================
 // CORS
 // ==========================================
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -64,7 +72,9 @@ app.use(
       console.log("CORS blocked origin:", origin);
 
       return callback(
-        new Error(`CORS: Origin not allowed - ${origin}`)
+        new Error(
+          `CORS: Origin not allowed - ${origin}`
+        )
       );
     },
 
@@ -89,6 +99,7 @@ app.use(
 // ==========================================
 // BODY PARSER
 // ==========================================
+
 app.use(
   express.json({
     limit: "10mb",
@@ -105,11 +116,13 @@ app.use(
 // ==========================================
 // COOKIE
 // ==========================================
+
 app.use(cookieParser());
 
 // ==========================================
 // LOGGER
 // ==========================================
+
 if (process.env.NODE_ENV !== "test") {
   app.use(morgan("combined"));
 }
@@ -117,11 +130,13 @@ if (process.env.NODE_ENV !== "test") {
 // ==========================================
 // ROOT
 // ==========================================
+
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
     message: "Office Management API is running",
-    environment: process.env.NODE_ENV || "development",
+    environment:
+      process.env.NODE_ENV || "development",
     timestamp: new Date().toISOString(),
   });
 });
@@ -129,6 +144,7 @@ app.get("/", (req, res) => {
 // ==========================================
 // HEALTH CHECK
 // ==========================================
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
@@ -141,6 +157,7 @@ app.get("/api/health", (req, res) => {
 // ==========================================
 // API VERSION
 // ==========================================
+
 app.get("/api", (req, res) => {
   res.status(200).json({
     success: true,
@@ -152,8 +169,29 @@ app.get("/api", (req, res) => {
 // ==========================================
 // AUTHENTICATION ROUTES
 // ==========================================
+
 // POST /api/auth/send-otp
-app.use("/api/auth", authRoutes);
+// POST /api/auth/verify-otp
+
+app.use(
+  "/api/auth",
+  authRoutes
+);
+
+// ==========================================
+// EXPENSE ROUTES
+// ==========================================
+
+// POST  /api/expenses
+// GET   /api/expenses
+// GET   /api/expenses/:id
+// PATCH /api/expenses/:id/approve
+// PATCH /api/expenses/:id/reject
+
+app.use(
+  "/api/expenses",
+  expenseRoutes
+);
 
 // ==========================================
 // FUTURE MODULES
@@ -164,9 +202,6 @@ app.use("/api/auth", authRoutes);
 
 // Dashboard
 // app.use("/api/dashboard", dashboardRoutes);
-
-// Expenses
-// app.use("/api/expenses", expenseRoutes);
 
 // Payments
 // app.use("/api/payments", paymentRoutes);
@@ -183,6 +218,7 @@ app.use("/api/auth", authRoutes);
 // ==========================================
 // 404 HANDLER
 // ==========================================
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -195,34 +231,83 @@ app.use((req, res) => {
 // ==========================================
 // GLOBAL ERROR HANDLER
 // ==========================================
-app.use((err, req, res, next) => {
-  console.error("Server Error:", err);
 
-  const statusCode = err.statusCode || 500;
+app.use(
+  (err, req, res, next) => {
+    console.error(
+      "Server Error:",
+      err
+    );
 
-  res.status(statusCode).json({
-    success: false,
-    message:
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message,
-  });
-});
+    const statusCode =
+      err.statusCode || 500;
+
+    res.status(statusCode).json({
+      success: false,
+
+      message:
+        process.env.NODE_ENV ===
+        "production"
+          ? "Internal server error"
+          : err.message,
+    });
+  }
+);
 
 // ==========================================
 // START SERVER
 // ==========================================
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("======================================");
-  console.log("Office Management Backend Started");
-  console.log(`Port: ${PORT}`);
-  console.log(
-    `Environment: ${process.env.NODE_ENV || "development"}`
-  );
-  console.log("======================================");
 
-  console.log("Auth API: /api/auth");
-  console.log("Send OTP: POST /api/auth/send-otp");
+app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      "======================================"
+    );
 
-  console.log("======================================");
-});
+    console.log(
+      "Office Management Backend Started"
+    );
+
+    console.log(
+      `Port: ${PORT}`
+    );
+
+    console.log(
+      `Environment: ${
+        process.env.NODE_ENV ||
+        "development"
+      }`
+    );
+
+    console.log(
+      "======================================"
+    );
+
+    console.log(
+      "Auth API: /api/auth"
+    );
+
+    console.log(
+      "Send OTP: POST /api/auth/send-otp"
+    );
+
+    console.log(
+      "Expense API: /api/expenses"
+    );
+
+    console.log(
+      "Create Expense: POST /api/expenses"
+    );
+
+    console.log(
+      "Get Expenses: GET /api/expenses"
+    );
+
+    console.log(
+      "======================================"
+    );
+  }
+);
+```
