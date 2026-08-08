@@ -1,29 +1,59 @@
 import express from "express";
-import auth from "../middleware/auth.js";
 
 import {
   createExpense,
   getExpenses,
   getExpenseById,
+  updateExpense,
+  deleteExpense,
   approveExpense,
   rejectExpense,
 } from "../controllers/expenseController.js";
 
+import auth from "../middleware/auth.js";
+
 const router = express.Router();
 
-// Create Expense
-router.post("/", auth, createExpense);
+router.post(
+  "/",
+  auth,
+  createExpense
+);
 
-// Get all Expenses
-router.get("/", auth, getExpenses);
+router.get(
+  "/",
+  auth,
+  getExpenses
+);
 
-// Get single Expense
-router.get("/:id", auth, getExpenseById);
+router.get(
+  "/:id",
+  auth,
+  getExpenseById
+);
 
-// Approve Expense
-router.patch("/:id/approve", auth, approveExpense);
+router.put(
+  "/:id",
+  auth,
+  updateExpense
+);
 
-// Reject Expense
-router.patch("/:id/reject", auth, rejectExpense);
+router.delete(
+  "/:id",
+  auth,
+  deleteExpense
+);
+
+router.patch(
+  "/:id/approve",
+  auth,
+  approveExpense
+);
+
+router.patch(
+  "/:id/reject",
+  auth,
+  rejectExpense
+);
 
 export default router;
