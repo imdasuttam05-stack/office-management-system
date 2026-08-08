@@ -1,5 +1,4 @@
 import dotenv from "dotenv";
-
 dotenv.config();
 
 import express from "express";
@@ -16,20 +15,24 @@ const app = express();
 // ==========================================
 // DATABASE
 // ==========================================
-
 await connectDB();
 
 // ==========================================
 // BASIC CONFIG
 // ==========================================
-
 const PORT = process.env.PORT || 10000;
-const CLIENT_URL = process.env.CLIENT_URL || "*";
+
+// ==========================================
+// ALLOWED FRONTEND ORIGINS
+// ==========================================
+const allowedOrigins = [
+  "https://office-management-system-lilac.vercel.app",
+  "https://office-management-system-ff0yh5xl-imdasuttam05-stacks-projects.vercel.app",
+];
 
 // ==========================================
 // SECURITY
 // ==========================================
-
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -39,18 +42,53 @@ app.use(
 // ==========================================
 // CORS
 // ==========================================
-
 app.use(
   cors({
-    origin: CLIENT_URL === "*" ? true : CLIENT_URL,
+    origin: (origin, callback) => {
+      // Allow requests without Origin
+      // Example: Render health checks
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Allow registered frontend URLs
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Allow Vercel preview deployments
+      if (origin.endsWith(".vercel.app")) {
+        return callback(null, true);
+      }
+
+      console.log("CORS blocked origin:", origin);
+
+      return callback(
+        new Error(`CORS: Origin not allowed - ${origin}`)
+      );
+    },
+
     credentials: true,
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
   })
 );
 
 // ==========================================
 // BODY PARSER
 // ==========================================
-
 app.use(
   express.json({
     limit: "10mb",
@@ -67,13 +105,11 @@ app.use(
 // ==========================================
 // COOKIE
 // ==========================================
-
 app.use(cookieParser());
 
 // ==========================================
 // LOGGER
 // ==========================================
-
 if (process.env.NODE_ENV !== "test") {
   app.use(morgan("combined"));
 }
@@ -81,7 +117,6 @@ if (process.env.NODE_ENV !== "test") {
 // ==========================================
 // ROOT
 // ==========================================
-
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -92,9 +127,8 @@ app.get("/", (req, res) => {
 });
 
 // ==========================================
-// HEALTH
+// HEALTH CHECK
 // ==========================================
-
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
@@ -107,7 +141,6 @@ app.get("/api/health", (req, res) => {
 // ==========================================
 // API VERSION
 // ==========================================
-
 app.get("/api", (req, res) => {
   res.status(200).json({
     success: true,
@@ -117,9 +150,8 @@ app.get("/api", (req, res) => {
 });
 
 // ==========================================
-// AUTHENTICATION
+// AUTHENTICATION ROUTES
 // ==========================================
-
 // POST /api/auth/send-otp
 app.use("/api/auth", authRoutes);
 
@@ -151,7 +183,6 @@ app.use("/api/auth", authRoutes);
 // ==========================================
 // 404 HANDLER
 // ==========================================
-
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -164,7 +195,6 @@ app.use((req, res) => {
 // ==========================================
 // GLOBAL ERROR HANDLER
 // ==========================================
-
 app.use((err, req, res, next) => {
   console.error("Server Error:", err);
 
@@ -182,14 +212,17 @@ app.use((err, req, res, next) => {
 // ==========================================
 // START SERVER
 // ==========================================
-
 app.listen(PORT, "0.0.0.0", () => {
   console.log("======================================");
   console.log("Office Management Backend Started");
   console.log(`Port: ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(
+    `Environment: ${process.env.NODE_ENV || "development"}`
+  );
   console.log("======================================");
+
   console.log("Auth API: /api/auth");
   console.log("Send OTP: POST /api/auth/send-otp");
+
   console.log("======================================");
 });
