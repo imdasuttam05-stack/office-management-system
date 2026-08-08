@@ -1,6 +1,4 @@
-import User from "../models/User.js";
 import Otp from "../models/Otp.js";
-
 import { generateOtp } from "../utils/generateOtp.js";
 import { sendOtpEmail } from "../services/emailService.js";
 
@@ -11,7 +9,7 @@ export const sendOtp = async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        message: "Email is required",
+        message: "Email is required"
       });
     }
 
@@ -22,21 +20,22 @@ export const sendOtp = async (req, res) => {
     await Otp.create({
       email,
       otp,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000)
     });
 
     await sendOtpEmail(email, otp);
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      message: "OTP sent successfully",
+      message: "OTP sent successfully"
     });
+
   } catch (error) {
     console.error("Send OTP Error:", error);
 
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: "Unable to send OTP",
+      message: "Unable to send OTP"
     });
   }
 };
