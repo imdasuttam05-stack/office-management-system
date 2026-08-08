@@ -1,26 +1,31 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
   "https://office-management-system-ikx8.onrender.com";
 
 function Login() {
+  const navigate = useNavigate();
+
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
 
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   const sendOtp = async () => {
     if (!email.trim()) {
-      setMessage("Please enter your email address.");
+      setError("Please enter your email address.");
       return;
     }
 
     try {
       setLoading(true);
+      setError("");
       setMessage("");
 
       const response = await axios.post(
@@ -39,9 +44,64 @@ function Login() {
     } catch (error) {
       console.error("OTP Error:", error);
 
-      setMessage(
+      setError(
         error.response?.data?.message ||
           "Unable to send OTP. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otp || otp.length !== 6) {
+      setError("Please enter the 6-digit OTP.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      setMessage("");
+
+      console.log("Verifying OTP:", email);
+
+      const response = await axios.post(
+        `${API_URL}/api/auth/verify-otp`,
+        {
+          email: email.trim(),
+          otp: otp.trim(),
+        }
+      );
+
+      console.log("Verify OTP Response:", response.data);
+
+      if (response.data.success) {
+        if (response.data.token) {
+          localStorage.setItem(
+            "token",
+            response.data.token
+          );
+        }
+
+        if (response.data.user) {
+          localStorage.setItem(
+            "user",
+            JSON.stringify(response.data.user)
+          );
+        }
+
+        setMessage("Login successful.");
+
+        // Dashboard page
+        navigate("/dashboard");
+      }
+    } catch (error) {
+      console.error("Verify OTP Error:", error);
+
+      setError(
+        error.response?.data?.message ||
+          "Invalid OTP. Please try again."
       );
     } finally {
       setLoading(false);
@@ -73,7 +133,9 @@ function Login() {
               type="email"
               placeholder="Enter your email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
             />
 
             <button
@@ -103,8 +165,11 @@ function Login() {
               }
             />
 
-            <button>
-              Verify OTP
+            <button
+              onClick={handleVerifyOtp}
+              disabled={loading || otp.length !== 6}
+            >
+              {loading ? "Verifying..." : "Verify OTP"}
             </button>
 
             <button
@@ -113,7 +178,9 @@ function Login() {
                 setOtpSent(false);
                 setOtp("");
                 setMessage("");
+                setError("");
               }}
+              disabled={loading}
             >
               Change Email
             </button>
@@ -123,6 +190,18 @@ function Login() {
         {message && (
           <p className="login-message">
             {message}
+          </p>
+        )}
+
+        {error && (
+          <p
+            className="login-message"
+            style={{
+              color: "#b42318",
+              background: "#fef3f2",
+            }}
+          >
+            {error}
           </p>
         )}
 
