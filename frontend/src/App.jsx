@@ -1,3 +1,4 @@
+
 import React, { lazy, Suspense } from "react";
 import {
   BrowserRouter,
@@ -25,17 +26,12 @@ const Dashboard = lazy(() =>
 function LoadingScreen() {
   return (
     <div className="app-loading">
-
       <div className="loading-card">
-
         <div className="loading-spinner"></div>
 
         <h3>Office Management</h3>
-
         <p>Loading...</p>
-
       </div>
-
     </div>
   );
 }
@@ -81,9 +77,16 @@ function App() {
 
           <Route element={<ProtectedRoute />}>
 
+            {/* DASHBOARD */}
             <Route
               path="/dashboard"
               element={<Dashboard />}
+            />
+
+            {/* EXPENSE */}
+            <Route
+              path="/expenses"
+              element={<Expense />}
             />
 
           </Route>
