@@ -1,5 +1,4 @@
 import express from "express";
-
 import {
   sendOtp,
   verifyOtp,
@@ -8,11 +7,9 @@ import {
 const router = express.Router();
 
 // Send OTP
-// POST /api/auth/send-otp
 router.post("/send-otp", sendOtp);
 
 // Verify OTP
-// POST /api/auth/verify-otp
 router.post("/verify-otp", verifyOtp);
 
 export default router;
