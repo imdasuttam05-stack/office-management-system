@@ -8,6 +8,7 @@ import {
 
 import Login from "./pages/Login.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import Expense from "./pages/Expense.jsx";
 
 // ==========================================
 // LAZY LOAD PAGES
