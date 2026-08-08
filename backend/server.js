@@ -1,11 +1,13 @@
 import dotenv from "dotenv";
+
 dotenv.config();
 
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
-import cookieParser from "cookie-parser";  
+import cookieParser from "cookie-parser";
+
 import authRoutes from "./routes/authRoutes.js";
 import connectDB from "./config/db.js";
 
@@ -22,7 +24,6 @@ await connectDB();
 // ==========================================
 
 const PORT = process.env.PORT || 10000;
-
 const CLIENT_URL = process.env.CLIENT_URL || "*";
 
 // ==========================================
@@ -116,11 +117,14 @@ app.get("/api", (req, res) => {
 });
 
 // ==========================================
-// FUTURE ROUTES
+// AUTHENTICATION ROUTES
 // ==========================================
 
-// Authentication
-// app.use("/api/auth", authRoutes);
+app.use("/api/auth", authRoutes);
+
+// ==========================================
+// FUTURE ROUTES
+// ==========================================
 
 // Users
 // app.use("/api/users", userRoutes);
@@ -181,6 +185,8 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log("======================================");
   console.log("Office Management Backend Started");
   console.log(`Port: ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(
+    `Environment: ${process.env.NODE_ENV || "development"}`
+  );
   console.log("======================================");
 });
