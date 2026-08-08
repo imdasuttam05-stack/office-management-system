@@ -27,7 +27,7 @@ const PORT = process.env.PORT || 10000;
 const CLIENT_URL = process.env.CLIENT_URL || "*";
 
 // ==========================================
-// SECURITY MIDDLEWARE
+// SECURITY
 // ==========================================
 
 app.use(
@@ -79,7 +79,7 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 // ==========================================
-// HEALTH CHECK
+// ROOT
 // ==========================================
 
 app.get("/", (req, res) => {
@@ -92,7 +92,7 @@ app.get("/", (req, res) => {
 });
 
 // ==========================================
-// API HEALTH CHECK
+// HEALTH
 // ==========================================
 
 app.get("/api/health", (req, res) => {
@@ -117,13 +117,14 @@ app.get("/api", (req, res) => {
 });
 
 // ==========================================
-// AUTHENTICATION ROUTES
+// AUTHENTICATION
 // ==========================================
 
+// POST /api/auth/send-otp
 app.use("/api/auth", authRoutes);
 
 // ==========================================
-// FUTURE ROUTES
+// FUTURE MODULES
 // ==========================================
 
 // Users
@@ -156,6 +157,7 @@ app.use((req, res) => {
     success: false,
     message: "API route not found",
     path: req.originalUrl,
+    method: req.method,
   });
 });
 
@@ -185,8 +187,9 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log("======================================");
   console.log("Office Management Backend Started");
   console.log(`Port: ${PORT}`);
-  console.log(
-    `Environment: ${process.env.NODE_ENV || "development"}`
-  );
+  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log("======================================");
+  console.log("Auth API: /api/auth");
+  console.log("Send OTP: POST /api/auth/send-otp");
   console.log("======================================");
 });
