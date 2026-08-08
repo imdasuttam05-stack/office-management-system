@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 
 const API_URL =
@@ -32,10 +32,12 @@ function Login() {
 
       if (response.data.success) {
         setOtpSent(true);
-        setMessage("OTP sent successfully. Please check your email.");
+        setMessage(
+          "OTP sent successfully. Please check your email."
+        );
       }
     } catch (error) {
-      console.error(error);
+      console.error("OTP Error:", error);
 
       setMessage(
         error.response?.data?.message ||
@@ -62,9 +64,12 @@ function Login() {
 
         {!otpSent ? (
           <>
-            <label>Email Address</label>
+            <label htmlFor="email">
+              Email Address
+            </label>
 
             <input
+              id="email"
               type="email"
               placeholder="Enter your email"
               value={email}
@@ -80,14 +85,22 @@ function Login() {
           </>
         ) : (
           <>
-            <label>Enter OTP</label>
+            <label htmlFor="otp">
+              Enter OTP
+            </label>
 
             <input
+              id="otp"
               type="text"
-              maxLength="6"
+              inputMode="numeric"
+              maxLength={6}
               placeholder="Enter 6 digit OTP"
               value={otp}
-              onChange={(e) => setOtp(e.target.value)}
+              onChange={(e) =>
+                setOtp(
+                  e.target.value.replace(/\D/g, "")
+                )
+              }
             />
 
             <button>
