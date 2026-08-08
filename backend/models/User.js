@@ -20,17 +20,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ["Admin", "Manager", "Employee"],
       default: "Employee",
-      set: (value) => {
-        if (!value) return "Employee";
-
-        const role = String(value).trim().toLowerCase();
-
-        if (role === "admin") return "Admin";
-        if (role === "manager") return "Manager";
-        if (role === "employee") return "Employee";
-
-        return value;
-      },
     },
 
     isVerified: {
@@ -53,4 +42,8 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-export default mongoose.model("User", userSchema);
+const User =
+  mongoose.models.User ||
+  mongoose.model("User", userSchema);
+
+export default User;
