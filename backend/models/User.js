@@ -18,32 +18,19 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-
-      // Automatically convert old lowercase values
-      // to the correct role format.
+      enum: ["Admin", "Manager", "Employee"],
+      default: "Employee",
       set: (value) => {
         if (!value) return "Employee";
 
         const role = String(value).trim().toLowerCase();
 
-        if (role === "admin") {
-          return "Admin";
-        }
-
-        if (role === "manager") {
-          return "Manager";
-        }
-
-        if (role === "employee") {
-          return "Employee";
-        }
+        if (role === "admin") return "Admin";
+        if (role === "manager") return "Manager";
+        if (role === "employee") return "Employee";
 
         return value;
       },
-
-      enum: ["Admin", "Manager", "Employee"],
-
-      default: "Employee",
     },
 
     isVerified: {
