@@ -3,28 +3,28 @@ import User from "../models/User.js";
 
 export default async function auth(req, res, next) {
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({
-        success: false,
-        message: "Authorization token is required.",
-      });
-    }
-
-    const parts = authHeader.split(" ");
+    const authHeader =
+      req.headers.authorization;
 
     if (
-      parts.length !== 2 ||
-      parts[0] !== "Bearer"
+      !authHeader ||
+      !authHeader.startsWith("Bearer ")
     ) {
       return res.status(401).json({
         success: false,
-        message: "Invalid authorization format.",
+        message: "Authentication required.",
       });
     }
 
-    const token = parts[1];
+    const token =
+      authHeader.slice(7).trim();
+
+    if (!token || !process.env.JWT_SECRET) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication.",
+      });
+    }
 
     const decoded = jwt.verify(
       token,
@@ -40,21 +40,27 @@ export default async function auth(req, res, next) {
 
     const user = await User.findById(
       decoded.userId
-    ).select("-password");
+    ).select(
+      "_id name email role isVerified isActive lastLogin"
+    );
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "User no longer exists.",
+        message: "User account not found.",
+      });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is inactive.",
       });
     }
 
     req.user = user;
-
     next();
   } catch (error) {
-    console.error("AUTH MIDDLEWARE ERROR:", error);
-
     if (
       error.name === "TokenExpiredError"
     ) {
