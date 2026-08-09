@@ -1,3 +1,4 @@
+```jsx
 import React, { useEffect, useRef, useState } from "react";
 
 /* =========================================================
@@ -8,9 +9,17 @@ const API_URL =
   import.meta.env.VITE_API_URL ||
   "https://office-management-system-ikx8.onrender.com";
 
+/*
+  IMPORTANT:
+  এখানে আপনার Python OCR Render service-এর URL দিন।
+
+  Example:
+  https://office-management-python.onrender.com
+*/
+
 const PYTHON_OCR_URL =
   import.meta.env.VITE_PYTHON_API_URL ||
-  "http://localhost:8000";
+  "https://YOUR-PYTHON-OCR-SERVICE.onrender.com";
 
 /* =========================================================
    AUTH
@@ -28,6 +37,10 @@ function getAuthHeaders() {
       : {}),
   };
 }
+
+/* =========================================================
+   TODAY
+========================================================= */
 
 function getToday() {
   const date = new Date();
@@ -83,7 +96,7 @@ export default function Expense() {
   const cameraInputRef = useRef(null);
 
   /* =========================================================
-     LOAD EXPENSES
+     LOAD
   ========================================================= */
 
   useEffect(() => {
@@ -91,7 +104,7 @@ export default function Expense() {
   }, []);
 
   /* =========================================================
-     CLEAN PREVIEW URL
+     CLEAN PREVIEW
   ========================================================= */
 
   useEffect(() => {
@@ -103,7 +116,7 @@ export default function Expense() {
   }, [previewUrl]);
 
   /* =========================================================
-     LOAD EXPENSES FROM NODE API
+     LOAD EXPENSES
   ========================================================= */
 
   async function loadExpenses() {
@@ -177,7 +190,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     CLEAR SELECTED FILE
+     CLEAR FILE
   ========================================================= */
 
   function clearSelectedFile() {
@@ -198,7 +211,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     OPEN UPLOAD MODAL
+     OPEN UPLOAD
   ========================================================= */
 
   function openUploadModal() {
@@ -208,7 +221,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     CLOSE UPLOAD MODAL
+     CLOSE UPLOAD
   ========================================================= */
 
   function closeUploadModal() {
@@ -228,16 +241,22 @@ export default function Expense() {
       return;
     }
 
+    /*
+      Tesseract API currently processes image files.
+      PDF is intentionally disabled.
+    */
+
     const allowedTypes = [
       "image/jpeg",
       "image/png",
       "image/webp",
-      "application/pdf",
+      "image/bmp",
+      "image/tiff",
     ];
 
     if (!allowedTypes.includes(file.type)) {
       setError(
-        "Please select JPG, PNG, WEBP or PDF file."
+        "Please select JPG, PNG, WEBP, BMP or TIFF image."
       );
 
       event.target.value = "";
@@ -272,7 +291,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     OPEN CAMERA
+     CAMERA
   ========================================================= */
 
   function openCamera() {
@@ -282,7 +301,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     OPEN FILE PICKER
+     FILE PICKER
   ========================================================= */
 
   function openFilePicker() {
@@ -292,13 +311,30 @@ export default function Expense() {
   }
 
   /* =========================================================
-     PYTHON OCR
+     TESSERACT OCR
   ========================================================= */
 
   async function useUploadedBill() {
     if (!selectedFile) {
       setError(
         "Please select a bill or invoice first."
+      );
+      return;
+    }
+
+    if (!selectedFile.type.startsWith("image/")) {
+      setError(
+        "Please select an image file."
+      );
+      return;
+    }
+
+    if (
+      !PYTHON_OCR_URL ||
+      PYTHON_OCR_URL.includes("YOUR-PYTHON")
+    ) {
+      setError(
+        "Python OCR URL is not configured. Please set VITE_PYTHON_API_URL."
       );
       return;
     }
@@ -315,24 +351,19 @@ export default function Expense() {
         selectedFile
       );
 
-      const token =
-        localStorage.getItem("token");
+      /*
+        IMPORTANT:
+        Do NOT send Content-Type manually.
+
+        Browser automatically creates:
+        multipart/form-data boundary.
+      */
 
       const response = await fetch(
-        PYTHON_OCR_URL +
-          "/api/ocr/scan",
+        PYTHON_OCR_URL.replace(/\/$/, "") +
+          "/ocr",
         {
           method: "POST",
-
-          headers: {
-            ...(token
-              ? {
-                  Authorization:
-                    "Bearer " + token,
-                }
-              : {}),
-          },
-
           body: formData,
         }
       );
@@ -349,90 +380,102 @@ export default function Expense() {
 
       if (!response.ok) {
         throw new Error(
-          data.message ||
-            data.error ||
+          data.error ||
+            data.message ||
             "OCR processing failed."
         );
       }
 
+      if (!data.success) {
+        throw new Error(
+          data.error ||
+            "OCR could not process this bill."
+        );
+      }
+
       /*
-        Python API can return:
+        Tesseract response:
 
         {
           success: true,
-          data: {
-            date,
-            natureOfExpense,
-            amount,
-            gpayNo,
-            payeeName,
-            billNo,
-            description
-          }
+          text: "...",
+          lines: [...]
         }
       */
 
-      const ocrData =
-        data.data ||
-        data.expense ||
-        data.result ||
-        data;
+      const extractedText =
+        data.text || "";
 
-      /* =====================================================
-         AUTO FILL FORM
-      ===================================================== */
+      const lines =
+        Array.isArray(data.lines)
+          ? data.lines
+          : [];
+
+      console.log(
+        "========== OCR TEXT =========="
+      );
+
+      console.log(
+        extractedText
+      );
+
+      console.log(
+        "========== OCR LINES =========="
+      );
+
+      console.log(lines);
+
+      /*
+        -----------------------------------------------------
+        BASIC LIGHTWEIGHT FIELD EXTRACTION
+        -----------------------------------------------------
+      */
+
+      const parsed = parseOCRText(
+        extractedText,
+        lines
+      );
+
+      console.log(
+        "========== PARSED OCR DATA =========="
+      );
+
+      console.log(parsed);
+
+      /*
+        AUTO FILL FORM
+      */
 
       setForm((previous) => ({
         ...previous,
 
         date:
-          ocrData.date ||
+          parsed.date ||
           previous.date,
 
         natureOfExpense:
-          ocrData.natureOfExpense ||
-          ocrData.nature_of_expense ||
-          ocrData.expenseNature ||
+          parsed.natureOfExpense ||
           previous.natureOfExpense,
 
         amount:
-          ocrData.amount !== undefined &&
-          ocrData.amount !== null
-            ? String(
-                ocrData.amount
-              ).replace(
-                /[^0-9.]/g,
-                ""
-              )
-            : previous.amount,
+          parsed.amount ||
+          previous.amount,
 
         gpayNo:
-          ocrData.gpayNo ||
-          ocrData.gpay_no ||
-          ocrData.upiNo ||
-          ocrData.upi_no ||
-          ocrData.upiReference ||
+          parsed.gpayNo ||
           previous.gpayNo,
 
         payeeName:
-          ocrData.payeeName ||
-          ocrData.payee_name ||
-          ocrData.vendorName ||
-          ocrData.vendor_name ||
-          ocrData.partyName ||
+          parsed.payeeName ||
           previous.payeeName,
 
         billNo:
-          ocrData.billNo ||
-          ocrData.bill_no ||
-          ocrData.invoiceNo ||
-          ocrData.invoice_no ||
+          parsed.billNo ||
           previous.billNo,
 
         description:
-          ocrData.description ||
-          ocrData.remark ||
-          ocrData.remarks ||
+          parsed.description ||
+          extractedText ||
           previous.description,
       }));
 
@@ -443,7 +486,7 @@ export default function Expense() {
       setShowUploadModal(false);
     } catch (err) {
       console.error(
-        "PYTHON OCR ERROR:",
+        "TESSERACT OCR ERROR:",
         err
       );
 
@@ -454,6 +497,234 @@ export default function Expense() {
     } finally {
       setOcrLoading(false);
     }
+  }
+
+  /* =========================================================
+     OCR TEXT PARSER
+  ========================================================= */
+
+  function parseOCRText(text, lines) {
+    const result = {
+      date: "",
+      natureOfExpense: "",
+      amount: "",
+      gpayNo: "",
+      payeeName: "",
+      billNo: "",
+      description: "",
+    };
+
+    if (!text) {
+      return result;
+    }
+
+    const cleanText = text
+      .replace(/\r/g, "")
+      .trim();
+
+    const cleanLines = (
+      lines.length
+        ? lines
+        : cleanText.split("\n")
+    )
+      .map((line) =>
+        String(line).trim()
+      )
+      .filter(Boolean);
+
+    /*
+      DATE
+    */
+
+    const datePatterns = [
+      /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/,
+      /\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b/,
+    ];
+
+    for (const line of cleanLines) {
+      for (const pattern of datePatterns) {
+        const match =
+          line.match(pattern);
+
+        if (match) {
+          if (
+            match[0].startsWith("20")
+          ) {
+            result.date =
+              `${match[1]}-${String(
+                match[2]
+              ).padStart(2, "0")}-${String(
+                match[3]
+              ).padStart(2, "0")}`;
+          } else {
+            result.date =
+              `${match[3]}-${String(
+                match[2]
+              ).padStart(2, "0")}-${String(
+                match[1]
+              ).padStart(2, "0")}`;
+          }
+
+          break;
+        }
+      }
+
+      if (result.date) {
+        break;
+      }
+    }
+
+    /*
+      AMOUNT
+
+      Looks for:
+      Total
+      Grand Total
+      Amount
+      Net Amount
+    */
+
+    const amountKeywords =
+      /(?:grand\s*total|total\s*amount|net\s*amount|amount|total)\s*[:\-]?\s*(?:₹|rs\.?|inr)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i;
+
+    const amountMatch =
+      cleanText.match(
+        amountKeywords
+      );
+
+    if (amountMatch) {
+      result.amount =
+        amountMatch[1].replace(
+          /,/g,
+          ""
+        );
+    }
+
+    /*
+      If no keyword amount found,
+      search for currency amount.
+    */
+
+    if (!result.amount) {
+      const currencyMatch =
+        cleanText.match(
+          /(?:₹|Rs\.?|INR)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i
+        );
+
+      if (currencyMatch) {
+        result.amount =
+          currencyMatch[1].replace(
+            /,/g,
+            ""
+          );
+      }
+    }
+
+    /*
+      BILL / INVOICE NUMBER
+    */
+
+    const billMatch =
+      cleanText.match(
+        /(?:invoice\s*(?:no|number)?|bill\s*(?:no|number)?|inv\s*(?:no|number)?)\s*[:#\-]?\s*([A-Z0-9\/\-_]+)/i
+      );
+
+    if (billMatch) {
+      result.billNo =
+        billMatch[1].trim();
+    }
+
+    /*
+      UPI / GPAY
+    */
+
+    const upiMatch =
+      cleanText.match(
+        /(?:upi|gpay|google\s*pay|transaction\s*(?:id|no|number)|txn\s*(?:id|no)?)\s*[:#\-]?\s*([A-Z0-9@._\-]{6,})/i
+      );
+
+    if (upiMatch) {
+      result.gpayNo =
+        upiMatch[1].trim();
+    }
+
+    /*
+      PAYEE / VENDOR
+
+      Looks for:
+      Vendor
+      Supplier
+      Payee
+      Name
+      Merchant
+    */
+
+    const payeeMatch =
+      cleanText.match(
+        /(?:vendor|supplier|payee|merchant|party|name)\s*[:\-]\s*([^\n]+)/i
+      );
+
+    if (payeeMatch) {
+      result.payeeName =
+        payeeMatch[1].trim();
+    }
+
+    /*
+      NATURE OF EXPENSE
+
+      If a clear keyword is found.
+    */
+
+    const expenseMatch =
+      cleanText.match(
+        /(?:expense|description|particular|item|service)\s*[:\-]\s*([^\n]+)/i
+      );
+
+    if (expenseMatch) {
+      result.natureOfExpense =
+        expenseMatch[1].trim();
+    }
+
+    /*
+      FALLBACK PAYEE
+
+      If no explicit vendor/payee
+      found, use first meaningful
+      text line.
+    */
+
+    if (!result.payeeName) {
+      const ignoredWords =
+        /^(invoice|tax invoice|bill|receipt|gst|date|total|amount|thank you)/i;
+
+      const possibleName =
+        cleanLines.find(
+          (line) =>
+            line.length >= 3 &&
+            line.length <= 80 &&
+            !ignoredWords.test(
+              line
+            ) &&
+            !/^\d+$/.test(line)
+        );
+
+      if (possibleName) {
+        result.payeeName =
+          possibleName;
+      }
+    }
+
+    /*
+      DESCRIPTION
+    */
+
+    result.description =
+      cleanText.substring(
+        0,
+        2000
+      );
+
+    return result;
   }
 
   /* =========================================================
@@ -468,19 +739,20 @@ export default function Expense() {
       setError("");
       setMessage("");
 
-      const response = await fetch(
-        API_URL +
-          "/api/expenses",
-        {
-          method: "POST",
-          headers: getAuthHeaders(),
+      const response =
+        await fetch(
+          API_URL +
+            "/api/expenses",
+          {
+            method: "POST",
+            headers: getAuthHeaders(),
 
-          body: JSON.stringify({
-            ...form,
-            forceSave,
-          }),
-        }
-      );
+            body: JSON.stringify({
+              ...form,
+              forceSave,
+            }),
+          }
+        );
 
       const data =
         await response.json();
@@ -570,7 +842,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     SAVE DUPLICATE ANYWAY
+     DUPLICATE SAVE
   ========================================================= */
 
   async function saveDuplicateAnyway() {
@@ -584,7 +856,7 @@ export default function Expense() {
   }
 
   /* =========================================================
-     UPDATE STATUS
+     STATUS
   ========================================================= */
 
   async function updateStatus(
@@ -603,10 +875,14 @@ export default function Expense() {
         status;
 
       const response =
-        await fetch(endpoint, {
-          method: "PATCH",
-          headers: getAuthHeaders(),
-        });
+        await fetch(
+          endpoint,
+          {
+            method: "PATCH",
+            headers:
+              getAuthHeaders(),
+          }
+        );
 
       const data =
         await response.json();
@@ -660,7 +936,8 @@ export default function Expense() {
             id,
           {
             method: "DELETE",
-            headers: getAuthHeaders(),
+            headers:
+              getAuthHeaders(),
           }
         );
 
@@ -793,9 +1070,7 @@ export default function Expense() {
   return (
     <div className="expense-page">
 
-      {/* =====================================================
-          HEADER
-      ===================================================== */}
+      {/* HEADER */}
 
       <div className="expense-header">
 
@@ -838,16 +1113,14 @@ export default function Expense() {
           </button>
 
         </div>
+
       </div>
 
-      {/* =====================================================
-          ALERT
-      ===================================================== */}
+      {/* ALERT */}
 
       {message && (
         <div className="alert success">
           <span>✓</span>
-
           <span>
             {message}
           </span>
@@ -857,21 +1130,17 @@ export default function Expense() {
       {error && (
         <div className="alert error">
           <span>!</span>
-
           <span>
             {error}
           </span>
         </div>
       )}
 
-      {/* =====================================================
-          TOP SUMMARY
-      ===================================================== */}
+      {/* SUMMARY */}
 
       <div className="top-summary-grid">
 
         <div className="top-summary-card">
-
           <div className="top-summary-icon blue">
             ₹
           </div>
@@ -887,11 +1156,9 @@ export default function Expense() {
               )}
             </strong>
           </div>
-
         </div>
 
         <div className="top-summary-card">
-
           <div className="top-summary-icon orange">
             ⏳
           </div>
@@ -905,11 +1172,9 @@ export default function Expense() {
               {pendingCount}
             </strong>
           </div>
-
         </div>
 
         <div className="top-summary-card">
-
           <div className="top-summary-icon green">
             ✓
           </div>
@@ -923,11 +1188,9 @@ export default function Expense() {
               {approvedCount}
             </strong>
           </div>
-
         </div>
 
         <div className="top-summary-card">
-
           <div className="top-summary-icon red">
             ×
           </div>
@@ -941,14 +1204,11 @@ export default function Expense() {
               {rejectedCount}
             </strong>
           </div>
-
         </div>
 
       </div>
 
-      {/* =====================================================
-          FORM + SUMMARY
-      ===================================================== */}
+      {/* FORM + SUMMARY */}
 
       <div className="expense-grid">
 
@@ -997,8 +1257,6 @@ export default function Expense() {
 
             <div className="form-grid">
 
-              {/* DATE */}
-
               <div className="field">
 
                 <label>
@@ -1018,8 +1276,6 @@ export default function Expense() {
                 />
 
               </div>
-
-              {/* NATURE */}
 
               <div className="field">
 
@@ -1041,8 +1297,6 @@ export default function Expense() {
                 />
 
               </div>
-
-              {/* AMOUNT */}
 
               <div className="field">
 
@@ -1067,8 +1321,6 @@ export default function Expense() {
 
               </div>
 
-              {/* GPAY */}
-
               <div className="field">
 
                 <label>
@@ -1088,8 +1340,6 @@ export default function Expense() {
                 />
 
               </div>
-
-              {/* PAYEE */}
 
               <div className="field">
 
@@ -1112,8 +1362,6 @@ export default function Expense() {
 
               </div>
 
-              {/* BILL */}
-
               <div className="field">
 
                 <label>
@@ -1133,8 +1381,6 @@ export default function Expense() {
                 />
 
               </div>
-
-              {/* DESCRIPTION */}
 
               <div className="field full-width">
 
@@ -1157,8 +1403,6 @@ export default function Expense() {
               </div>
 
             </div>
-
-            {/* SELECTED FILE */}
 
             {selectedFile && (
               <div className="selected-file-box">
@@ -1199,8 +1443,6 @@ export default function Expense() {
               </div>
             )}
 
-            {/* ACTION */}
-
             <div className="form-actions">
 
               <button
@@ -1236,9 +1478,7 @@ export default function Expense() {
 
         </section>
 
-        {/* ===================================================
-            SUMMARY
-        =================================================== */}
+        {/* SUMMARY */}
 
         <section className="expense-card summary-card">
 
@@ -1262,7 +1502,6 @@ export default function Expense() {
           </div>
 
           <div className="summary-item">
-
             <span>
               Total Entries
             </span>
@@ -1270,11 +1509,9 @@ export default function Expense() {
             <strong>
               {expenses.length}
             </strong>
-
           </div>
 
           <div className="summary-item">
-
             <span>
               Pending
             </span>
@@ -1282,11 +1519,9 @@ export default function Expense() {
             <strong className="orange-text">
               {pendingCount}
             </strong>
-
           </div>
 
           <div className="summary-item">
-
             <span>
               Approved
             </span>
@@ -1294,11 +1529,9 @@ export default function Expense() {
             <strong className="green-text">
               {approvedCount}
             </strong>
-
           </div>
 
           <div className="summary-item">
-
             <span>
               Rejected
             </span>
@@ -1306,11 +1539,9 @@ export default function Expense() {
             <strong className="red-text">
               {rejectedCount}
             </strong>
-
           </div>
 
           <div className="summary-total">
-
             <span>
               Total Amount
             </span>
@@ -1320,16 +1551,13 @@ export default function Expense() {
                 totalAmount
               )}
             </strong>
-
           </div>
 
         </section>
 
       </div>
 
-      {/* =====================================================
-          EXISTING EXPENSES
-      ===================================================== */}
+      {/* EXISTING EXPENSES */}
 
       <section className="expense-card existing-card">
 
@@ -1378,8 +1606,7 @@ export default function Expense() {
             </p>
 
           </div>
-        ) : expenses.length ===
-          0 ? (
+        ) : expenses.length === 0 ? (
           <div className="empty-state">
 
             <div className="empty-icon">
@@ -1416,37 +1643,14 @@ export default function Expense() {
               <thead>
 
                 <tr>
-                  <th>
-                    Date
-                  </th>
-
-                  <th>
-                    Nature
-                  </th>
-
-                  <th>
-                    Payee
-                  </th>
-
-                  <th>
-                    Bill No
-                  </th>
-
-                  <th>
-                    G-Pay No
-                  </th>
-
-                  <th>
-                    Amount
-                  </th>
-
-                  <th>
-                    Status
-                  </th>
-
-                  <th>
-                    Action
-                  </th>
+                  <th>Date</th>
+                  <th>Nature</th>
+                  <th>Payee</th>
+                  <th>Bill No</th>
+                  <th>G-Pay No</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Action</th>
                 </tr>
 
               </thead>
@@ -1586,19 +1790,15 @@ export default function Expense() {
 
       </section>
 
-      {/* =====================================================
-          UPLOAD / SCAN MODAL
-      ===================================================== */}
+      {/* UPLOAD / SCAN MODAL */}
 
       {showUploadModal && (
         <div
           className="modal-overlay"
-          onMouseDown={(
-            event
-          ) => {
+          onMouseDown={(event) => {
             if (
               event.target ===
-              event.currentTarget &&
+                event.currentTarget &&
               !ocrLoading
             ) {
               closeUploadModal();
@@ -1648,24 +1848,23 @@ export default function Expense() {
 
             </div>
 
-            {/* HIDDEN FILE INPUT */}
+            {/* FILE INPUT */}
 
             <input
               ref={
                 fileInputRef
               }
               type="file"
-              accept="image/*,.pdf"
+              accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff"
               onChange={
                 handleFileSelect
               }
               style={{
-                display:
-                  "none",
+                display: "none",
               }}
             />
 
-            {/* CAMERA INPUT */}
+            {/* CAMERA */}
 
             <input
               ref={
@@ -1678,14 +1877,9 @@ export default function Expense() {
                 handleFileSelect
               }
               style={{
-                display:
-                  "none",
+                display: "none",
               }}
             />
-
-            {/* =================================================
-                NO FILE
-            ================================================= */}
 
             {!selectedFile ? (
               <div className="upload-options">
@@ -1708,9 +1902,8 @@ export default function Expense() {
                     </strong>
 
                     <span>
-                      Choose image or
-                      PDF from your
-                      device
+                      Choose image from
+                      your device
                     </span>
                   </div>
 
@@ -1753,7 +1946,10 @@ export default function Expense() {
 
                   <span>
                     ✓ JPG, PNG, WEBP
-                    or PDF
+                  </span>
+
+                  <span>
+                    ✓ BMP / TIFF
                   </span>
 
                   <span>
@@ -1761,17 +1957,13 @@ export default function Expense() {
                   </span>
 
                   <span>
-                    ✓ Python OCR
+                    ✓ Tesseract OCR
                   </span>
 
                 </div>
 
               </div>
             ) : (
-              /* =================================================
-                 FILE PREVIEW
-              ================================================= */
-
               <div className="file-preview-section">
 
                 <div className="preview-header">
@@ -1802,7 +1994,7 @@ export default function Expense() {
 
                 </div>
 
-                {previewUrl ? (
+                {previewUrl && (
                   <div className="image-preview">
 
                     <img
@@ -1811,25 +2003,6 @@ export default function Expense() {
                       }
                       alt="Bill preview"
                     />
-
-                  </div>
-                ) : (
-                  <div className="pdf-preview">
-
-                    <div className="pdf-icon">
-                      PDF
-                    </div>
-
-                    <strong>
-                      {
-                        selectedFile.name
-                      }
-                    </strong>
-
-                    <span>
-                      PDF document
-                      selected
-                    </span>
 
                   </div>
                 )}
@@ -1871,7 +2044,7 @@ export default function Expense() {
                     </span>
 
                     <strong>
-                      Python
+                      Tesseract
                     </strong>
                   </div>
 
@@ -1880,9 +2053,7 @@ export default function Expense() {
               </div>
             )}
 
-            {/* =================================================
-                FOOTER
-            ================================================= */}
+            {/* FOOTER */}
 
             <div className="upload-modal-footer">
 
@@ -1930,19 +2101,16 @@ export default function Expense() {
             </div>
 
           </div>
+
         </div>
       )}
 
-      {/* =====================================================
-          DUPLICATE MODAL
-      ===================================================== */}
+      {/* DUPLICATE MODAL */}
 
       {showDuplicate && (
         <div
           className="modal-overlay"
-          onMouseDown={(
-            event
-          ) => {
+          onMouseDown={(event) => {
             if (
               event.target ===
               event.currentTarget
@@ -2116,8 +2284,6 @@ export default function Expense() {
           color: #172b4d;
         }
 
-        /* HEADER */
-
         .expense-header {
           display: flex;
           align-items: center;
@@ -2168,8 +2334,6 @@ export default function Expense() {
           color: #344054;
         }
 
-        /* ALERT */
-
         .alert {
           padding: 13px 15px;
           border-radius: 10px;
@@ -2192,8 +2356,6 @@ export default function Expense() {
           color: #b42318;
           border: 1px solid #fecdca;
         }
-
-        /* SUMMARY */
 
         .top-summary-grid {
           display: grid;
@@ -2256,8 +2418,6 @@ export default function Expense() {
           color: #1c2637;
         }
 
-        /* GRID */
-
         .expense-grid {
           display: grid;
           grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
@@ -2272,8 +2432,6 @@ export default function Expense() {
           padding: 24px;
           box-shadow: 0 8px 25px rgba(16, 24, 40, 0.05);
         }
-
-        /* CARD TITLE */
 
         .card-title-row {
           display: flex;
@@ -2326,8 +2484,6 @@ export default function Expense() {
           cursor: pointer;
         }
 
-        /* FORM */
-
         .form-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -2353,7 +2509,6 @@ export default function Expense() {
         .field input,
         .field textarea {
           width: 100%;
-          box-sizing: border-box;
           border: 1px solid #d0d5dd;
           border-radius: 10px;
           padding: 12px 13px;
@@ -2374,8 +2529,6 @@ export default function Expense() {
           border-color: #245a96;
           box-shadow: 0 0 0 3px rgba(36, 90, 150, 0.1);
         }
-
-        /* FILE */
 
         .selected-file-box {
           display: flex;
@@ -2429,8 +2582,6 @@ export default function Expense() {
           font-size: 20px;
         }
 
-        /* ACTION */
-
         .form-actions {
           display: flex;
           justify-content: flex-end;
@@ -2469,8 +2620,6 @@ export default function Expense() {
           background: #eef2f6;
           color: #344054;
         }
-
-        /* SUMMARY */
 
         .summary-card {
           height: fit-content;
@@ -2550,8 +2699,6 @@ export default function Expense() {
           color: #245994;
           font-size: 16px;
         }
-
-        /* EXISTING */
 
         .existing-card {
           overflow: hidden;
@@ -2683,8 +2830,6 @@ export default function Expense() {
           color: #b42318;
         }
 
-        /* EMPTY */
-
         .empty-state {
           padding: 55px 20px;
           text-align: center;
@@ -2733,10 +2878,6 @@ export default function Expense() {
           color: #245994;
         }
 
-        /* =====================================================
-           MODAL
-        ===================================================== */
-
         .modal-overlay {
           position: fixed;
           inset: 0;
@@ -2757,8 +2898,6 @@ export default function Expense() {
           border-radius: 20px;
           box-shadow: 0 25px 70px rgba(0, 0, 0, 0.22);
         }
-
-        /* UPLOAD HEADER */
 
         .upload-modal-header {
           padding: 22px 24px;
@@ -2814,8 +2953,6 @@ export default function Expense() {
           background: #fef3f2;
           color: #b42318;
         }
-
-        /* UPLOAD OPTIONS */
 
         .upload-options {
           padding: 24px;
@@ -2899,8 +3036,6 @@ export default function Expense() {
           font-size: 10px;
         }
 
-        /* PREVIEW */
-
         .file-preview-section {
           padding: 24px;
         }
@@ -2953,43 +3088,6 @@ export default function Expense() {
           object-fit: contain;
         }
 
-        .pdf-preview {
-          height: 220px;
-          border: 1px solid #e5e9ef;
-          border-radius: 12px;
-          background: #f8fafc;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .pdf-icon {
-          width: 65px;
-          height: 65px;
-          border-radius: 14px;
-          background: #fff0ef;
-          color: #c8493e;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 900;
-        }
-
-        .pdf-preview strong {
-          font-size: 12px;
-          max-width: 90%;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .pdf-preview span {
-          color: #8993a5;
-          font-size: 10px;
-        }
-
         .selected-file-info {
           margin-top: 13px;
           padding: 12px;
@@ -3016,8 +3114,6 @@ export default function Expense() {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-
-        /* FOOTER */
 
         .upload-modal-footer {
           border-top: 1px solid #eef0f4;
@@ -3048,8 +3144,6 @@ export default function Expense() {
             transform: rotate(360deg);
           }
         }
-
-        /* DUPLICATE */
 
         .duplicate-modal {
           position: relative;
@@ -3114,8 +3208,6 @@ export default function Expense() {
           gap: 10px;
           margin-top: 22px;
         }
-
-        /* RESPONSIVE */
 
         @media (max-width: 1100px) {
 
@@ -3243,3 +3335,4 @@ export default function Expense() {
     </div>
   );
 }
+```
