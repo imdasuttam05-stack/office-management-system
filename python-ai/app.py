@@ -79,8 +79,8 @@ def ocr():
 
         return jsonify({
             "success": True,
-            "text": result["text"],
-            "lines": result["lines"]
+            "text": result.get("text", ""),
+            "lines": result.get("lines", [])
         })
 
     except Exception as e:
