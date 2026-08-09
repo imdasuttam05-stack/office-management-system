@@ -1,77 +1,114 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from ocr import extract_text
+import os
+import tempfile
 
-from ocr import extract_expense_data
+app = Flask(__name__)
+CORS(app)
 
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
-app = FastAPI(title="Office Management OCR API")
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
 
-@app.get("/")
-def root():
-    return {
-        "success": True,
-        "message": "OCR service is running"
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "ok",
+        "service": "Office Management OCR API",
+        "ocr": "Tesseract"
+    })
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "healthy",
+        "ocr": "tesseract"
+    })
+
+
+@app.route("/ocr", methods=["POST"])
+def ocr():
+    if "file" not in request.files:
+        return jsonify({
+            "success": False,
+            "error": "No file uploaded"
+        }), 400
+
+    file = request.files["file"]
+
+    if not file or file.filename == "":
+        return jsonify({
+            "success": False,
+            "error": "No file selected"
+        }), 400
+
+    allowed_extensions = {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".tiff",
+        ".tif"
     }
 
+    filename = file.filename.lower()
+    extension = os.path.splitext(filename)[1]
 
-@app.post("/api/ocr/expense")
-async def scan_expense(
-    file: UploadFile = File(...)
-):
+    if extension not in allowed_extensions:
+        return jsonify({
+            "success": False,
+            "error": "Unsupported image format"
+        }), 400
 
-    if not file:
-        raise HTTPException(
-            status_code=400,
-            detail="No file uploaded"
-        )
-
-    allowed_types = [
-        "image/jpeg",
-        "image/jpg",
-        "image/png",
-        "image/webp"
-    ]
-
-    if file.content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail="Only JPG, PNG or WEBP images are supported"
-        )
+    temp_path = None
 
     try:
-        image_bytes = await file.read()
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=extension
+        ) as temp_file:
 
-        if not image_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded file is empty"
-            )
+            file.save(temp_file.name)
+            temp_path = temp_file.name
 
-        result = extract_expense_data(image_bytes)
+        result = extract_text(temp_path)
 
-        return {
+        return jsonify({
             "success": True,
-            "filename": file.filename,
-            "data": result
-        }
+            "text": result["text"],
+            "lines": result["lines"]
+        })
 
-    except HTTPException:
-        raise
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
-    except Exception as error:
-        print("OCR ERROR:", error)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to process image"
-        )
+
+@app.errorhandler(413)
+def file_too_large(error):
+    return jsonify({
+        "success": False,
+        "error": "File too large. Maximum size is 10 MB."
+    }), 413
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
