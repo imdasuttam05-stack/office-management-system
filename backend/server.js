@@ -9,75 +9,78 @@ import cookieParser from "cookie-parser";
 
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
+import ocrRoutes from "./routes/ocrRoutes.js";
+import {
+  apiLimiter,
+} from "./middleware/rateLimit.js";
 import connectDB from "./config/db.js";
 
 const app = express();
 
-// ==========================================
-// DATABASE
-// ==========================================
+const PORT =
+  Number(process.env.PORT) || 10000;
+
+const allowedOrigins = (
+  process.env.CLIENT_URL || ""
+)
+  .split(",")
+  .map((item) =>
+    item.trim()
+  )
+  .filter(Boolean);
 
 await connectDB();
 
-// ==========================================
-// BASIC CONFIG
-// ==========================================
+app.set(
+  "trust proxy",
+  1
+);
 
-const PORT = process.env.PORT || 10000;
-
-// ==========================================
-// ALLOWED FRONTEND ORIGINS
-// ==========================================
-
-const allowedOrigins = [
-  "https://office-management-system-lilac.vercel.app",
-  "https://office-management-system-ff0yh5xl-imdasuttam05-stacks-projects.vercel.app",
-];
-
-// ==========================================
-// SECURITY
-// ==========================================
+app.disable(
+  "x-powered-by"
+);
 
 app.use(
   helmet({
-    crossOriginResourcePolicy: false,
+    crossOriginResourcePolicy: {
+      policy: "cross-origin",
+    },
   })
 );
 
-// ==========================================
-// CORS
-// ==========================================
-
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow requests without Origin
+    origin(origin, callback) {
       if (!origin) {
-        return callback(null, true);
+        return callback(
+          null,
+          true
+        );
       }
 
-      // Allow registered frontend URLs
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
+      if (
+        allowedOrigins.includes(
+          origin
+        )
+      ) {
+        return callback(
+          null,
+          true
+        );
       }
 
-      // Allow Vercel deployments
-      if (origin.endsWith(".vercel.app")) {
-        return callback(null, true);
-      }
+      console.warn(
+        "Blocked CORS origin:",
+        origin
+      );
 
-      console.log("CORS blocked origin:", origin);
-
-      // IMPORTANT:
-      // Do not use a template literal here.
-      // This avoids the syntax error you are getting on Render.
       return callback(
-        new Error("CORS: Origin not allowed")
+        new Error(
+          "CORS origin not allowed."
+        )
       );
     },
-
     credentials: true,
-
     methods: [
       "GET",
       "POST",
@@ -86,7 +89,6 @@ app.use(
       "DELETE",
       "OPTIONS",
     ],
-
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -94,215 +96,147 @@ app.use(
   })
 );
 
-// ==========================================
-// BODY PARSER
-// ==========================================
-
 app.use(
   express.json({
-    limit: "10mb",
+    limit: "2mb",
   })
 );
 
 app.use(
   express.urlencoded({
     extended: true,
-    limit: "10mb",
+    limit: "1mb",
   })
 );
 
-// ==========================================
-// COOKIE
-// ==========================================
+app.use(
+  cookieParser()
+);
 
-app.use(cookieParser());
-
-// ==========================================
-// LOGGER
-// ==========================================
-
-if (process.env.NODE_ENV !== "test") {
-  app.use(morgan("combined"));
+if (
+  process.env.NODE_ENV !== "test"
+) {
+  app.use(
+    morgan("combined")
+  );
 }
 
-// ==========================================
-// ROOT
-// ==========================================
+app.get(
+  "/",
+  (req, res) => {
+    res.status(200).json({
+      success: true,
+      message:
+        "Office Management API is running",
+      environment:
+        process.env.NODE_ENV ||
+        "development",
+      timestamp:
+        new Date().toISOString(),
+    });
+  }
+);
 
-app.get("/", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Office Management API is running",
-    environment:
-      process.env.NODE_ENV || "development",
-    timestamp: new Date().toISOString(),
-  });
-});
+app.get(
+  "/api/health",
+  (req, res) => {
+    res.status(200).json({
+      success: true,
+      service:
+        "office-management-backend",
+      database:
+        "MongoDB Atlas",
+      timestamp:
+        new Date().toISOString(),
+    });
+  }
+);
 
-// ==========================================
-// HEALTH CHECK
-// ==========================================
-
-app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    service: "office-management-backend",
-    database: "MongoDB Atlas",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// ==========================================
-// API VERSION
-// ==========================================
-
-app.get("/api", (req, res) => {
-  res.status(200).json({
-    success: true,
-    name: "Office Management System API",
-    version: "1.0.0",
-  });
-});
-
-// ==========================================
-// AUTHENTICATION ROUTES
-// ==========================================
-
-// POST /api/auth/send-otp
-// POST /api/auth/verify-otp
+app.use(
+  "/api",
+  apiLimiter
+);
 
 app.use(
   "/api/auth",
   authRoutes
 );
 
-// ==========================================
-// EXPENSE ROUTES
-// ==========================================
-
-// POST   /api/expenses
-// GET    /api/expenses
-// GET    /api/expenses/:id
-// PUT    /api/expenses/:id
-// DELETE /api/expenses/:id
-// PATCH  /api/expenses/:id/approve
-// PATCH  /api/expenses/:id/reject
-
 app.use(
   "/api/expenses",
   expenseRoutes
 );
 
-// ==========================================
-// FUTURE MODULES
-// ==========================================
-
-// Users
-// app.use("/api/users", userRoutes);
-
-// Dashboard
-// app.use("/api/dashboard", dashboardRoutes);
-
-// Payments
-// app.use("/api/payments", paymentRoutes);
-
-// Reminders
-// app.use("/api/reminders", reminderRoutes);
-
-// OCR
-// app.use("/api/ocr", ocrRoutes);
-
-// Reports
-// app.use("/api/reports", reportRoutes);
-
-// ==========================================
-// 404 HANDLER
-// ==========================================
-
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "API route not found",
-    path: req.originalUrl,
-    method: req.method,
-  });
-});
-
-// ==========================================
-// GLOBAL ERROR HANDLER
-// ==========================================
+app.use(
+  "/api/ocr",
+  ocrRoutes
+);
 
 app.use(
-  (err, req, res, next) => {
-    console.error("Server Error:", err);
-
-    const statusCode =
-      err.statusCode || 500;
-
-    res.status(statusCode).json({
+  (req, res) => {
+    res.status(404).json({
       success: false,
-
       message:
-        process.env.NODE_ENV === "production"
-          ? "Internal server error"
-          : err.message,
+        "API route not found.",
     });
   }
 );
 
-// ==========================================
-// START SERVER
-// ==========================================
+app.use(
+  (err, req, res, next) => {
+    console.error(
+      "SERVER ERROR:",
+      err.message
+    );
+
+    const isUploadError =
+      err?.name ===
+        "MulterError" ||
+      String(
+        err?.message || ""
+      ).includes(
+        "Only JPG"
+      );
+
+    if (
+      err?.code ===
+      "LIMIT_FILE_SIZE"
+    ) {
+      return res.status(413).json({
+        success: false,
+        message:
+          "Image is too large. Maximum size is 10 MB.",
+      });
+    }
+
+    if (isUploadError) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid image upload.",
+      });
+    }
+
+    return res.status(
+      err.statusCode || 500
+    ).json({
+      success: false,
+      message:
+        process.env.NODE_ENV ===
+        "production"
+          ? "Internal server error."
+          : err.message ||
+            "Internal server error.",
+    });
+  }
+);
 
 app.listen(
   PORT,
   "0.0.0.0",
   () => {
     console.log(
-      "======================================"
-    );
-
-    console.log(
-      "Office Management Backend Started"
-    );
-
-    console.log(
-      `Port: ${PORT}`
-    );
-
-    console.log(
-      `Environment: ${
-        process.env.NODE_ENV ||
-        "development"
-      }`
-    );
-
-    console.log(
-      "======================================"
-    );
-
-    console.log(
-      "Auth API: /api/auth"
-    );
-
-    console.log(
-      "Send OTP: POST /api/auth/send-otp"
-    );
-
-    console.log(
-      "Expense API: /api/expenses"
-    );
-
-    console.log(
-      "Create Expense: POST /api/expenses"
-    );
-
-    console.log(
-      "Get Expenses: GET /api/expenses"
-    );
-
-    console.log(
-      "======================================"
+      `Office Management Backend running on port ${PORT}`
     );
   }
 );
