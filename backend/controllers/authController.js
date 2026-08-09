@@ -1,607 +1,793 @@
-import Otp from "../models/Otp.js";
-import User from "../models/User.js";
-import RefreshToken from "../models/RefreshToken.js";
+import mongoose from "mongoose";
+import Expense from "../models/Expense.js";
 import AuditLog from "../models/AuditLog.js";
-import { generateOtp } from "../utils/generateOtp.js";
-import { sendOtpEmail } from "../services/emailService.js";
-import {
-  createOpaqueToken,
-  getClientIp,
-  hashOtp,
-  safeEqualStrings,
-  sha256,
-  setRefreshCookie,
-  clearRefreshCookie,
-  isAllowedOrigin,
-} from "../utils/security.js";
-import jwt from "jsonwebtoken";
+import { getClientIp } from "../utils/security.js";
 
-const EMAIL_REGEX =
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const ACCESS_TOKEN_EXPIRES =
-  process.env.JWT_EXPIRES_IN || "15m";
-
-const REFRESH_DAYS =
-  Number(process.env.REFRESH_TOKEN_DAYS || 7);
-
-function normalizeEmail(value) {
-  return String(value || "")
+function cleanString(value, maxLength = 2000) {
+  return String(value ?? "")
     .trim()
-    .toLowerCase();
+    .slice(0, maxLength);
 }
 
-function allowedLoginEmails() {
-  return (
-    process.env.ALLOWED_LOGIN_EMAILS || ""
-  )
-    .split(",")
-    .map((item) =>
-      item.trim().toLowerCase()
-    )
-    .filter(Boolean);
-}
-
-function isBootstrapEmail(email) {
-  return (
-    normalizeEmail(
-      process.env.BOOTSTRAP_ADMIN_EMAIL
-    ) === email
+function escapeRegex(value) {
+  return String(value || "").replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
   );
 }
 
-function canCreateUser(email) {
-  return (
-    isBootstrapEmail(email) ||
-    allowedLoginEmails().includes(email) ||
-    process.env.AUTO_REGISTER_EMPLOYEES ===
-      "true"
-  );
-}
-
-async function audit(req, action, userId = null, metadata = {}) {
+async function audit(req, action, entityId, metadata = {}) {
   try {
     await AuditLog.create({
-      actorUser: userId,
+      actorUser: req.user?._id || null,
       action,
-      entity: "Auth",
+      entity: "Expense",
+      entityId,
       metadata,
       ip: getClientIp(req),
       userAgent:
         req.headers["user-agent"] || "",
     });
   } catch {
-    // Audit failure must not expose internal details to the client.
+    // Do not break a successful business action if audit logging fails.
   }
 }
 
-function issueAccessToken(user) {
-  if (!process.env.JWT_SECRET) {
-    throw new Error(
-      "JWT_SECRET is not configured"
-    );
-  }
-
-  return jwt.sign(
-    {
-      userId: user._id.toString(),
-      email: user.email,
-      role: user.role,
-    },
-    process.env.JWT_SECRET,
-    {
-      expiresIn: ACCESS_TOKEN_EXPIRES,
-    }
+function canSeeAllExpenses(user) {
+  return (
+    user.role === "Admin" ||
+    user.role === "Manager"
   );
 }
 
-async function createRefreshSession(req, res, user) {
-  const rawToken =
-    createOpaqueToken();
+function canManageExpense(user, expense) {
+  if (
+    user.role === "Admin" ||
+    user.role === "Manager"
+  ) {
+    return true;
+  }
 
-  const expiresAt =
-    new Date(
-      Date.now() +
-        REFRESH_DAYS *
-          24 *
-          60 *
-          60 *
-          1000
-    );
-
-  await RefreshToken.create({
-    tokenHash: sha256(rawToken),
-    userId: user._id,
-    expiresAt,
-    ip: getClientIp(req),
-    userAgent:
-      req.headers["user-agent"] || "",
-  });
-
-  setRefreshCookie(
-    res,
-    rawToken
+  return (
+    String(expense.createdBy) ===
+    String(user._id)
   );
 }
 
-function userPayload(user) {
-  return {
-    id: user._id.toString(),
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    isVerified: user.isVerified,
-    isActive: user.isActive,
-  };
-}
-
-export const sendOtp = async (req, res) => {
+export const createExpense = async (
+  req,
+  res
+) => {
   try {
-    const email =
-      normalizeEmail(req.body?.email);
+    const {
+      date,
+      natureOfExpense,
+      amount,
+      gpayNo,
+      payeeName,
+      billNo,
+      description,
+      forceSave,
+    } = req.body || {};
 
-    if (
-      !email ||
-      !EMAIL_REGEX.test(email) ||
-      email.length > 200
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Please enter a valid email address.",
-      });
-    }
-
-    let user =
-      await User.findOne({ email });
-
-    if (!user && !canCreateUser(email)) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "This email is not authorized for this office system.",
-      });
-    }
-
-    if (user && !user.isActive) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "This account is inactive. Contact an administrator.",
-      });
-    }
-
-    const existing =
-      await Otp.findOne({ email });
-
-    if (
-      existing &&
-      existing.resendAvailableAt >
-        new Date()
-    ) {
-      return res.status(429).json({
-        success: false,
-        message:
-          "Please wait before requesting another OTP.",
-      });
-    }
-
-    await Otp.deleteMany({ email });
-
-    const otp =
-      generateOtp();
-
-    const now =
-      new Date();
-
-    await Otp.create({
-      email,
-      otpHash: hashOtp(otp),
-      expiresAt:
-        new Date(
-          now.getTime() +
-            5 * 60 * 1000
-        ),
-      resendAvailableAt:
-        new Date(
-          now.getTime() +
-            60 * 1000
-        ),
-      attempts: 0,
-    });
-
-    try {
-      await sendOtpEmail(
-        email,
-        otp
-      );
-    } catch (error) {
-      await Otp.deleteMany({ email });
-      throw error;
-    }
-
-    await audit(
-      req,
-      "OTP_REQUESTED",
-      user?._id || null
-    );
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "OTP sent successfully. Please check your email.",
-    });
-  } catch (error) {
-    console.error(
-      "SEND OTP ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to send OTP right now.",
-    });
-  }
-};
-
-export const verifyOtp = async (req, res) => {
-  try {
-    const email =
-      normalizeEmail(req.body?.email);
-
-    const otp =
-      String(req.body?.otp || "")
-        .trim();
-
-    if (
-      !EMAIL_REGEX.test(email) ||
-      !/^\d{6}$/.test(otp)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid email or OTP.",
-      });
-    }
-
-    const otpRecord =
-      await Otp.findOne({ email });
-
-    if (!otpRecord) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid or expired OTP.",
-      });
-    }
-
-    if (
-      otpRecord.expiresAt <=
-      new Date()
-    ) {
-      await Otp.deleteOne({
-        _id: otpRecord._id,
-      });
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "OTP has expired. Please request a new OTP.",
-      });
-    }
-
-    if (otpRecord.attempts >= 5) {
-      await Otp.deleteOne({
-        _id: otpRecord._id,
-      });
-
-      return res.status(429).json({
-        success: false,
-        message:
-          "Too many OTP attempts. Please request a new OTP.",
-      });
-    }
-
-    const validOtp =
-      safeEqualStrings(
-        hashOtp(otp),
-        otpRecord.otpHash
+    const cleanNature =
+      cleanString(
+        natureOfExpense,
+        150
       );
 
-    if (!validOtp) {
-      otpRecord.attempts += 1;
+    const cleanPayee =
+      cleanString(
+        payeeName,
+        150
+      );
+
+    const cleanGpay =
+      cleanString(
+        gpayNo,
+        120
+      );
+
+    const cleanBillNo =
+      cleanString(
+        billNo,
+        120
+      );
+
+    const cleanDescription =
+      cleanString(
+        description,
+        2000
+      );
+
+    const parsedDate =
+      new Date(date);
+
+    const expenseAmount =
+      Number(amount);
+
+    if (
+      !date ||
+      Number.isNaN(
+        parsedDate.getTime()
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A valid expense date is required.",
+      });
+    }
+
+    if (!cleanNature) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Nature of expense is required.",
+      });
+    }
+
+    if (
+      !Number.isFinite(
+        expenseAmount
+      ) ||
+      expenseAmount <= 0 ||
+      expenseAmount > 1000000000
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A valid expense amount is required.",
+      });
+    }
+
+    if (!cleanPayee) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Payee name is required.",
+      });
+    }
+
+    const duplicate =
+      await Expense.findOne({
+        isDeleted: false,
+        amount: expenseAmount,
+        payeeName: {
+          $regex:
+            escapeRegex(cleanPayee),
+          $options: "i",
+        },
+        natureOfExpense: {
+          $regex:
+            escapeRegex(cleanNature),
+          $options: "i",
+        },
+      }).sort({
+        createdAt: -1,
+      });
+
+    const isOverride =
+      Boolean(forceSave) &&
+      (
+        req.user.role === "Admin" ||
+        req.user.role === "Manager"
+      );
+
+    if (duplicate && !isOverride) {
+      let similarity = 85;
 
       if (
-        otpRecord.attempts >= 5
+        cleanBillNo &&
+        duplicate.billNo &&
+        cleanBillNo.toLowerCase() ===
+          duplicate.billNo.toLowerCase()
       ) {
-        await Otp.deleteOne({
-          _id: otpRecord._id,
-        });
-      } else {
-        await otpRecord.save();
+        similarity = 98;
+      } else if (
+        cleanGpay &&
+        duplicate.gpayNo &&
+        cleanGpay.toLowerCase() ===
+          duplicate.gpayNo.toLowerCase()
+      ) {
+        similarity = 97;
       }
 
-      await audit(
-        req,
-        "OTP_FAILED"
-      );
-
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
+        duplicate: true,
         message:
-          "Invalid or expired OTP.",
+          "Possible duplicate expense found. Manager or Admin approval is required to save it anyway.",
+        similarity,
+        existingExpense:
+          duplicate,
       });
     }
 
-    let user =
-      await User.findOne({ email });
-
-    if (!user) {
-      if (!canCreateUser(email)) {
-        await Otp.deleteOne({
-          _id: otpRecord._id,
-        });
-
-        return res.status(403).json({
-          success: false,
-          message:
-            "This email is not authorized for this office system.",
-        });
-      }
-
-      user = await User.create({
-        email,
-        role: isBootstrapEmail(email)
-          ? "Admin"
-          : "Employee",
-        isActive: true,
-        isVerified: true,
-        lastLogin: new Date(),
+    const expense =
+      await Expense.create({
+        date: parsedDate,
+        natureOfExpense:
+          cleanNature,
+        amount:
+          expenseAmount,
+        gpayNo:
+          cleanGpay,
+        payeeName:
+          cleanPayee,
+        billNo:
+          cleanBillNo,
+        description:
+          cleanDescription,
+        createdBy:
+          req.user._id,
+        status:
+          "pending",
+        duplicateOverrideBy:
+          isOverride
+            ? req.user._id
+            : null,
+        duplicateOverrideAt:
+          isOverride
+            ? new Date()
+            : null,
       });
-    } else {
-      if (!user.isActive) {
-        await Otp.deleteOne({
-          _id: otpRecord._id,
-        });
-
-        return res.status(403).json({
-          success: false,
-          message:
-            "Your account is inactive. Contact an administrator.",
-        });
-      }
-
-      const roles = [
-        "Admin",
-        "Manager",
-        "Employee",
-      ];
-
-      if (!roles.includes(user.role)) {
-        return res.status(500).json({
-          success: false,
-          message:
-            "User role configuration is invalid.",
-        });
-      }
-
-      user.isVerified = true;
-      user.lastLogin = new Date();
-
-      // IMPORTANT: Never reactivate a disabled account during login.
-      await user.save();
-    }
-
-    await Otp.deleteOne({
-      _id: otpRecord._id,
-    });
-
-    await RefreshToken.deleteMany({
-      userId: user._id,
-      expiresAt: {
-        $lte: new Date(),
-      },
-    });
-
-    const token =
-      issueAccessToken(user);
-
-    await createRefreshSession(
-      req,
-      res,
-      user
-    );
 
     await audit(
       req,
-      "LOGIN_SUCCESS",
-      user._id
+      "EXPENSE_CREATED",
+      expense._id,
+      {
+        amount: expenseAmount,
+        duplicateOverride:
+          isOverride,
+      }
     );
 
-    return res.status(200).json({
+    return res.status(201).json({
       success: true,
+      duplicate: false,
       message:
-        "Login successful.",
-      token,
-      expiresIn:
-        ACCESS_TOKEN_EXPIRES,
-      user:
-        userPayload(user),
+        "Expense created successfully.",
+      expense,
     });
   } catch (error) {
     console.error(
-      "VERIFY OTP ERROR:",
+      "CREATE EXPENSE ERROR:",
       error.message
     );
 
     return res.status(500).json({
       success: false,
       message:
-        "Unable to verify OTP right now.",
+        "Unable to create expense.",
     });
   }
 };
 
-export const refreshAccessToken = async (
+export const getExpenses = async (
   req,
   res
 ) => {
   try {
-    if (!isAllowedOrigin(req)) {
-      return res.status(403).json({
-        success: false,
-        message: "Origin not allowed.",
-      });
+    const filter = {
+      isDeleted: false,
+    };
+
+    if (!canSeeAllExpenses(req.user)) {
+      filter.createdBy =
+        req.user._id;
     }
 
-    const rawToken =
-      req.cookies?.refresh_token;
-
-    if (!rawToken) {
-      return res.status(401).json({
-        success: false,
-        message:
-          "Refresh session not found.",
-      });
-    }
-
-    const oldHash =
-      sha256(rawToken);
-
-    const session =
-      await RefreshToken.findOneAndUpdate(
-        {
-          tokenHash: oldHash,
-          revokedAt: null,
-          expiresAt: {
-            $gt: new Date(),
-          },
-        },
-        {
-          $set: {
-            revokedAt: new Date(),
-          },
-        },
-        {
-          new: true,
-        }
-      ).populate("userId");
-
-    if (!session?.userId) {
-      clearRefreshCookie(res);
-
-      return res.status(401).json({
-        success: false,
-        message:
-          "Refresh session is invalid or expired.",
-      });
-    }
-
-    const user =
-      session.userId;
-
-    if (!user.isActive) {
-      clearRefreshCookie(res);
-
-      return res.status(403).json({
-        success: false,
-        message:
-          "Your account is inactive.",
-      });
-    }
-
-    const token =
-      issueAccessToken(user);
-
-    await createRefreshSession(
-      req,
-      res,
-      user
-    );
+    const expenses =
+      await Expense.find(filter)
+        .populate(
+          "createdBy",
+          "name email role"
+        )
+        .populate(
+          "approvedBy",
+          "name email role"
+        )
+        .populate(
+          "rejectedBy",
+          "name email role"
+        )
+        .sort({
+          date: -1,
+          createdAt: -1,
+        });
 
     return res.status(200).json({
       success: true,
-      token,
-      expiresIn:
-        ACCESS_TOKEN_EXPIRES,
-      user:
-        userPayload(user),
+      count:
+        expenses.length,
+      expenses,
     });
   } catch (error) {
     console.error(
-      "REFRESH TOKEN ERROR:",
+      "GET EXPENSES ERROR:",
       error.message
     );
 
-    clearRefreshCookie(res);
-
-    return res.status(401).json({
+    return res.status(500).json({
       success: false,
       message:
-        "Unable to refresh authentication.",
+        "Unable to fetch expenses.",
     });
   }
 };
 
-export const logout = async (
+export const getExpenseById = async (
   req,
   res
 ) => {
   try {
-    if (!isAllowedOrigin(req)) {
-      return res.status(403).json({
+    if (
+      !mongoose.isValidObjectId(
+        req.params.id
+      )
+    ) {
+      return res.status(400).json({
         success: false,
-        message: "Origin not allowed.",
+        message:
+          "Invalid expense ID.",
       });
     }
 
-    const rawToken =
-      req.cookies?.refresh_token;
+    const expense =
+      await Expense.findOne({
+        _id:
+          req.params.id,
+        isDeleted: false,
+      })
+        .populate(
+          "createdBy",
+          "name email role"
+        )
+        .populate(
+          "approvedBy",
+          "name email role"
+        )
+        .populate(
+          "rejectedBy",
+          "name email role"
+        );
 
-    if (rawToken) {
-      await RefreshToken.updateMany(
-        {
-          tokenHash:
-            sha256(rawToken),
-          revokedAt: null,
-        },
-        {
-          $set: {
-            revokedAt: new Date(),
-          },
-        }
-      );
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Expense not found.",
+      });
     }
 
-    clearRefreshCookie(res);
-
-    if (req.user?._id) {
-      await audit(
-        req,
-        "LOGOUT",
-        req.user._id
-      );
+    if (
+      !canSeeAllExpenses(
+        req.user
+      ) &&
+      String(expense.createdBy?._id) !==
+        String(req.user._id)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You do not have access to this expense.",
+      });
     }
 
     return res.status(200).json({
       success: true,
-      message: "Logged out successfully.",
+      expense,
     });
   } catch (error) {
-    clearRefreshCookie(res);
+    console.error(
+      "GET EXPENSE ERROR:",
+      error.message
+    );
 
-    return res.status(200).json({
-      success: true,
-      message: "Logged out.",
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to fetch expense.",
     });
   }
 };
 
-export const getMe = async (
+export const updateExpense = async (
   req,
   res
 ) => {
-  return res.status(200).json({
-    success: true,
-    user: userPayload(req.user),
-  });
+  try {
+    if (
+      !mongoose.isValidObjectId(
+        req.params.id
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid expense ID.",
+      });
+    }
+
+    const expense =
+      await Expense.findOne({
+        _id:
+          req.params.id,
+        isDeleted: false,
+      });
+
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Expense not found.",
+      });
+    }
+
+    if (
+      !canManageExpense(
+        req.user,
+        expense
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You do not have permission to edit this expense.",
+      });
+    }
+
+    if (
+      expense.status !== "pending"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Approved or rejected expenses cannot be edited.",
+      });
+    }
+
+    const allowedFields = [
+      "date",
+      "natureOfExpense",
+      "amount",
+      "gpayNo",
+      "payeeName",
+      "billNo",
+      "description",
+    ];
+
+    for (const field of allowedFields) {
+      if (
+        req.body?.[field] !==
+        undefined
+      ) {
+        if (
+          field === "amount"
+        ) {
+          const value =
+            Number(
+              req.body[field]
+            );
+
+          if (
+            !Number.isFinite(value) ||
+            value <= 0
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Invalid amount.",
+            });
+          }
+
+          expense.amount =
+            value;
+        } else if (
+          field === "date"
+        ) {
+          const value =
+            new Date(
+              req.body[field]
+            );
+
+          if (
+            Number.isNaN(
+              value.getTime()
+            )
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Invalid date.",
+            });
+          }
+
+          expense.date =
+            value;
+        } else {
+          expense[field] =
+            cleanString(
+              req.body[field],
+              field ===
+                "description"
+                ? 2000
+                : 150
+            );
+        }
+      }
+    }
+
+    expense.updatedBy =
+      req.user._id;
+
+    await expense.save();
+
+    await audit(
+      req,
+      "EXPENSE_UPDATED",
+      expense._id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Expense updated successfully.",
+      expense,
+    });
+  } catch (error) {
+    console.error(
+      "UPDATE EXPENSE ERROR:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to update expense.",
+    });
+  }
+};
+
+export const deleteExpense = async (
+  req,
+  res
+) => {
+  try {
+    if (
+      req.user.role !== "Admin"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only Admin can delete expenses.",
+      });
+    }
+
+    if (
+      !mongoose.isValidObjectId(
+        req.params.id
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid expense ID.",
+      });
+    }
+
+    const expense =
+      await Expense.findOne({
+        _id:
+          req.params.id,
+        isDeleted: false,
+      });
+
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Expense not found.",
+      });
+    }
+
+    expense.isDeleted = true;
+    expense.deletedBy =
+      req.user._id;
+    expense.deletedAt =
+      new Date();
+    expense.updatedBy =
+      req.user._id;
+
+    await expense.save();
+
+    await audit(
+      req,
+      "EXPENSE_DELETED",
+      expense._id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Expense deleted successfully.",
+    });
+  } catch (error) {
+    console.error(
+      "DELETE EXPENSE ERROR:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to delete expense.",
+    });
+  }
+};
+
+export const approveExpense = async (
+  req,
+  res
+) => {
+  try {
+    if (
+      !["Admin", "Manager"].includes(
+        req.user.role
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only Manager or Admin can approve expenses.",
+      });
+    }
+
+    const expense =
+      await Expense.findOne({
+        _id:
+          req.params.id,
+        isDeleted: false,
+      });
+
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Expense not found.",
+      });
+    }
+
+    if (
+      expense.status !== "pending"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Only pending expenses can be approved.",
+      });
+    }
+
+    expense.status =
+      "approved";
+    expense.approvedBy =
+      req.user._id;
+    expense.approvedAt =
+      new Date();
+    expense.rejectedBy =
+      null;
+    expense.rejectedAt =
+      null;
+    expense.rejectedReason =
+      "";
+    expense.updatedBy =
+      req.user._id;
+
+    await expense.save();
+
+    await audit(
+      req,
+      "EXPENSE_APPROVED",
+      expense._id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Expense approved successfully.",
+      expense,
+    });
+  } catch (error) {
+    console.error(
+      "APPROVE EXPENSE ERROR:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to approve expense.",
+    });
+  }
+};
+
+export const rejectExpense = async (
+  req,
+  res
+) => {
+  try {
+    if (
+      !["Admin", "Manager"].includes(
+        req.user.role
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only Manager or Admin can reject expenses.",
+      });
+    }
+
+    const expense =
+      await Expense.findOne({
+        _id:
+          req.params.id,
+        isDeleted: false,
+      });
+
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Expense not found.",
+      });
+    }
+
+    if (
+      expense.status !== "pending"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Only pending expenses can be rejected.",
+      });
+    }
+
+    expense.status =
+      "rejected";
+    expense.rejectedBy =
+      req.user._id;
+    expense.rejectedAt =
+      new Date();
+    expense.updatedBy =
+      req.user._id;
+
+    await expense.save();
+
+    await audit(
+      req,
+      "EXPENSE_REJECTED",
+      expense._id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Expense rejected successfully.",
+      expense,
+    });
+  } catch (error) {
+    console.error(
+      "REJECT EXPENSE ERROR:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to reject expense.",
+    });
+  }
 };
