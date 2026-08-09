@@ -1,8 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
 from ocr import extract_expense_data
 
+
 app = FastAPI(title="Office Management OCR API")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,7 +25,9 @@ def root():
 
 
 @app.post("/api/ocr/expense")
-async def scan_expense(file: UploadFile = File(...)):
+async def scan_expense(
+    file: UploadFile = File(...)
+):
 
     if not file:
         raise HTTPException(
@@ -46,6 +51,12 @@ async def scan_expense(file: UploadFile = File(...)):
     try:
         image_bytes = await file.read()
 
+        if not image_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty"
+            )
+
         result = extract_expense_data(image_bytes)
 
         return {
@@ -53,6 +64,9 @@ async def scan_expense(file: UploadFile = File(...)):
             "filename": file.filename,
             "data": result
         }
+
+    except HTTPException:
+        raise
 
     except Exception as error:
         print("OCR ERROR:", error)
