@@ -1,4 +1,3 @@
-```jsx
 import React, { lazy, Suspense } from "react";
 import {
   BrowserRouter,
@@ -11,31 +10,50 @@ import Login from "./pages/Login.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import Expense from "./pages/Expense.jsx";
 
+// ==========================================
+// LAZY LOAD PAGES
+// ==========================================
+
 const Dashboard = lazy(() =>
   import("./pages/Dashboard.jsx")
 );
+
+// ==========================================
+// LOADING SCREEN
+// ==========================================
 
 function LoadingScreen() {
   return (
     <div className="app-loading">
       <div className="loading-card">
+
         <div className="loading-spinner"></div>
 
         <h3>Office Management</h3>
 
         <p>Loading...</p>
+
       </div>
     </div>
   );
 }
 
+// ==========================================
+// APP
+// ==========================================
+
 function App() {
   return (
     <BrowserRouter>
+
       <Suspense fallback={<LoadingScreen />}>
+
         <Routes>
 
-          {/* ROOT */}
+          {/* =================================
+              ROOT
+          ================================= */}
+
           <Route
             path="/"
             element={
@@ -46,22 +64,30 @@ function App() {
             }
           />
 
-          {/* LOGIN */}
+          {/* =================================
+              LOGIN
+          ================================= */}
+
           <Route
             path="/login"
             element={<Login />}
           />
 
-          {/* PROTECTED APPLICATION */}
+          {/* =================================
+              PROTECTED APPLICATION
+          ================================= */}
+
           <Route element={<ProtectedRoute />}>
 
             {/* DASHBOARD */}
+
             <Route
               path="/dashboard"
               element={<Dashboard />}
             />
 
             {/* EXPENSE */}
+
             <Route
               path="/expenses"
               element={<Expense />}
@@ -69,7 +95,10 @@ function App() {
 
           </Route>
 
-          {/* UNKNOWN URL */}
+          {/* =================================
+              UNKNOWN URL
+          ================================= */}
+
           <Route
             path="*"
             element={
@@ -81,10 +110,83 @@ function App() {
           />
 
         </Routes>
+
       </Suspense>
+
+      {/* =====================================
+          GLOBAL APP LOADING CSS
+      ====================================== */}
+
+      <style>
+        {`
+          .app-loading {
+            min-height: 100vh;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f5f7fb;
+            font-family:
+              Inter,
+              Arial,
+              Helvetica,
+              sans-serif;
+          }
+
+          .loading-card {
+            width: 280px;
+            padding: 30px 25px;
+            background: #ffffff;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow:
+              0 10px 35px rgba(0, 0, 0, 0.08);
+          }
+
+          .loading-spinner {
+            width: 38px;
+            height: 38px;
+            margin: 0 auto 18px;
+
+            border: 4px solid #e5e7eb;
+            border-top-color: #245a96;
+
+            border-radius: 50%;
+
+            animation:
+              officeAppSpin
+              0.8s
+              linear
+              infinite;
+          }
+
+          .loading-card h3 {
+            margin: 0;
+            color: #172b4d;
+            font-size: 17px;
+            font-weight: 700;
+          }
+
+          .loading-card p {
+            margin: 7px 0 0;
+            color: #667085;
+            font-size: 13px;
+          }
+
+          @keyframes officeAppSpin {
+            from {
+              transform: rotate(0deg);
+            }
+
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        `}
+      </style>
+
     </BrowserRouter>
   );
 }
 
 export default App;
-```
