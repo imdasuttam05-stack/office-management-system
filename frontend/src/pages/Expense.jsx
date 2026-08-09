@@ -1,221 +1,302 @@
-import React, { useState } from "react";
+```jsx
+import React, { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
   "https://office-management-system-ikx8.onrender.com";
 
-function Expense() {
-  const navigate = useNavigate();
+const emptyForm = {
+  date: new Date().toISOString().split("T")[0],
+  natureOfExpense: "",
+  amount: "",
+  gpayNo: "",
+  payeeName: "",
+  billNo: "",
+  description: "",
+  remark: "",
+};
 
-  const [form, setForm] = useState({
-    date: new Date().toISOString().split("T")[0],
-    natureOfExpense: "",
-    amount: "",
-    gpayNo: "",
-    payeeName: "",
-    description: "",
-  });
+export default function Expense() {
+  const [form, setForm] = useState(emptyForm);
+
+  const [expenses, setExpenses] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
 
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
+
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [duplicate, setDuplicate] = useState(null);
-  const [successExpense, setSuccessExpense] = useState(null);
 
-  const token = localStorage.getItem("token");
+  const [duplicate, setDuplicate] = useState(null);
+  const [showDuplicate, setShowDuplicate] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   // ==========================================
-  // INPUT CHANGE
+  // GET TOKEN
+  // ==========================================
+
+  const getToken = () => {
+    return localStorage.getItem("token");
+  };
+
+  // ==========================================
+  // AXIOS CONFIG
+  // ==========================================
+
+  const getConfig = () => {
+    const token = getToken();
+
+    return {
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    };
+  };
+
+  // ==========================================
+  // FETCH EXPENSES
+  // ==========================================
+
+  const fetchExpenses = async () => {
+    try {
+      setFetching(true);
+      setError("");
+
+      const response = await axios.get(
+        `${API_URL}/api/expenses`,
+        getConfig()
+      );
+
+      if (response.data?.success) {
+        setExpenses(response.data.expenses || []);
+      }
+    } catch (err) {
+      console.error("FETCH EXPENSE ERROR:", err);
+
+      if (err.response?.status === 401) {
+        setError("Session expired. Please login again.");
+      } else {
+        setError(
+          err.response?.data?.message ||
+            "Unable to load expenses."
+        );
+      }
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  // ==========================================
+  // LOAD EXPENSES
+  // ==========================================
+
+  useEffect(() => {
+    fetchExpenses();
+  }, []);
+
+  // ==========================================
+  // FORM CHANGE
   // ==========================================
 
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    setForm((prev) => ({
-      ...prev,
+    setForm((previous) => ({
+      ...previous,
       [name]: value,
     }));
+  };
 
+  // ==========================================
+  // FILE SELECT
+  // ==========================================
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    const allowedTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      setError(
+        "Please upload JPG, PNG, WEBP or PDF file."
+      );
+
+      e.target.value = "";
+      return;
+    }
+
+    const maxSize = 10 * 1024 * 1024;
+
+    if (file.size > maxSize) {
+      setError("Maximum file size is 10 MB.");
+
+      e.target.value = "";
+      return;
+    }
+
+    setSelectedFile(file);
     setError("");
+    setMessage(
+      "Bill selected. OCR scan will be connected next."
+    );
+  };
+
+  // ==========================================
+  // REMOVE FILE
+  // ==========================================
+
+  const removeFile = () => {
+    setSelectedFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
     setMessage("");
+  };
+
+  // ==========================================
+  // RESET FORM
+  // ==========================================
+
+  const resetForm = () => {
+    setForm({
+      ...emptyForm,
+      date: new Date()
+        .toISOString()
+        .split("T")[0],
+    });
+
+    setSelectedFile(null);
+    setDuplicate(null);
+    setShowDuplicate(false);
+    setMessage("");
+    setError("");
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   // ==========================================
   // SAVE EXPENSE
   // ==========================================
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    setError("");
-    setMessage("");
-    setDuplicate(null);
-    setSuccessExpense(null);
-
-    // Basic validation
-    if (!form.date) {
-      setError("Please select expense date.");
-      return;
-    }
-
-    if (!form.natureOfExpense.trim()) {
-      setError("Please enter nature of expense.");
-      return;
-    }
-
-    if (!form.amount || Number(form.amount) <= 0) {
-      setError("Please enter a valid amount.");
-      return;
-    }
-
-    if (!form.payeeName.trim()) {
-      setError("Please enter payee name.");
-      return;
-    }
-
-    if (!token) {
-      setError("Session expired. Please login again.");
-      navigate("/login");
-      return;
-    }
-
+  const saveExpense = async (forceSave = false) => {
     try {
       setLoading(true);
+      setError("");
+      setMessage("");
 
-      const response = await axios.post(
-        `${API_URL}/api/expenses`,
-        {
-          date: form.date,
-          natureOfExpense: form.natureOfExpense.trim(),
-          amount: Number(form.amount),
-          gpayNo: form.gpayNo.trim(),
-          payeeName: form.payeeName.trim(),
-          description: form.description.trim(),
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (response.data?.success) {
-        setSuccessExpense(response.data.expense);
-
-        setMessage(
-          "Expense saved successfully."
-        );
-
-        setForm({
-          date: new Date()
-            .toISOString()
-            .split("T")[0],
-          natureOfExpense: "",
-          amount: "",
-          gpayNo: "",
-          payeeName: "",
-          description: "",
-        });
-      }
-    } catch (err) {
-      console.error(
-        "EXPENSE SAVE ERROR:",
-        err
-      );
-
-      // Duplicate detected
-      if (
-        err.response?.status === 409 &&
-        err.response?.data?.duplicate
-      ) {
-        setDuplicate(
-          err.response.data
-        );
-
-        setError(
-          "Possible duplicate expense found."
-        );
-
+      if (!form.date) {
+        setError("Date is required.");
         return;
       }
 
-      // Unauthorized
-      if (err.response?.status === 401) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
+      if (!form.natureOfExpense.trim()) {
+        setError("Nature of Expenses is required.");
+        return;
+      }
 
-        navigate("/login");
+      if (
+        form.amount === "" ||
+        Number(form.amount) <= 0
+      ) {
+        setError("Please enter a valid amount.");
+        return;
+      }
+
+      if (!form.payeeName.trim()) {
+        setError("Payee Name is required.");
+        return;
+      }
+
+      const payload = {
+        date: form.date,
+
+        natureOfExpense:
+          form.natureOfExpense.trim(),
+
+        amount: Number(form.amount),
+
+        gpayNo: form.gpayNo.trim(),
+
+        payeeName:
+          form.payeeName.trim(),
+
+        billNo:
+          form.billNo.trim(),
+
+        description:
+          form.description.trim(),
+
+        remark:
+          form.remark.trim(),
+      };
+
+      // ========================================
+      // SAVE TO BACKEND
+      // ========================================
+
+      const response = await axios.post(
+        `${API_URL}/api/expenses`,
+        payload,
+        getConfig()
+      );
+
+      if (response.data?.success) {
+        setMessage(
+          "Expense saved successfully. Status: Pending."
+        );
+
+        resetForm();
+
+        await fetchExpenses();
 
         return;
       }
 
       setError(
-        err.response?.data?.message ||
-          "Unable to save expense. Please try again."
+        response.data?.message ||
+          "Unable to save expense."
       );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==========================================
-  // SAVE DUPLICATE ANYWAY
-  // ==========================================
-
-  const saveAnyway = async () => {
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-      setDuplicate(null);
-
-      const response = await axios.post(
-        `${API_URL}/api/expenses`,
-        {
-          ...form,
-          amount: Number(form.amount),
-          forceSave: true,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (response.data?.success) {
-        setSuccessExpense(
-          response.data.expense
-        );
-
-        setMessage(
-          "Expense saved successfully."
-        );
-
-        setForm({
-          date: new Date()
-            .toISOString()
-            .split("T")[0],
-          natureOfExpense: "",
-          amount: "",
-          gpayNo: "",
-          payeeName: "",
-          description: "",
-        });
-      }
     } catch (err) {
-      console.error(
-        "SAVE ANYWAY ERROR:",
-        err
-      );
+      console.error("SAVE EXPENSE ERROR:", err);
+
+      // ========================================
+      // DUPLICATE FOUND
+      // ========================================
+
+      if (
+        err.response?.status === 409 &&
+        err.response?.data?.duplicate
+      ) {
+        setDuplicate(
+          err.response.data.existingExpense
+        );
+
+        setShowDuplicate(true);
+
+        setError(
+          err.response.data.message ||
+            "Possible duplicate expense found."
+        );
+
+        return;
+      }
 
       setError(
         err.response?.data?.message ||
@@ -227,792 +308,1163 @@ function Expense() {
   };
 
   // ==========================================
-  // CANCEL DUPLICATE
+  // SAVE ANYWAY
   // ==========================================
 
-  const cancelDuplicate = () => {
-    setDuplicate(null);
-    setError("");
+  const saveAnyway = async () => {
+    try {
+      setShowDuplicate(false);
+
+      /*
+       * IMPORTANT:
+       * Current backend duplicate API returns 409.
+       * A dedicated "force save" endpoint should be
+       * added later for Save Anyway.
+       */
+
+      setError(
+        "Duplicate detected. Save Anyway API will be connected in the next backend step."
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // ==========================================
+  // STATUS CLASS
+  // ==========================================
+
+  const getStatusClass = (status) => {
+    switch (
+      String(status || "").toLowerCase()
+    ) {
+      case "approved":
+        return "status approved";
+
+      case "rejected":
+        return "status rejected";
+
+      default:
+        return "status pending";
+    }
+  };
+
+  // ==========================================
+  // FORMAT DATE
+  // ==========================================
+
+  const formatDate = (value) => {
+    if (!value) return "-";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return date.toLocaleDateString("en-IN");
+  };
+
+  // ==========================================
+  // FORMAT AMOUNT
+  // ==========================================
+
+  const formatAmount = (amount) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 2,
+    }).format(Number(amount || 0));
+  };
+
+  // ==========================================
+  // TOTAL
+  // ==========================================
+
+  const totalAmount = expenses.reduce(
+    (total, expense) =>
+      total + Number(expense.amount || 0),
+    0
+  );
+
+  // ==========================================
+  // APPROVE
+  // ==========================================
+
+  const approveExpense = async (id) => {
+    try {
+      await axios.patch(
+        `${API_URL}/api/expenses/${id}/approve`,
+        {},
+        getConfig()
+      );
+
+      await fetchExpenses();
+    } catch (err) {
+      console.error(
+        "APPROVE EXPENSE ERROR:",
+        err
+      );
+
+      setError(
+        err.response?.data?.message ||
+          "Unable to approve expense."
+      );
+    }
+  };
+
+  // ==========================================
+  // REJECT
+  // ==========================================
+
+  const rejectExpense = async (id) => {
+    try {
+      await axios.patch(
+        `${API_URL}/api/expenses/${id}/reject`,
+        {},
+        getConfig()
+      );
+
+      await fetchExpenses();
+    } catch (err) {
+      console.error(
+        "REJECT EXPENSE ERROR:",
+        err
+      );
+
+      setError(
+        err.response?.data?.message ||
+          "Unable to reject expense."
+      );
+    }
   };
 
   return (
     <div className="expense-page">
 
-      {/* ======================================
+      {/* =====================================
           HEADER
       ====================================== */}
 
-      <header className="expense-header">
+      <div className="expense-header">
 
         <div>
-          <h1>Expense Entry</h1>
+          <h1>Expenses</h1>
 
           <p>
-            Create and manage office expenses
+            Manage office expenses and payments
           </p>
         </div>
 
-        <button
-          className="back-btn"
-          onClick={() =>
-            navigate("/dashboard")
-          }
-        >
-          ← Dashboard
-        </button>
+        <div className="total-card">
+          <span>Total Expenses</span>
 
-      </header>
+          <strong>
+            {formatAmount(totalAmount)}
+          </strong>
+        </div>
 
-      {/* ======================================
-          CONTENT
+      </div>
+
+      {/* =====================================
+          MESSAGE
       ====================================== */}
 
-      <main className="expense-container">
+      {message && (
+        <div className="alert success">
+          {message}
+        </div>
+      )}
 
-        {/* ====================================
-            FORM CARD
+      {error && (
+        <div className="alert error">
+          {error}
+        </div>
+      )}
+
+      {/* =====================================
+          EXPENSE FORM
+      ====================================== */}
+
+      <div className="expense-card">
+
+        <div className="card-title">
+          <div>
+            <h2>Expense Entry</h2>
+
+            <p>
+              Enter manually or upload a bill
+            </p>
+          </div>
+        </div>
+
+        {/* ===================================
+            UPLOAD
         ==================================== */}
 
-        <section className="expense-card">
+        <div className="upload-box">
 
-          <div className="card-title">
+          <div className="upload-icon">
+            📄
+          </div>
 
-            <div>
-              <h2>New Expense</h2>
+          <div className="upload-content">
 
-              <p>
-                Enter the expense details below
-              </p>
-            </div>
+            <strong>
+              Upload Bill / Receipt
+            </strong>
 
-            <div className="status-badge pending">
-              Pending
-            </div>
+            <span>
+              JPG, PNG, WEBP or PDF — Maximum 10 MB
+            </span>
+
+            {selectedFile && (
+              <div className="selected-file">
+                <span>
+                  {selectedFile.name}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={removeFile}
+                >
+                  Remove
+                </button>
+              </div>
+            )}
 
           </div>
 
-          {/* ==================================
-              ALERTS
-          ================================== */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp,.pdf"
+            onChange={handleFileChange}
+            hidden
+          />
 
-          {message && (
-            <div className="success-alert">
-              ✓ {message}
-            </div>
-          )}
-
-          {error && !duplicate && (
-            <div className="error-alert">
-              ⚠ {error}
-            </div>
-          )}
-
-          {/* ==================================
-              DUPLICATE WARNING
-          ================================== */}
-
-          {duplicate && (
-            <div className="duplicate-alert">
-
-              <div className="duplicate-title">
-                ⚠ Possible Duplicate Expense
-              </div>
-
-              <p>
-                A similar expense already exists
-                in the system.
-              </p>
-
-              {duplicate.existingExpense && (
-                <div className="duplicate-details">
-
-                  <div>
-                    <span>Date</span>
-                    <strong>
-                      {
-                        duplicate
-                          .existingExpense
-                          .date
-                      }
-                    </strong>
-                  </div>
-
-                  <div>
-                    <span>Amount</span>
-                    <strong>
-                      ₹
-                      {
-                        duplicate
-                          .existingExpense
-                          .amount
-                      }
-                    </strong>
-                  </div>
-
-                  <div>
-                    <span>Payee</span>
-                    <strong>
-                      {
-                        duplicate
-                          .existingExpense
-                          .payeeName
-                      }
-                    </strong>
-                  </div>
-
-                  <div>
-                    <span>Nature</span>
-                    <strong>
-                      {
-                        duplicate
-                          .existingExpense
-                          .natureOfExpense
-                      }
-                    </strong>
-                  </div>
-
-                </div>
-              )}
-
-              <div className="similarity">
-
-                Similarity:
-
-                <strong>
-                  {duplicate.similarity || 90}%
-                </strong>
-
-              </div>
-
-              <div className="duplicate-actions">
-
-                <button
-                  type="button"
-                  className="cancel-btn"
-                  onClick={cancelDuplicate}
-                  disabled={loading}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  className="save-anyway-btn"
-                  onClick={saveAnyway}
-                  disabled={loading}
-                >
-                  {loading
-                    ? "Saving..."
-                    : "Save Anyway"}
-                </button>
-
-              </div>
-
-            </div>
-          )}
-
-          {/* ==================================
-              FORM
-          ================================== */}
-
-          <form
-            onSubmit={handleSubmit}
-            className="expense-form"
+          <button
+            type="button"
+            className="upload-button"
+            onClick={() =>
+              fileInputRef.current?.click()
+            }
           >
+            Choose File
+          </button>
 
-            {/* DATE */}
+        </div>
 
-            <div className="form-group">
+        {/* ===================================
+            FORM
+        ==================================== */}
 
-              <label htmlFor="date">
-                Date
-                <span>*</span>
-              </label>
+        <div className="form-grid">
 
-              <input
-                id="date"
-                name="date"
-                type="date"
-                value={form.date}
-                onChange={handleChange}
-                required
-              />
+          {/* DATE */}
 
+          <div className="field">
+            <label>
+              Date <span>*</span>
+            </label>
+
+            <input
+              type="date"
+              name="date"
+              value={form.date}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* NATURE */}
+
+          <div className="field">
+            <label>
+              Nature of Expenses <span>*</span>
+            </label>
+
+            <input
+              type="text"
+              name="natureOfExpense"
+              placeholder="e.g. Transportation Charges"
+              value={form.natureOfExpense}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* AMOUNT */}
+
+          <div className="field">
+            <label>
+              Amount <span>*</span>
+            </label>
+
+            <input
+              type="number"
+              name="amount"
+              min="0"
+              step="0.01"
+              placeholder="₹ 0.00"
+              value={form.amount}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* GPAY */}
+
+          <div className="field">
+            <label>G-Pay No</label>
+
+            <input
+              type="text"
+              name="gpayNo"
+              placeholder="G-Pay / Transaction No"
+              value={form.gpayNo}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* PAYEE */}
+
+          <div className="field">
+            <label>
+              Payee Name <span>*</span>
+            </label>
+
+            <input
+              type="text"
+              name="payeeName"
+              placeholder="Enter payee name"
+              value={form.payeeName}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* BILL NO */}
+
+          <div className="field">
+            <label>Bill No / Invoice No</label>
+
+            <input
+              type="text"
+              name="billNo"
+              placeholder="Bill / Invoice number"
+              value={form.billNo}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* DESCRIPTION */}
+
+          <div className="field full">
+            <label>Description</label>
+
+            <textarea
+              name="description"
+              rows="3"
+              placeholder="Expense description"
+              value={form.description}
+              onChange={handleChange}
+            />
+          </div>
+
+          {/* REMARK */}
+
+          <div className="field full">
+            <label>Remark</label>
+
+            <textarea
+              name="remark"
+              rows="3"
+              placeholder="Additional remarks"
+              value={form.remark}
+              onChange={handleChange}
+            />
+          </div>
+
+        </div>
+
+        {/* ===================================
+            ACTIONS
+        ==================================== */}
+
+        <div className="form-actions">
+
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={resetForm}
+            disabled={loading}
+          >
+            Clear
+          </button>
+
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => saveExpense(false)}
+            disabled={loading}
+          >
+            {loading
+              ? "Saving..."
+              : "Save Expense"}
+          </button>
+
+        </div>
+
+      </div>
+
+      {/* =====================================
+          DUPLICATE WARNING
+      ====================================== */}
+
+      {showDuplicate && duplicate && (
+        <div className="duplicate-overlay">
+
+          <div className="duplicate-modal">
+
+            <div className="warning-icon">
+              ⚠
             </div>
 
-            {/* NATURE */}
+            <h2>
+              Possible Duplicate Expense
+            </h2>
 
-            <div className="form-group full-width">
+            <p>
+              A similar expense already exists.
+              Please review it before saving.
+            </p>
 
-              <label htmlFor="natureOfExpense">
-                Nature of Expenses
-                <span>*</span>
-              </label>
-
-              <input
-                id="natureOfExpense"
-                name="natureOfExpense"
-                type="text"
-                placeholder="Example: Chennai Hub Transportation Charges"
-                value={form.natureOfExpense}
-                onChange={handleChange}
-                required
-              />
-
-            </div>
-
-            {/* AMOUNT */}
-
-            <div className="form-group">
-
-              <label htmlFor="amount">
-                Amount
-                <span>*</span>
-              </label>
-
-              <div className="amount-input">
-
-                <span>₹</span>
-
-                <input
-                  id="amount"
-                  name="amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={form.amount}
-                  onChange={handleChange}
-                  required
-                />
-
-              </div>
-
-            </div>
-
-            {/* GPAY */}
-
-            <div className="form-group">
-
-              <label htmlFor="gpayNo">
-                G-Pay No
-              </label>
-
-              <input
-                id="gpayNo"
-                name="gpayNo"
-                type="text"
-                placeholder="Enter G-Pay / UPI reference"
-                value={form.gpayNo}
-                onChange={handleChange}
-              />
-
-            </div>
-
-            {/* PAYEE */}
-
-            <div className="form-group full-width">
-
-              <label htmlFor="payeeName">
-                Payee Name
-                <span>*</span>
-              </label>
-
-              <input
-                id="payeeName"
-                name="payeeName"
-                type="text"
-                placeholder="Enter payee name"
-                value={form.payeeName}
-                onChange={handleChange}
-                required
-              />
-
-            </div>
-
-            {/* DESCRIPTION */}
-
-            <div className="form-group full-width">
-
-              <label htmlFor="description">
-                Description
-              </label>
-
-              <textarea
-                id="description"
-                name="description"
-                rows="4"
-                placeholder="Add additional details..."
-                value={form.description}
-                onChange={handleChange}
-              />
-
-            </div>
-
-            {/* STATUS */}
-
-            <div className="status-section full-width">
+            <div className="duplicate-details">
 
               <div>
-                <label>
-                  Expense Status
-                </label>
-
-                <p>
-                  New expenses require approval.
-                </p>
+                <span>Date</span>
+                <strong>
+                  {formatDate(duplicate.date)}
+                </strong>
               </div>
 
-              <div className="status-options">
+              <div>
+                <span>Amount</span>
+                <strong>
+                  {formatAmount(
+                    duplicate.amount
+                  )}
+                </strong>
+              </div>
 
-                <span className="status-badge pending">
-                  Pending
-                </span>
+              <div>
+                <span>Payee</span>
+                <strong>
+                  {duplicate.payeeName || "-"}
+                </strong>
+              </div>
 
-                <span className="status-badge approved">
-                  Approved
-                </span>
-
-                <span className="status-badge rejected">
-                  Rejected
-                </span>
-
+              <div>
+                <span>Bill No</span>
+                <strong>
+                  {duplicate.billNo || "-"}
+                </strong>
               </div>
 
             </div>
 
-            {/* ACTIONS */}
-
-            <div className="form-actions full-width">
+            <div className="duplicate-actions">
 
               <button
                 type="button"
-                className="secondary-btn"
-                onClick={() =>
-                  navigate("/dashboard")
-                }
-                disabled={loading}
+                className="secondary-button"
+                onClick={() => {
+                  setShowDuplicate(false);
+                  setDuplicate(null);
+                }}
               >
                 Cancel
               </button>
 
               <button
-                type="submit"
-                className="primary-btn"
-                disabled={loading}
+                type="button"
+                className="danger-button"
+                onClick={saveAnyway}
               >
-                {loading
-                  ? "Saving..."
-                  : "Save Expense"}
+                Review / Save Anyway
               </button>
 
             </div>
 
-          </form>
+          </div>
 
-        </section>
+        </div>
+      )}
 
-      </main>
+      {/* =====================================
+          EXISTING EXPENSES
+      ====================================== */}
 
-      {/* ======================================
-          CSS
+      <div className="expense-card">
+
+        <div className="list-header">
+
+          <div>
+            <h2>Existing Expenses</h2>
+
+            <p>
+              Previously submitted expenses
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="refresh-button"
+            onClick={fetchExpenses}
+            disabled={fetching}
+          >
+            {fetching
+              ? "Loading..."
+              : "Refresh"}
+          </button>
+
+        </div>
+
+        {fetching ? (
+          <div className="empty-state">
+            Loading expenses...
+          </div>
+        ) : expenses.length === 0 ? (
+          <div className="empty-state">
+            No expenses found.
+          </div>
+        ) : (
+          <div className="expense-table-wrapper">
+
+            <table className="expense-table">
+
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Nature</th>
+                  <th>Payee</th>
+                  <th>Bill No</th>
+                  <th>G-Pay No</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+
+              <tbody>
+
+                {expenses.map((expense) => (
+
+                  <tr key={expense._id}>
+
+                    <td>
+                      {formatDate(
+                        expense.date
+                      )}
+                    </td>
+
+                    <td>
+                      <strong>
+                        {expense.natureOfExpense ||
+                          "-"}
+                      </strong>
+
+                      {expense.description && (
+                        <small>
+                          {expense.description}
+                        </small>
+                      )}
+                    </td>
+
+                    <td>
+                      {expense.payeeName || "-"}
+                    </td>
+
+                    <td>
+                      {expense.billNo || "-"}
+                    </td>
+
+                    <td>
+                      {expense.gpayNo || "-"}
+                    </td>
+
+                    <td className="amount">
+                      {formatAmount(
+                        expense.amount
+                      )}
+                    </td>
+
+                    <td>
+                      <span
+                        className={getStatusClass(
+                          expense.status
+                        )}
+                      >
+                        {expense.status ||
+                          "pending"}
+                      </span>
+                    </td>
+
+                    <td>
+
+                      {expense.status ===
+                        "pending" && (
+                        <div className="action-buttons">
+
+                          <button
+                            type="button"
+                            className="approve-button"
+                            onClick={() =>
+                              approveExpense(
+                                expense._id
+                              )
+                            }
+                          >
+                            Approve
+                          </button>
+
+                          <button
+                            type="button"
+                            className="reject-button"
+                            onClick={() =>
+                              rejectExpense(
+                                expense._id
+                              )
+                            }
+                          >
+                            Reject
+                          </button>
+
+                        </div>
+                      )}
+
+                    </td>
+
+                  </tr>
+
+                ))}
+
+              </tbody>
+
+            </table>
+
+          </div>
+        )}
+
+      </div>
+
+      {/* =====================================
+          PAGE CSS
       ====================================== */}
 
       <style>{`
+
         * {
           box-sizing: border-box;
         }
 
         .expense-page {
           min-height: 100vh;
+          padding: 28px;
           background: #f5f7fb;
-          color: #172b4d;
           font-family:
             Inter,
             Arial,
             Helvetica,
             sans-serif;
+          color: #172b4d;
         }
 
         .expense-header {
-          height: 76px;
-          padding: 0 32px;
-          background: #ffffff;
-          border-bottom: 1px solid #e4e7ec;
           display: flex;
-          align-items: center;
           justify-content: space-between;
+          align-items: center;
+          gap: 20px;
+          margin-bottom: 24px;
         }
 
         .expense-header h1 {
           margin: 0;
-          font-size: 22px;
-          font-weight: 700;
+          font-size: 28px;
+          font-weight: 800;
         }
 
         .expense-header p {
-          margin: 5px 0 0;
+          margin: 6px 0 0;
           color: #667085;
-          font-size: 13px;
+          font-size: 14px;
         }
 
-        .back-btn {
-          border: 1px solid #d0d5dd;
-          background: #ffffff;
-          color: #344054;
-          padding: 10px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 600;
+        .total-card {
+          background: white;
+          border-radius: 14px;
+          padding: 16px 22px;
+          min-width: 190px;
+          box-shadow:
+            0 5px 20px rgba(0, 0, 0, 0.06);
         }
 
-        .back-btn:hover {
-          background: #f9fafb;
+        .total-card span {
+          display: block;
+          color: #667085;
+          font-size: 12px;
         }
 
-        .expense-container {
-          max-width: 1100px;
-          margin: 0 auto;
-          padding: 32px;
+        .total-card strong {
+          display: block;
+          margin-top: 5px;
+          font-size: 22px;
+        }
+
+        .alert {
+          padding: 13px 16px;
+          border-radius: 10px;
+          margin-bottom: 18px;
+          font-size: 14px;
+        }
+
+        .alert.success {
+          background: #ecfdf3;
+          color: #027a48;
+          border: 1px solid #abefc6;
+        }
+
+        .alert.error {
+          background: #fef3f2;
+          color: #b42318;
+          border: 1px solid #fecdca;
         }
 
         .expense-card {
-          background: #ffffff;
-          border: 1px solid #e4e7ec;
-          border-radius: 16px;
-          padding: 28px;
+          background: white;
+          border-radius: 18px;
+          padding: 24px;
+          margin-bottom: 24px;
           box-shadow:
-            0 5px 20px rgba(16, 24, 40, 0.05);
+            0 6px 24px rgba(0, 0, 0, 0.06);
         }
 
         .card-title {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 25px;
+          margin-bottom: 22px;
         }
 
-        .card-title h2 {
+        .card-title h2,
+        .list-header h2 {
           margin: 0;
           font-size: 19px;
         }
 
-        .card-title p {
+        .card-title p,
+        .list-header p {
           margin: 5px 0 0;
           color: #667085;
           font-size: 13px;
         }
 
-        .expense-form {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 20px;
+        .upload-box {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 18px;
+          margin-bottom: 24px;
+          border: 1.5px dashed #b8c4d6;
+          border-radius: 14px;
+          background: #f8fafc;
         }
 
-        .form-group {
+        .upload-icon {
+          width: 46px;
+          height: 46px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          background: #e8f1fb;
+          font-size: 22px;
+        }
+
+        .upload-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .upload-content strong {
+          display: block;
+          font-size: 14px;
+        }
+
+        .upload-content > span {
+          display: block;
+          margin-top: 4px;
+          color: #667085;
+          font-size: 12px;
+        }
+
+        .selected-file {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-top: 8px;
+          font-size: 12px;
+        }
+
+        .selected-file button {
+          border: none;
+          background: transparent;
+          color: #b42318;
+          cursor: pointer;
+          font-weight: 600;
+        }
+
+        .upload-button {
+          border: none;
+          border-radius: 9px;
+          padding: 10px 15px;
+          background: #172b4d;
+          color: white;
+          cursor: pointer;
+          font-weight: 600;
+        }
+
+        .form-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+          gap: 18px;
+        }
+
+        .field {
           display: flex;
           flex-direction: column;
           gap: 7px;
         }
 
-        .full-width {
+        .field.full {
           grid-column: 1 / -1;
         }
 
-        .form-group label,
-        .status-section label {
+        .field label {
           font-size: 13px;
-          font-weight: 600;
+          font-weight: 700;
           color: #344054;
         }
 
-        .form-group label span {
+        .field label span {
           color: #d92d20;
-          margin-left: 3px;
         }
 
-        .form-group input,
-        .form-group textarea {
+        .field input,
+        .field textarea {
           width: 100%;
           border: 1px solid #d0d5dd;
           border-radius: 9px;
-          padding: 12px 13px;
-          font-size: 14px;
+          padding: 11px 13px;
           outline: none;
-          background: #ffffff;
+          background: white;
           color: #101828;
           font-family: inherit;
+          font-size: 14px;
           transition: 0.2s;
         }
 
-        .form-group textarea {
+        .field textarea {
           resize: vertical;
         }
 
-        .form-group input:focus,
-        .form-group textarea:focus {
+        .field input:focus,
+        .field textarea:focus {
           border-color: #245a96;
           box-shadow:
-            0 0 0 3px rgba(36, 90, 150, 0.1);
-        }
-
-        .amount-input {
-          display: flex;
-          align-items: center;
-          border: 1px solid #d0d5dd;
-          border-radius: 9px;
-          overflow: hidden;
-        }
-
-        .amount-input span {
-          padding-left: 13px;
-          font-weight: 700;
-          color: #475467;
-        }
-
-        .amount-input input {
-          border: none;
-          box-shadow: none;
-        }
-
-        .amount-input input:focus {
-          box-shadow: none;
-        }
-
-        .status-section {
-          border-top: 1px solid #eaecf0;
-          border-bottom: 1px solid #eaecf0;
-          padding: 20px 0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 20px;
-        }
-
-        .status-section p {
-          margin: 5px 0 0;
-          color: #667085;
-          font-size: 12px;
-        }
-
-        .status-options {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .status-badge {
-          display: inline-flex;
-          align-items: center;
-          padding: 6px 11px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .pending {
-          color: #9a6700;
-          background: #fff7d6;
-        }
-
-        .approved {
-          color: #027a48;
-          background: #ecfdf3;
-        }
-
-        .rejected {
-          color: #b42318;
-          background: #fef3f2;
+            0 0 0 3px rgba(
+              36,
+              90,
+              150,
+              0.1
+            );
         }
 
         .form-actions {
           display: flex;
           justify-content: flex-end;
           gap: 12px;
+          margin-top: 24px;
         }
 
-        .primary-btn,
-        .secondary-btn {
-          border-radius: 9px;
-          padding: 11px 20px;
-          font-size: 14px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .primary-btn {
+        .primary-button,
+        .secondary-button,
+        .danger-button,
+        .refresh-button {
           border: none;
+          border-radius: 9px;
+          padding: 11px 18px;
+          cursor: pointer;
+          font-weight: 700;
+        }
+
+        .primary-button {
           background: #245a96;
-          color: #ffffff;
+          color: white;
         }
 
-        .primary-btn:hover {
-          background: #174579;
+        .secondary-button {
+          background: #eef2f6;
+          color: #344054;
         }
 
-        .primary-btn:disabled,
-        .secondary-btn:disabled {
+        .danger-button {
+          background: #b42318;
+          color: white;
+        }
+
+        .refresh-button {
+          background: #eef2f6;
+          color: #344054;
+        }
+
+        button:disabled {
           opacity: 0.6;
           cursor: not-allowed;
         }
 
-        .secondary-btn {
-          border: 1px solid #d0d5dd;
-          background: #ffffff;
-          color: #344054;
-        }
-
-        .success-alert,
-        .error-alert,
-        .duplicate-alert {
-          border-radius: 10px;
-          padding: 14px 16px;
+        .list-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
           margin-bottom: 20px;
-          font-size: 13px;
         }
 
-        .success-alert {
+        .expense-table-wrapper {
+          width: 100%;
+          overflow-x: auto;
+        }
+
+        .expense-table {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 950px;
+        }
+
+        .expense-table th {
+          background: #f8fafc;
+          color: #667085;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          text-align: left;
+          padding: 13px;
+          border-bottom: 1px solid #eaecf0;
+        }
+
+        .expense-table td {
+          padding: 14px 13px;
+          border-bottom: 1px solid #eaecf0;
+          font-size: 13px;
+          vertical-align: middle;
+        }
+
+        .expense-table td small {
+          display: block;
+          margin-top: 4px;
+          color: #667085;
+        }
+
+        .amount {
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .status {
+          display: inline-flex;
+          padding: 5px 9px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: capitalize;
+        }
+
+        .status.pending {
+          background: #fff7ed;
+          color: #c2410c;
+        }
+
+        .status.approved {
           background: #ecfdf3;
           color: #027a48;
-          border: 1px solid #abefc6;
         }
 
-        .error-alert {
+        .status.rejected {
           background: #fef3f2;
           color: #b42318;
-          border: 1px solid #fecdca;
         }
 
-        .duplicate-alert {
-          background: #fffbeb;
-          border: 1px solid #fedf89;
-          color: #7a4d00;
+        .action-buttons {
+          display: flex;
+          gap: 6px;
         }
 
-        .duplicate-title {
-          font-size: 15px;
+        .approve-button,
+        .reject-button {
+          border: none;
+          border-radius: 7px;
+          padding: 7px 9px;
+          font-size: 11px;
           font-weight: 700;
+          cursor: pointer;
         }
 
-        .duplicate-alert p {
-          margin: 6px 0 15px;
+        .approve-button {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+
+        .reject-button {
+          background: #fef3f2;
+          color: #b42318;
+        }
+
+        .empty-state {
+          padding: 45px 20px;
+          text-align: center;
+          color: #667085;
+          font-size: 14px;
+        }
+
+        .duplicate-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          background: rgba(16, 24, 40, 0.55);
+        }
+
+        .duplicate-modal {
+          width: min(480px, 100%);
+          background: white;
+          border-radius: 18px;
+          padding: 28px;
+          box-shadow:
+            0 20px 50px rgba(0, 0, 0, 0.2);
+        }
+
+        .warning-icon {
+          width: 48px;
+          height: 48px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          background: #fff7ed;
+          color: #c2410c;
+          font-size: 24px;
+          margin-bottom: 15px;
+        }
+
+        .duplicate-modal h2 {
+          margin: 0;
+          font-size: 20px;
+        }
+
+        .duplicate-modal > p {
+          color: #667085;
           font-size: 13px;
+          line-height: 1.6;
         }
 
         .duplicate-details {
           display: grid;
           grid-template-columns:
-            repeat(4, 1fr);
-          gap: 10px;
-          background: #ffffff;
-          border-radius: 9px;
-          padding: 14px;
+            repeat(2, 1fr);
+          gap: 12px;
+          margin: 20px 0;
         }
 
         .duplicate-details div {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
+          padding: 12px;
+          background: #f8fafc;
+          border-radius: 9px;
         }
 
         .duplicate-details span {
-          font-size: 11px;
+          display: block;
           color: #667085;
+          font-size: 11px;
         }
 
         .duplicate-details strong {
+          display: block;
+          margin-top: 4px;
           font-size: 13px;
-          color: #344054;
-        }
-
-        .similarity {
-          margin-top: 12px;
-          font-size: 13px;
-        }
-
-        .similarity strong {
-          margin-left: 5px;
         }
 
         .duplicate-actions {
-          margin-top: 15px;
           display: flex;
           justify-content: flex-end;
           gap: 10px;
         }
 
-        .cancel-btn,
-        .save-anyway-btn {
-          padding: 9px 15px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 600;
-        }
+        @media (max-width: 768px) {
 
-        .cancel-btn {
-          border: 1px solid #d0d5dd;
-          background: #ffffff;
-        }
-
-        .save-anyway-btn {
-          border: none;
-          background: #245a96;
-          color: #ffffff;
-        }
-
-        @media (max-width: 700px) {
+          .expense-page {
+            padding: 16px;
+          }
 
           .expense-header {
-            padding: 0 16px;
+            align-items: stretch;
+            flex-direction: column;
           }
 
-          .expense-header h1 {
-            font-size: 18px;
+          .total-card {
+            width: 100%;
           }
 
-          .expense-container {
-            padding: 18px;
-          }
-
-          .expense-card {
-            padding: 20px;
-          }
-
-          .expense-form {
+          .form-grid {
             grid-template-columns: 1fr;
           }
 
-          .full-width {
+          .field.full {
             grid-column: auto;
           }
 
-          .card-title {
+          .upload-box {
             align-items: flex-start;
-            gap: 15px;
+            flex-wrap: wrap;
           }
 
-          .status-section {
-            flex-direction: column;
-            align-items: flex-start;
+          .upload-content {
+            width: calc(100% - 65px);
           }
 
-          .duplicate-details {
-            grid-template-columns: 1fr 1fr;
+          .upload-button {
+            width: 100%;
           }
 
           .form-actions {
             flex-direction: column-reverse;
           }
 
-          .primary-btn,
-          .secondary-btn {
+          .form-actions button {
+            width: 100%;
+          }
+
+          .duplicate-actions {
+            flex-direction: column;
+          }
+
+          .duplicate-actions button {
             width: 100%;
           }
 
         }
+
       `}</style>
+
     </div>
   );
 }
-
-export default Expense;
+```
