@@ -5,23 +5,35 @@ export default function ProtectedRoute({ allowedRoles }) {
   const token = localStorage.getItem("token");
   const userData = localStorage.getItem("user");
 
-  // Not logged in
+  // ==========================================
+  // NOT LOGGED IN
+  // ==========================================
+
   if (!token || !userData) {
     return <Navigate to="/login" replace />;
   }
+
+  // ==========================================
+  // PARSE USER DATA
+  // ==========================================
 
   let user = {};
 
   try {
     user = JSON.parse(userData);
-  } catch {
+  } catch (error) {
+    console.error("Invalid user data:", error);
+
     localStorage.removeItem("token");
     localStorage.removeItem("user");
 
     return <Navigate to="/login" replace />;
   }
 
-  // Role permission
+  // ==========================================
+  // ROLE PERMISSION
+  // ==========================================
+
   if (
     allowedRoles &&
     allowedRoles.length > 0 &&
@@ -30,6 +42,9 @@ export default function ProtectedRoute({ allowedRoles }) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  // Authorized
+  // ==========================================
+  // AUTHORIZED
+  // ==========================================
+
   return <Outlet />;
 }
