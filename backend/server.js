@@ -1,4 +1,3 @@
-```js
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -20,13 +19,11 @@ const app = express();
 
 await connectDB();
 
-
 // ==========================================
 // BASIC CONFIG
 // ==========================================
 
 const PORT = process.env.PORT || 10000;
-
 
 // ==========================================
 // ALLOWED FRONTEND ORIGINS
@@ -36,7 +33,6 @@ const allowedOrigins = [
   "https://office-management-system-lilac.vercel.app",
   "https://office-management-system-ff0yh5xl-imdasuttam05-stacks-projects.vercel.app",
 ];
-
 
 // ==========================================
 // SECURITY
@@ -48,22 +44,19 @@ app.use(
   })
 );
 
-
 // ==========================================
 // CORS
 // ==========================================
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-
-      // Render health checks /
-      // server-to-server requests
+    origin: function (origin, callback) {
+      // Allow requests without Origin
       if (!origin) {
         return callback(null, true);
       }
 
-      // Registered frontend URLs
+      // Allow registered frontend URLs
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
@@ -73,15 +66,13 @@ app.use(
         return callback(null, true);
       }
 
-      console.log(
-        "CORS blocked origin:",
-        origin
-      );
+      console.log("CORS blocked origin:", origin);
 
+      // IMPORTANT:
+      // Do not use a template literal here.
+      // This avoids the syntax error you are getting on Render.
       return callback(
-        new Error(
-          `CORS: Origin not allowed - ${origin}`
-        )
+        new Error("CORS: Origin not allowed")
       );
     },
 
@@ -103,7 +94,6 @@ app.use(
   })
 );
 
-
 // ==========================================
 // BODY PARSER
 // ==========================================
@@ -121,13 +111,11 @@ app.use(
   })
 );
 
-
 // ==========================================
 // COOKIE
 // ==========================================
 
 app.use(cookieParser());
-
 
 // ==========================================
 // LOGGER
@@ -137,7 +125,6 @@ if (process.env.NODE_ENV !== "test") {
   app.use(morgan("combined"));
 }
 
-
 // ==========================================
 // ROOT
 // ==========================================
@@ -145,18 +132,12 @@ if (process.env.NODE_ENV !== "test") {
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message:
-      "Office Management API is running",
-
+    message: "Office Management API is running",
     environment:
-      process.env.NODE_ENV ||
-      "development",
-
-    timestamp:
-      new Date().toISOString(),
+      process.env.NODE_ENV || "development",
+    timestamp: new Date().toISOString(),
   });
 });
-
 
 // ==========================================
 // HEALTH CHECK
@@ -165,18 +146,11 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
-
-    service:
-      "office-management-backend",
-
-    database:
-      "MongoDB Atlas",
-
-    timestamp:
-      new Date().toISOString(),
+    service: "office-management-backend",
+    database: "MongoDB Atlas",
+    timestamp: new Date().toISOString(),
   });
 });
-
 
 // ==========================================
 // API VERSION
@@ -185,49 +159,39 @@ app.get("/api/health", (req, res) => {
 app.get("/api", (req, res) => {
   res.status(200).json({
     success: true,
-
-    name:
-      "Office Management System API",
-
+    name: "Office Management System API",
     version: "1.0.0",
   });
 });
 
-
 // ==========================================
 // AUTHENTICATION ROUTES
 // ==========================================
-//
+
 // POST /api/auth/send-otp
 // POST /api/auth/verify-otp
-//
 
 app.use(
   "/api/auth",
   authRoutes
 );
 
-
 // ==========================================
 // EXPENSE ROUTES
 // ==========================================
-//
+
 // POST   /api/expenses
 // GET    /api/expenses
 // GET    /api/expenses/:id
 // PUT    /api/expenses/:id
 // DELETE /api/expenses/:id
-//
 // PATCH  /api/expenses/:id/approve
 // PATCH  /api/expenses/:id/reject
-// PATCH  /api/expenses/:id/status
-//
 
 app.use(
   "/api/expenses",
   expenseRoutes
 );
-
 
 // ==========================================
 // FUTURE MODULES
@@ -251,7 +215,6 @@ app.use(
 // Reports
 // app.use("/api/reports", reportRoutes);
 
-
 // ==========================================
 // 404 HANDLER
 // ==========================================
@@ -259,18 +222,11 @@ app.use(
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-
-    message:
-      "API route not found",
-
-    path:
-      req.originalUrl,
-
-    method:
-      req.method,
+    message: "API route not found",
+    path: req.originalUrl,
+    method: req.method,
   });
 });
-
 
 // ==========================================
 // GLOBAL ERROR HANDLER
@@ -278,11 +234,7 @@ app.use((req, res) => {
 
 app.use(
   (err, req, res, next) => {
-
-    console.error(
-      "Server Error:",
-      err
-    );
+    console.error("Server Error:", err);
 
     const statusCode =
       err.statusCode || 500;
@@ -291,14 +243,12 @@ app.use(
       success: false,
 
       message:
-        process.env.NODE_ENV ===
-        "production"
+        process.env.NODE_ENV === "production"
           ? "Internal server error"
           : err.message,
     });
   }
 );
-
 
 // ==========================================
 // START SERVER
@@ -308,7 +258,6 @@ app.listen(
   PORT,
   "0.0.0.0",
   () => {
-
     console.log(
       "======================================"
     );
@@ -353,24 +302,7 @@ app.listen(
     );
 
     console.log(
-      "Approve Expense:"
-    );
-
-    console.log(
-      "PATCH /api/expenses/:id/approve"
-    );
-
-    console.log(
-      "Reject Expense:"
-    );
-
-    console.log(
-      "PATCH /api/expenses/:id/reject"
-    );
-
-    console.log(
       "======================================"
     );
   }
 );
-```
