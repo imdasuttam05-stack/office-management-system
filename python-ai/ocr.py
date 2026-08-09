@@ -1,4 +1,5 @@
 import os
+
 import pytesseract
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 
@@ -9,6 +10,7 @@ def preprocess_image(image):
     No OpenCV / EasyOCR / PyTorch required.
     """
 
+    # Fix image rotation based on EXIF
     image = ImageOps.exif_transpose(image)
 
     # Convert to grayscale
@@ -25,6 +27,7 @@ def preprocess_image(image):
 
     if width < 1600:
         scale = 1600 / width
+
         new_width = int(width * scale)
         new_height = int(height * scale)
 
@@ -37,30 +40,38 @@ def preprocess_image(image):
 
 
 def extract_text(image_path):
+    """
+    Extract text from an image using Tesseract OCR.
+    """
+
     if not os.path.exists(image_path):
         raise FileNotFoundError("Image file not found")
 
     image = Image.open(image_path)
 
-    processed_image = preprocess_image(image)
+    try:
+        processed_image = preprocess_image(image)
 
-    # Tesseract configuration
-    config = "--oem 3 --psm 6"
+        # Tesseract configuration
+        config = "--oem 3 --psm 6"
 
-    text = pytesseract.image_to_string(
-        processed_image,
-        config=config
-    )
+        text = pytesseract.image_to_string(
+            processed_image,
+            config=config
+        )
 
-    text = text.strip()
+        text = text.strip()
 
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip()
-    ]
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip()
+        ]
 
-    return {
-        "text": text,
-        "lines": lines
-    }
+        return {
+            "text": text,
+            "lines": lines
+        }
+
+    finally:
+        image.close()
