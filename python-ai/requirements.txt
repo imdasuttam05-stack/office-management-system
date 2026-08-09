@@ -1,8 +1,5 @@
-fastapi
-uvicorn[standard]
-python-multipart
-easyocr
-opencv-python-headless
-numpy
-Pillow
-rapidfuzz
+Flask==3.1.1
+flask-cors==6.0.1
+pytesseract==0.3.13
+Pillow==11.3.0
+gunicorn==23.0.0
