@@ -31,12 +31,11 @@ def find_amount(text):
         )
 
         if match:
-            value = match.group(1)
-            value = value.replace(",", "")
+            value = match.group(1).replace(",", "")
 
             try:
                 return float(value)
-            except:
+            except ValueError:
                 pass
 
     return ""
@@ -127,7 +126,6 @@ def extract_expense_data(image_bytes):
     if image is None:
         raise ValueError("Invalid image")
 
-    # Improve image for OCR
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY
@@ -150,13 +148,9 @@ def extract_expense_data(image_bytes):
 
     for item in results:
         if len(item) >= 2:
-            detected_text.append(
-                item[1]
-            )
+            detected_text.append(item[1])
 
-    raw_text = "\n".join(
-        detected_text
-    )
+    raw_text = "\n".join(detected_text)
 
     text = clean_text(raw_text)
 
