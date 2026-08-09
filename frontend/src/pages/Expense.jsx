@@ -1,8 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
 
+/* =========================================================
+   API CONFIGURATION
+========================================================= */
+
 const API_URL =
   import.meta.env.VITE_API_URL ||
   "https://office-management-system-ikx8.onrender.com";
+
+const PYTHON_OCR_URL =
+  import.meta.env.VITE_PYTHON_API_URL ||
+  "http://localhost:8000";
+
+/* =========================================================
+   AUTH
+========================================================= */
 
 function getAuthHeaders() {
   const token = localStorage.getItem("token");
@@ -27,6 +39,10 @@ function getToday() {
   return `${year}-${month}-${day}`;
 }
 
+/* =========================================================
+   INITIAL FORM
+========================================================= */
+
 const initialForm = {
   date: getToday(),
   natureOfExpense: "",
@@ -37,6 +53,10 @@ const initialForm = {
   description: "",
 };
 
+/* =========================================================
+   COMPONENT
+========================================================= */
+
 export default function Expense() {
   const [form, setForm] = useState(initialForm);
 
@@ -44,16 +64,17 @@ export default function Expense() {
 
   const [loading, setLoading] = useState(false);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  /* Duplicate */
   const [duplicateExpense, setDuplicateExpense] = useState(null);
   const [showDuplicate, setShowDuplicate] = useState(false);
-
   const [savingAnyway, setSavingAnyway] = useState(false);
 
-  // Upload / Scan
+  /* Upload / Scan */
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -61,9 +82,17 @@ export default function Expense() {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
+  /* =========================================================
+     LOAD EXPENSES
+  ========================================================= */
+
   useEffect(() => {
     loadExpenses();
   }, []);
+
+  /* =========================================================
+     CLEAN PREVIEW URL
+  ========================================================= */
 
   useEffect(() => {
     return () => {
@@ -73,21 +102,29 @@ export default function Expense() {
     };
   }, [previewUrl]);
 
+  /* =========================================================
+     LOAD EXPENSES FROM NODE API
+  ========================================================= */
+
   async function loadExpenses() {
     try {
       setLoadingExpenses(true);
       setError("");
 
-      const response = await fetch(API_URL + "/api/expenses", {
-        method: "GET",
-        headers: getAuthHeaders(),
-      });
+      const response = await fetch(
+        API_URL + "/api/expenses",
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.message || "Unable to load expenses."
+          data.message ||
+            "Unable to load expenses."
         );
       }
 
@@ -96,12 +133,17 @@ export default function Expense() {
       console.error(err);
 
       setError(
-        err.message || "Unable to load expenses."
+        err.message ||
+          "Unable to load expenses."
       );
     } finally {
       setLoadingExpenses(false);
     }
   }
+
+  /* =========================================================
+     FORM CHANGE
+  ========================================================= */
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -114,6 +156,10 @@ export default function Expense() {
     setError("");
     setMessage("");
   }
+
+  /* =========================================================
+     RESET FORM
+  ========================================================= */
 
   function resetForm() {
     setForm({
@@ -129,6 +175,10 @@ export default function Expense() {
     setError("");
     setMessage("");
   }
+
+  /* =========================================================
+     CLEAR SELECTED FILE
+  ========================================================= */
 
   function clearSelectedFile() {
     if (previewUrl) {
@@ -147,15 +197,29 @@ export default function Expense() {
     }
   }
 
+  /* =========================================================
+     OPEN UPLOAD MODAL
+  ========================================================= */
+
   function openUploadModal() {
     setShowUploadModal(true);
     setError("");
     setMessage("");
   }
 
+  /* =========================================================
+     CLOSE UPLOAD MODAL
+  ========================================================= */
+
   function closeUploadModal() {
-    setShowUploadModal(false);
+    if (!ocrLoading) {
+      setShowUploadModal(false);
+    }
   }
+
+  /* =========================================================
+     FILE SELECT
+  ========================================================= */
 
   function handleFileSelect(event) {
     const file = event.target.files?.[0];
@@ -175,6 +239,8 @@ export default function Expense() {
       setError(
         "Please select JPG, PNG, WEBP or PDF file."
       );
+
+      event.target.value = "";
       return;
     }
 
@@ -182,6 +248,8 @@ export default function Expense() {
       setError(
         "File size must be less than 10 MB."
       );
+
+      event.target.value = "";
       return;
     }
 
@@ -192,33 +260,20 @@ export default function Expense() {
     setSelectedFile(file);
 
     if (file.type.startsWith("image/")) {
-      setPreviewUrl(URL.createObjectURL(file));
+      setPreviewUrl(
+        URL.createObjectURL(file)
+      );
     } else {
       setPreviewUrl("");
     }
 
     setError("");
+    setMessage("");
   }
 
-  function useUploadedBill() {
-    if (!selectedFile) {
-      setError("Please select a bill or invoice first.");
-      return;
-    }
-
-    /*
-      Currently this attaches the selected file to the
-      expense screen.
-
-      OCR/API upload can be connected here later.
-    */
-
-    setMessage(
-      "Bill selected successfully. OCR upload API can be connected next."
-    );
-
-    setShowUploadModal(false);
-  }
+  /* =========================================================
+     OPEN CAMERA
+  ========================================================= */
 
   function openCamera() {
     if (cameraInputRef.current) {
@@ -226,23 +281,200 @@ export default function Expense() {
     }
   }
 
+  /* =========================================================
+     OPEN FILE PICKER
+  ========================================================= */
+
   function openFilePicker() {
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
   }
 
-  async function saveExpense(forceSave = false) {
+  /* =========================================================
+     PYTHON OCR
+  ========================================================= */
+
+  async function useUploadedBill() {
+    if (!selectedFile) {
+      setError(
+        "Please select a bill or invoice first."
+      );
+      return;
+    }
+
+    try {
+      setOcrLoading(true);
+      setError("");
+      setMessage("");
+
+      const formData = new FormData();
+
+      formData.append(
+        "file",
+        selectedFile
+      );
+
+      const token =
+        localStorage.getItem("token");
+
+      const response = await fetch(
+        PYTHON_OCR_URL +
+          "/api/ocr/scan",
+        {
+          method: "POST",
+
+          headers: {
+            ...(token
+              ? {
+                  Authorization:
+                    "Bearer " + token,
+                }
+              : {}),
+          },
+
+          body: formData,
+        }
+      );
+
+      let data;
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          "Python OCR server returned an invalid response."
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            data.error ||
+            "OCR processing failed."
+        );
+      }
+
+      /*
+        Python API can return:
+
+        {
+          success: true,
+          data: {
+            date,
+            natureOfExpense,
+            amount,
+            gpayNo,
+            payeeName,
+            billNo,
+            description
+          }
+        }
+      */
+
+      const ocrData =
+        data.data ||
+        data.expense ||
+        data.result ||
+        data;
+
+      /* =====================================================
+         AUTO FILL FORM
+      ===================================================== */
+
+      setForm((previous) => ({
+        ...previous,
+
+        date:
+          ocrData.date ||
+          previous.date,
+
+        natureOfExpense:
+          ocrData.natureOfExpense ||
+          ocrData.nature_of_expense ||
+          ocrData.expenseNature ||
+          previous.natureOfExpense,
+
+        amount:
+          ocrData.amount !== undefined &&
+          ocrData.amount !== null
+            ? String(
+                ocrData.amount
+              ).replace(
+                /[^0-9.]/g,
+                ""
+              )
+            : previous.amount,
+
+        gpayNo:
+          ocrData.gpayNo ||
+          ocrData.gpay_no ||
+          ocrData.upiNo ||
+          ocrData.upi_no ||
+          ocrData.upiReference ||
+          previous.gpayNo,
+
+        payeeName:
+          ocrData.payeeName ||
+          ocrData.payee_name ||
+          ocrData.vendorName ||
+          ocrData.vendor_name ||
+          ocrData.partyName ||
+          previous.payeeName,
+
+        billNo:
+          ocrData.billNo ||
+          ocrData.bill_no ||
+          ocrData.invoiceNo ||
+          ocrData.invoice_no ||
+          previous.billNo,
+
+        description:
+          ocrData.description ||
+          ocrData.remark ||
+          ocrData.remarks ||
+          previous.description,
+      }));
+
+      setMessage(
+        "✓ Bill scanned successfully. Please review the extracted details before saving."
+      );
+
+      setShowUploadModal(false);
+    } catch (err) {
+      console.error(
+        "PYTHON OCR ERROR:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Unable to process bill with OCR."
+      );
+    } finally {
+      setOcrLoading(false);
+    }
+  }
+
+  /* =========================================================
+     SAVE EXPENSE
+  ========================================================= */
+
+  async function saveExpense(
+    forceSave = false
+  ) {
     try {
       setLoading(true);
       setError("");
       setMessage("");
 
       const response = await fetch(
-        API_URL + "/api/expenses",
+        API_URL +
+          "/api/expenses",
         {
           method: "POST",
           headers: getAuthHeaders(),
+
           body: JSON.stringify({
             ...form,
             forceSave,
@@ -250,14 +482,16 @@ export default function Expense() {
         }
       );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (
         response.status === 409 &&
         data.duplicate
       ) {
         setDuplicateExpense(
-          data.existingExpense || null
+          data.existingExpense ||
+            null
         );
 
         setShowDuplicate(true);
@@ -292,6 +526,10 @@ export default function Expense() {
     }
   }
 
+  /* =========================================================
+     SUBMIT
+  ========================================================= */
+
   async function handleSubmit(event) {
     event.preventDefault();
 
@@ -302,7 +540,9 @@ export default function Expense() {
       return;
     }
 
-    if (!form.natureOfExpense.trim()) {
+    if (
+      !form.natureOfExpense.trim()
+    ) {
       setError(
         "Please enter nature of expense."
       );
@@ -329,6 +569,10 @@ export default function Expense() {
     await saveExpense(false);
   }
 
+  /* =========================================================
+     SAVE DUPLICATE ANYWAY
+  ========================================================= */
+
   async function saveDuplicateAnyway() {
     try {
       setSavingAnyway(true);
@@ -339,7 +583,14 @@ export default function Expense() {
     }
   }
 
-  async function updateStatus(id, status) {
+  /* =========================================================
+     UPDATE STATUS
+  ========================================================= */
+
+  async function updateStatus(
+    id,
+    status
+  ) {
     try {
       setError("");
       setMessage("");
@@ -351,15 +602,14 @@ export default function Expense() {
         "/" +
         status;
 
-      const response = await fetch(
-        endpoint,
-        {
+      const response =
+        await fetch(endpoint, {
           method: "PATCH",
           headers: getAuthHeaders(),
-        }
-      );
+        });
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -385,6 +635,10 @@ export default function Expense() {
     }
   }
 
+  /* =========================================================
+     DELETE
+  ========================================================= */
+
   async function deleteExpense(id) {
     const confirmed =
       window.confirm(
@@ -399,17 +653,19 @@ export default function Expense() {
       setError("");
       setMessage("");
 
-      const response = await fetch(
-        API_URL +
-          "/api/expenses/" +
-          id,
-        {
-          method: "DELETE",
-          headers: getAuthHeaders(),
-        }
-      );
+      const response =
+        await fetch(
+          API_URL +
+            "/api/expenses/" +
+            id,
+          {
+            method: "DELETE",
+            headers: getAuthHeaders(),
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -433,15 +689,22 @@ export default function Expense() {
     }
   }
 
+  /* =========================================================
+     FORMAT DATE
+  ========================================================= */
+
   function formatDate(value) {
     if (!value) {
       return "-";
     }
 
-    const date = new Date(value);
+    const date =
+      new Date(value);
 
     if (
-      Number.isNaN(date.getTime())
+      Number.isNaN(
+        date.getTime()
+      )
     ) {
       return value;
     }
@@ -450,6 +713,10 @@ export default function Expense() {
       "en-IN"
     );
   }
+
+  /* =========================================================
+     FORMAT AMOUNT
+  ========================================================= */
 
   function formatAmount(value) {
     return Number(
@@ -464,57 +731,82 @@ export default function Expense() {
     );
   }
 
+  /* =========================================================
+     STATUS CLASS
+  ========================================================= */
+
   function statusClass(status) {
-    if (status === "approved") {
+    if (
+      status === "approved"
+    ) {
       return "status approved";
     }
 
-    if (status === "rejected") {
+    if (
+      status === "rejected"
+    ) {
       return "status rejected";
     }
 
     return "status pending";
   }
 
+  /* =========================================================
+     SUMMARY
+  ========================================================= */
+
   const pendingCount =
     expenses.filter(
       (item) =>
-        item.status === "pending"
+        item.status ===
+        "pending"
     ).length;
 
   const approvedCount =
     expenses.filter(
       (item) =>
-        item.status === "approved"
+        item.status ===
+        "approved"
     ).length;
 
   const rejectedCount =
     expenses.filter(
       (item) =>
-        item.status === "rejected"
+        item.status ===
+        "rejected"
     ).length;
 
   const totalAmount =
     expenses.reduce(
       (total, item) =>
         total +
-        Number(item.amount || 0),
+        Number(
+          item.amount || 0
+        ),
       0
     );
+
+  /* =========================================================
+     UI
+  ========================================================= */
 
   return (
     <div className="expense-page">
 
-      {/* ================= HEADER ================= */}
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
 
       <div className="expense-header">
 
         <div>
-          <h1>Expenses</h1>
+          <h1>
+            Expenses
+          </h1>
 
           <p>
-            Create and manage office
-            expenses
+            Create and manage
+            office expenses
           </p>
         </div>
 
@@ -523,7 +815,9 @@ export default function Expense() {
           <button
             className="upload-button"
             type="button"
-            onClick={openUploadModal}
+            onClick={
+              openUploadModal
+            }
           >
             📎 Upload / Scan Bill
           </button>
@@ -531,8 +825,12 @@ export default function Expense() {
           <button
             className="refresh-button"
             type="button"
-            onClick={loadExpenses}
-            disabled={loadingExpenses}
+            onClick={
+              loadExpenses
+            }
+            disabled={
+              loadingExpenses
+            }
           >
             {loadingExpenses
               ? "Loading..."
@@ -540,84 +838,117 @@ export default function Expense() {
           </button>
 
         </div>
-
       </div>
 
-      {/* ================= ALERT ================= */}
+      {/* =====================================================
+          ALERT
+      ===================================================== */}
 
       {message && (
         <div className="alert success">
           <span>✓</span>
-          {message}
+
+          <span>
+            {message}
+          </span>
         </div>
       )}
 
       {error && (
         <div className="alert error">
           <span>!</span>
-          {error}
+
+          <span>
+            {error}
+          </span>
         </div>
       )}
 
-      {/* ================= SUMMARY TOP ================= */}
+      {/* =====================================================
+          TOP SUMMARY
+      ===================================================== */}
 
       <div className="top-summary-grid">
 
         <div className="top-summary-card">
+
           <div className="top-summary-icon blue">
             ₹
           </div>
 
           <div>
-            <span>Total Expense</span>
+            <span>
+              Total Expense
+            </span>
+
             <strong>
-              {formatAmount(totalAmount)}
+              {formatAmount(
+                totalAmount
+              )}
             </strong>
           </div>
+
         </div>
 
         <div className="top-summary-card">
+
           <div className="top-summary-icon orange">
             ⏳
           </div>
 
           <div>
-            <span>Pending</span>
+            <span>
+              Pending
+            </span>
+
             <strong>
               {pendingCount}
             </strong>
           </div>
+
         </div>
 
         <div className="top-summary-card">
+
           <div className="top-summary-icon green">
             ✓
           </div>
 
           <div>
-            <span>Approved</span>
+            <span>
+              Approved
+            </span>
+
             <strong>
               {approvedCount}
             </strong>
           </div>
+
         </div>
 
         <div className="top-summary-card">
+
           <div className="top-summary-icon red">
             ×
           </div>
 
           <div>
-            <span>Rejected</span>
+            <span>
+              Rejected
+            </span>
+
             <strong>
               {rejectedCount}
             </strong>
           </div>
+
         </div>
 
       </div>
 
-      {/* ================= FORM + SUMMARY ================= */}
+      {/* =====================================================
+          FORM + SUMMARY
+      ===================================================== */}
 
       <div className="expense-grid">
 
@@ -628,23 +959,30 @@ export default function Expense() {
           <div className="card-title-row">
 
             <div className="card-title">
+
               <div className="card-title-icon">
                 ₹
               </div>
 
               <div>
-                <h2>New Expense</h2>
+                <h2>
+                  New Expense
+                </h2>
 
                 <p>
-                  Enter expense details
+                  Enter expense
+                  details
                 </p>
               </div>
+
             </div>
 
             <button
               type="button"
               className="small-upload-button"
-              onClick={openUploadModal}
+              onClick={
+                openUploadModal
+              }
             >
               📷 Scan / Upload
             </button>
@@ -652,10 +990,14 @@ export default function Expense() {
           </div>
 
           <form
-            onSubmit={handleSubmit}
+            onSubmit={
+              handleSubmit
+            }
           >
 
             <div className="form-grid">
+
+              {/* DATE */}
 
               <div className="field">
 
@@ -666,12 +1008,18 @@ export default function Expense() {
                 <input
                   type="date"
                   name="date"
-                  value={form.date}
-                  onChange={handleChange}
+                  value={
+                    form.date
+                  }
+                  onChange={
+                    handleChange
+                  }
                   required
                 />
 
               </div>
+
+              {/* NATURE */}
 
               <div className="field">
 
@@ -685,12 +1033,16 @@ export default function Expense() {
                   value={
                     form.natureOfExpense
                   }
-                  onChange={handleChange}
+                  onChange={
+                    handleChange
+                  }
                   placeholder="e.g. Transportation Charges"
                   required
                 />
 
               </div>
+
+              {/* AMOUNT */}
 
               <div className="field">
 
@@ -701,8 +1053,12 @@ export default function Expense() {
                 <input
                   type="number"
                   name="amount"
-                  value={form.amount}
-                  onChange={handleChange}
+                  value={
+                    form.amount
+                  }
+                  onChange={
+                    handleChange
+                  }
                   placeholder="0.00"
                   min="0"
                   step="0.01"
@@ -710,6 +1066,8 @@ export default function Expense() {
                 />
 
               </div>
+
+              {/* GPAY */}
 
               <div className="field">
 
@@ -720,12 +1078,18 @@ export default function Expense() {
                 <input
                   type="text"
                   name="gpayNo"
-                  value={form.gpayNo}
-                  onChange={handleChange}
+                  value={
+                    form.gpayNo
+                  }
+                  onChange={
+                    handleChange
+                  }
                   placeholder="UPI reference number"
                 />
 
               </div>
+
+              {/* PAYEE */}
 
               <div className="field">
 
@@ -736,13 +1100,19 @@ export default function Expense() {
                 <input
                   type="text"
                   name="payeeName"
-                  value={form.payeeName}
-                  onChange={handleChange}
+                  value={
+                    form.payeeName
+                  }
+                  onChange={
+                    handleChange
+                  }
                   placeholder="Enter payee name"
                   required
                 />
 
               </div>
+
+              {/* BILL */}
 
               <div className="field">
 
@@ -753,12 +1123,18 @@ export default function Expense() {
                 <input
                   type="text"
                   name="billNo"
-                  value={form.billNo}
-                  onChange={handleChange}
+                  value={
+                    form.billNo
+                  }
+                  onChange={
+                    handleChange
+                  }
                   placeholder="Bill / Invoice No"
                 />
 
               </div>
+
+              {/* DESCRIPTION */}
 
               <div className="field full-width">
 
@@ -768,8 +1144,12 @@ export default function Expense() {
 
                 <textarea
                   name="description"
-                  value={form.description}
-                  onChange={handleChange}
+                  value={
+                    form.description
+                  }
+                  onChange={
+                    handleChange
+                  }
                   placeholder="Enter description or remark"
                   rows="4"
                 />
@@ -778,7 +1158,7 @@ export default function Expense() {
 
             </div>
 
-            {/* FILE SELECTED */}
+            {/* SELECTED FILE */}
 
             {selectedFile && (
               <div className="selected-file-box">
@@ -790,7 +1170,9 @@ export default function Expense() {
                 <div className="file-info">
 
                   <strong>
-                    {selectedFile.name}
+                    {
+                      selectedFile.name
+                    }
                   </strong>
 
                   <span>
@@ -817,13 +1199,20 @@ export default function Expense() {
               </div>
             )}
 
+            {/* ACTION */}
+
             <div className="form-actions">
 
               <button
                 type="button"
                 className="secondary-button"
-                onClick={resetForm}
-                disabled={loading}
+                onClick={
+                  resetForm
+                }
+                disabled={
+                  loading ||
+                  ocrLoading
+                }
               >
                 Clear
               </button>
@@ -831,7 +1220,10 @@ export default function Expense() {
               <button
                 type="submit"
                 className="primary-button"
-                disabled={loading}
+                disabled={
+                  loading ||
+                  ocrLoading
+                }
               >
                 {loading
                   ? "Saving..."
@@ -844,7 +1236,9 @@ export default function Expense() {
 
         </section>
 
-        {/* SUMMARY */}
+        {/* ===================================================
+            SUMMARY
+        =================================================== */}
 
         <section className="expense-card summary-card">
 
@@ -856,7 +1250,8 @@ export default function Expense() {
               </h2>
 
               <p>
-                Current expense status
+                Current expense
+                status
               </p>
             </div>
 
@@ -921,7 +1316,9 @@ export default function Expense() {
             </span>
 
             <strong>
-              {formatAmount(totalAmount)}
+              {formatAmount(
+                totalAmount
+              )}
             </strong>
 
           </div>
@@ -930,7 +1327,9 @@ export default function Expense() {
 
       </div>
 
-      {/* ================= EXISTING EXPENSES ================= */}
+      {/* =====================================================
+          EXISTING EXPENSES
+      ===================================================== */}
 
       <section className="expense-card existing-card">
 
@@ -942,8 +1341,8 @@ export default function Expense() {
             </h2>
 
             <p>
-              All expenses stored in
-              MongoDB
+              All expenses stored
+              in MongoDB
             </p>
           </div>
 
@@ -952,7 +1351,9 @@ export default function Expense() {
             <button
               type="button"
               className="outline-upload-button"
-              onClick={openUploadModal}
+              onClick={
+                openUploadModal
+              }
             >
               + Add Bill
             </button>
@@ -967,6 +1368,7 @@ export default function Expense() {
 
         {loadingExpenses ? (
           <div className="empty-state">
+
             <div className="loading-spinner">
               ⟳
             </div>
@@ -974,8 +1376,10 @@ export default function Expense() {
             <p>
               Loading expenses...
             </p>
+
           </div>
-        ) : expenses.length === 0 ? (
+        ) : expenses.length ===
+          0 ? (
           <div className="empty-state">
 
             <div className="empty-icon">
@@ -987,16 +1391,20 @@ export default function Expense() {
             </h4>
 
             <p>
-              Start by adding your first
-              office expense.
+              Start by adding
+              your first office
+              expense.
             </p>
 
             <button
               type="button"
               className="empty-action"
-              onClick={openUploadModal}
+              onClick={
+                openUploadModal
+              }
             >
-              📎 Upload / Scan Bill
+              📎 Upload / Scan
+              Bill
             </button>
 
           </div>
@@ -1008,14 +1416,37 @@ export default function Expense() {
               <thead>
 
                 <tr>
-                  <th>Date</th>
-                  <th>Nature</th>
-                  <th>Payee</th>
-                  <th>Bill No</th>
-                  <th>G-Pay No</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Action</th>
+                  <th>
+                    Date
+                  </th>
+
+                  <th>
+                    Nature
+                  </th>
+
+                  <th>
+                    Payee
+                  </th>
+
+                  <th>
+                    Bill No
+                  </th>
+
+                  <th>
+                    G-Pay No
+                  </th>
+
+                  <th>
+                    Amount
+                  </th>
+
+                  <th>
+                    Status
+                  </th>
+
+                  <th>
+                    Action
+                  </th>
                 </tr>
 
               </thead>
@@ -1024,7 +1455,6 @@ export default function Expense() {
 
                 {expenses.map(
                   (expense) => (
-
                     <tr
                       key={
                         expense._id
@@ -1144,7 +1574,6 @@ export default function Expense() {
                       </td>
 
                     </tr>
-
                   )
                 )}
 
@@ -1157,27 +1586,29 @@ export default function Expense() {
 
       </section>
 
-      {/* ================= UPLOAD / SCAN MODAL ================= */}
+      {/* =====================================================
+          UPLOAD / SCAN MODAL
+      ===================================================== */}
 
       {showUploadModal && (
-
         <div
           className="modal-overlay"
-          onMouseDown={(event) => {
-
+          onMouseDown={(
+            event
+          ) => {
             if (
               event.target ===
-              event.currentTarget
+              event.currentTarget &&
+              !ocrLoading
             ) {
               closeUploadModal();
             }
-
           }}
         >
 
           <div className="upload-modal">
 
-            {/* MODAL HEADER */}
+            {/* HEADER */}
 
             <div className="upload-modal-header">
 
@@ -1189,11 +1620,13 @@ export default function Expense() {
 
                 <div>
                   <h2>
-                    Upload / Scan Bill
+                    Upload / Scan
+                    Bill
                   </h2>
 
                   <p>
-                    Add your bill or invoice
+                    Add your bill or
+                    invoice
                   </p>
                 </div>
 
@@ -1205,6 +1638,9 @@ export default function Expense() {
                 onClick={
                   closeUploadModal
                 }
+                disabled={
+                  ocrLoading
+                }
                 aria-label="Close"
               >
                 ×
@@ -1212,22 +1648,29 @@ export default function Expense() {
 
             </div>
 
-            {/* HIDDEN INPUTS */}
+            {/* HIDDEN FILE INPUT */}
 
             <input
-              ref={fileInputRef}
+              ref={
+                fileInputRef
+              }
               type="file"
               accept="image/*,.pdf"
               onChange={
                 handleFileSelect
               }
               style={{
-                display: "none",
+                display:
+                  "none",
               }}
             />
 
+            {/* CAMERA INPUT */}
+
             <input
-              ref={cameraInputRef}
+              ref={
+                cameraInputRef
+              }
               type="file"
               accept="image/*"
               capture="environment"
@@ -1235,14 +1678,16 @@ export default function Expense() {
                 handleFileSelect
               }
               style={{
-                display: "none",
+                display:
+                  "none",
               }}
             />
 
-            {/* BODY */}
+            {/* =================================================
+                NO FILE
+            ================================================= */}
 
             {!selectedFile ? (
-
               <div className="upload-options">
 
                 <button
@@ -1263,8 +1708,9 @@ export default function Expense() {
                     </strong>
 
                     <span>
-                      Choose image or PDF
-                      from your device
+                      Choose image or
+                      PDF from your
+                      device
                     </span>
                   </div>
 
@@ -1292,8 +1738,8 @@ export default function Expense() {
                     </strong>
 
                     <span>
-                      Use camera to capture
-                      the bill
+                      Use camera to
+                      capture the bill
                     </span>
                   </div>
 
@@ -1306,7 +1752,8 @@ export default function Expense() {
                 <div className="upload-info">
 
                   <span>
-                    ✓ JPG, PNG, WEBP or PDF
+                    ✓ JPG, PNG, WEBP
+                    or PDF
                   </span>
 
                   <span>
@@ -1314,14 +1761,16 @@ export default function Expense() {
                   </span>
 
                   <span>
-                    ✓ OCR can be connected
+                    ✓ Python OCR
                   </span>
 
                 </div>
 
               </div>
-
             ) : (
+              /* =================================================
+                 FILE PREVIEW
+              ================================================= */
 
               <div className="file-preview-section">
 
@@ -1333,7 +1782,8 @@ export default function Expense() {
                     </strong>
 
                     <span>
-                      Review before adding
+                      Review before
+                      scanning
                     </span>
                   </div>
 
@@ -1343,6 +1793,9 @@ export default function Expense() {
                     onClick={
                       openFilePicker
                     }
+                    disabled={
+                      ocrLoading
+                    }
                   >
                     Change
                   </button>
@@ -1350,18 +1803,17 @@ export default function Expense() {
                 </div>
 
                 {previewUrl ? (
-
                   <div className="image-preview">
 
                     <img
-                      src={previewUrl}
+                      src={
+                        previewUrl
+                      }
                       alt="Bill preview"
                     />
 
                   </div>
-
                 ) : (
-
                   <div className="pdf-preview">
 
                     <div className="pdf-icon">
@@ -1369,15 +1821,17 @@ export default function Expense() {
                     </div>
 
                     <strong>
-                      {selectedFile.name}
+                      {
+                        selectedFile.name
+                      }
                     </strong>
 
                     <span>
-                      PDF document selected
+                      PDF document
+                      selected
                     </span>
 
                   </div>
-
                 )}
 
                 <div className="selected-file-info">
@@ -1388,7 +1842,9 @@ export default function Expense() {
                     </span>
 
                     <strong>
-                      {selectedFile.name}
+                      {
+                        selectedFile.name
+                      }
                     </strong>
                   </div>
 
@@ -1402,18 +1858,31 @@ export default function Expense() {
                         selectedFile.size /
                         1024 /
                         1024
-                      ).toFixed(2)}{" "}
+                      ).toFixed(
+                        2
+                      )}{" "}
                       MB
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>
+                      OCR Engine
+                    </span>
+
+                    <strong>
+                      Python
                     </strong>
                   </div>
 
                 </div>
 
               </div>
-
             )}
 
-            {/* MODAL FOOTER */}
+            {/* =================================================
+                FOOTER
+            ================================================= */}
 
             <div className="upload-modal-footer">
 
@@ -1423,6 +1892,9 @@ export default function Expense() {
                 onClick={
                   closeUploadModal
                 }
+                disabled={
+                  ocrLoading
+                }
               >
                 Close
               </button>
@@ -1430,39 +1902,59 @@ export default function Expense() {
               {selectedFile && (
                 <button
                   type="button"
-                  className="primary-button"
+                  className="primary-button scan-button"
                   onClick={
                     useUploadedBill
                   }
+                  disabled={
+                    ocrLoading
+                  }
                 >
-                  ✓ Use This Bill
+                  {ocrLoading ? (
+                    <>
+                      <span className="scan-spinner">
+                        ⟳
+                      </span>
+
+                      Scanning...
+                    </>
+                  ) : (
+                    <>
+                      🔍 Scan & Fill
+                      Form
+                    </>
+                  )}
                 </button>
               )}
 
             </div>
 
           </div>
-
         </div>
-
       )}
 
-      {/* ================= DUPLICATE MODAL ================= */}
+      {/* =====================================================
+          DUPLICATE MODAL
+      ===================================================== */}
 
       {showDuplicate && (
-
         <div
           className="modal-overlay"
-          onMouseDown={(event) => {
-
+          onMouseDown={(
+            event
+          ) => {
             if (
               event.target ===
               event.currentTarget
             ) {
-              setShowDuplicate(false);
-              setDuplicateExpense(null);
-            }
+              setShowDuplicate(
+                false
+              );
 
+              setDuplicateExpense(
+                null
+              );
+            }
           }}
         >
 
@@ -1472,7 +1964,10 @@ export default function Expense() {
               type="button"
               className="duplicate-close-button"
               onClick={() => {
-                setShowDuplicate(false);
+                setShowDuplicate(
+                  false
+                );
+
                 setDuplicateExpense(
                   null
                 );
@@ -1486,16 +1981,17 @@ export default function Expense() {
             </div>
 
             <h2>
-              Possible Duplicate Found
+              Possible Duplicate
+              Found
             </h2>
 
             <p>
-              A similar expense already
-              exists in the system.
+              A similar expense
+              already exists in
+              the system.
             </p>
 
             {duplicateExpense && (
-
               <div className="duplicate-details">
 
                 <div>
@@ -1560,7 +2056,6 @@ export default function Expense() {
                 </div>
 
               </div>
-
             )}
 
             <div className="modal-actions">
@@ -1572,6 +2067,7 @@ export default function Expense() {
                   setShowDuplicate(
                     false
                   );
+
                   setDuplicateExpense(
                     null
                   );
@@ -1600,10 +2096,11 @@ export default function Expense() {
           </div>
 
         </div>
-
       )}
 
-      {/* ================= CSS ================= */}
+      {/* =====================================================
+          CSS
+      ===================================================== */}
 
       <style>{`
 
@@ -1696,7 +2193,7 @@ export default function Expense() {
           border: 1px solid #fecdca;
         }
 
-        /* TOP SUMMARY */
+        /* SUMMARY */
 
         .top-summary-grid {
           display: grid;
@@ -1932,7 +2429,7 @@ export default function Expense() {
           font-size: 20px;
         }
 
-        /* FORM ACTIONS */
+        /* ACTION */
 
         .form-actions {
           display: flex;
@@ -1962,6 +2459,10 @@ export default function Expense() {
         .primary-button {
           background: #245a96;
           color: #ffffff;
+        }
+
+        .primary-button:hover:not(:disabled) {
+          background: #1d4d82;
         }
 
         .secondary-button {
@@ -2232,7 +2733,9 @@ export default function Expense() {
           color: #245994;
         }
 
-        /* MODAL */
+        /* =====================================================
+           MODAL
+        ===================================================== */
 
         .modal-overlay {
           position: fixed;
@@ -2514,7 +3017,7 @@ export default function Expense() {
           white-space: nowrap;
         }
 
-        /* MODAL FOOTER */
+        /* FOOTER */
 
         .upload-modal-footer {
           border-top: 1px solid #eef0f4;
@@ -2522,6 +3025,28 @@ export default function Expense() {
           display: flex;
           justify-content: flex-end;
           gap: 10px;
+        }
+
+        .scan-button {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .scan-spinner {
+          display: inline-block;
+          animation: spin 1s linear infinite;
+          font-size: 18px;
+        }
+
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+
+          to {
+            transform: rotate(360deg);
+          }
         }
 
         /* DUPLICATE */
@@ -2700,6 +3225,14 @@ export default function Expense() {
           }
 
           .header-actions button {
+            width: 100%;
+          }
+
+          .upload-modal-footer {
+            flex-direction: column;
+          }
+
+          .upload-modal-footer button {
             width: 100%;
           }
 
