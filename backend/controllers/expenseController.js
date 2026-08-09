@@ -1,4 +1,3 @@
-```js
 import Expense from "../models/Expense.js";
 
 // ==========================================
@@ -553,4 +552,3 @@ export const rejectExpense = async (
     });
   }
 };
-```
