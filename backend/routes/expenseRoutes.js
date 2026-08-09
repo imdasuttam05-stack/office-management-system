@@ -1,4 +1,3 @@
-```js
 import express from "express";
 
 import {
@@ -224,4 +223,3 @@ router.patch(
 
 
 export default router;
-```
