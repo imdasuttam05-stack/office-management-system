@@ -1,4 +1,4 @@
-```dockerfile
+dockerfile
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -23,4 +23,3 @@ ENV PORT=10000
 EXPOSE 10000
 
 CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "1", "--threads", "2", "--timeout", "120", "app:app"]
-```
