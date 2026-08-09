@@ -31,72 +31,53 @@ const expenseSchema = new mongoose.Schema(
       trim: true,
     },
 
-    receiptUrl: {
+    billNo: {
       type: String,
+      trim: true,
       default: "",
     },
 
-    receiptPublicId: {
+    description: {
       type: String,
+      trim: true,
       default: "",
     },
 
-    approvalStatus: {
+    status: {
       type: String,
       enum: [
-        "PENDING",
-        "APPROVED",
-        "REJECTED",
+        "pending",
+        "approved",
+        "rejected",
       ],
-      default: "PENDING",
-    },
-
-    duplicateStatus: {
-      type: String,
-      enum: [
-        "NONE",
-        "POSSIBLE_DUPLICATE",
-        "DUPLICATE",
-      ],
-      default: "NONE",
-    },
-
-    duplicateScore: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100,
-    },
-
-    duplicateOf: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Expense",
-      default: null,
-    },
-
-    duplicateReason: {
-      type: String,
-      default: "",
-    },
-
-    source: {
-      type: String,
-      enum: [
-        "MANUAL",
-        "OCR",
-      ],
-      default: "MANUAL",
+      default: "pending",
     },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      default: null,
     },
 
-    updatedBy: {
+    approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      default: null,
+    },
+
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    rejectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    rejectedAt: {
+      type: Date,
       default: null,
     },
   },
@@ -105,28 +86,7 @@ const expenseSchema = new mongoose.Schema(
   }
 );
 
-// Useful database indexes
-expenseSchema.index({
-  date: 1,
-  amount: 1,
-  payeeName: 1,
-});
-
-expenseSchema.index({
-  gpayNo: 1,
-});
-
-expenseSchema.index({
-  approvalStatus: 1,
-});
-
-expenseSchema.index({
-  duplicateStatus: 1,
-});
-
-const Expense = mongoose.model(
+export default mongoose.model(
   "Expense",
   expenseSchema
 );
-
-export default Expense;
