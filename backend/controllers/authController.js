@@ -3,6 +3,10 @@ import Expense from "../models/Expense.js";
 import AuditLog from "../models/AuditLog.js";
 import { getClientIp } from "../utils/security.js";
 
+/* =========================================================
+   HELPERS
+========================================================= */
+
 function cleanString(value, maxLength = 2000) {
   return String(value ?? "")
     .trim()
@@ -16,49 +20,109 @@ function escapeRegex(value) {
   );
 }
 
-async function audit(req, action, entityId, metadata = {}) {
-  try {
-    await AuditLog.create({
-      actorUser: req.user?._id || null,
-      action,
-      entity: "Expense",
-      entityId,
-      metadata,
-      ip: getClientIp(req),
-      userAgent:
-        req.headers["user-agent"] || "",
-    });
-  } catch {
-    // Do not break a successful business action if audit logging fails.
-  }
+function isAdminOrManager(user) {
+  return ["Admin", "Manager"].includes(user?.role);
 }
 
 function canSeeAllExpenses(user) {
-  return (
-    user.role === "Admin" ||
-    user.role === "Manager"
-  );
+  return isAdminOrManager(user);
 }
 
 function canManageExpense(user, expense) {
-  if (
-    user.role === "Admin" ||
-    user.role === "Manager"
-  ) {
+  if (isAdminOrManager(user)) {
     return true;
   }
 
   return (
     String(expense.createdBy) ===
-    String(user._id)
+    String(user?._id)
   );
 }
+
+function validExpenseId(id) {
+  return mongoose.isValidObjectId(id);
+}
+
+function parseAmount(value) {
+  const amount = Number(value);
+
+  if (
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > 1000000000
+  ) {
+    return null;
+  }
+
+  return amount;
+}
+
+function parseDate(value) {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+/* =========================================================
+   AUDIT LOG
+========================================================= */
+
+async function audit(
+  req,
+  action,
+  entityId = null,
+  metadata = {}
+) {
+  try {
+    await AuditLog.create({
+      actorUser:
+        req.user?._id || null,
+
+      action,
+
+      entity: "Expense",
+
+      entityId,
+
+      metadata,
+
+      ip: getClientIp(req),
+
+      userAgent:
+        req.headers["user-agent"] || "",
+    });
+  } catch (error) {
+    // Audit failure must never expose internal
+    // database information to the client.
+    console.error(
+      "AUDIT LOG ERROR:",
+      error.message
+    );
+  }
+}
+
+/* =========================================================
+   CREATE EXPENSE
+========================================================= */
 
 export const createExpense = async (
   req,
   res
 ) => {
   try {
+    if (!req.user?._id) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
     const {
       date,
       natureOfExpense,
@@ -69,6 +133,12 @@ export const createExpense = async (
       description,
       forceSave,
     } = req.body || {};
+
+    const parsedDate =
+      parseDate(date);
+
+    const expenseAmount =
+      parseAmount(amount);
 
     const cleanNature =
       cleanString(
@@ -100,18 +170,11 @@ export const createExpense = async (
         2000
       );
 
-    const parsedDate =
-      new Date(date);
+    /* -------------------------
+       VALIDATION
+    ------------------------- */
 
-    const expenseAmount =
-      Number(amount);
-
-    if (
-      !date ||
-      Number.isNaN(
-        parsedDate.getTime()
-      )
-    ) {
+    if (!parsedDate) {
       return res.status(400).json({
         success: false,
         message:
@@ -127,13 +190,7 @@ export const createExpense = async (
       });
     }
 
-    if (
-      !Number.isFinite(
-        expenseAmount
-      ) ||
-      expenseAmount <= 0 ||
-      expenseAmount > 1000000000
-    ) {
+    if (expenseAmount === null) {
       return res.status(400).json({
         success: false,
         message:
@@ -149,84 +206,131 @@ export const createExpense = async (
       });
     }
 
+    /* -------------------------
+       DUPLICATE DETECTION
+    ------------------------- */
+
     const duplicate =
       await Expense.findOne({
         isDeleted: false,
+
         amount: expenseAmount,
+
         payeeName: {
           $regex:
             escapeRegex(cleanPayee),
           $options: "i",
         },
+
         natureOfExpense: {
           $regex:
             escapeRegex(cleanNature),
           $options: "i",
         },
-      }).sort({
-        createdAt: -1,
-      });
+      })
+        .sort({
+          createdAt: -1,
+        })
+        .lean();
 
     const isOverride =
       Boolean(forceSave) &&
-      (
-        req.user.role === "Admin" ||
-        req.user.role === "Manager"
-      );
+      isAdminOrManager(req.user);
 
-    if (duplicate && !isOverride) {
+    if (
+      duplicate &&
+      !isOverride
+    ) {
       let similarity = 85;
 
       if (
         cleanBillNo &&
         duplicate.billNo &&
         cleanBillNo.toLowerCase() ===
-          duplicate.billNo.toLowerCase()
+          String(
+            duplicate.billNo
+          ).toLowerCase()
       ) {
         similarity = 98;
       } else if (
         cleanGpay &&
         duplicate.gpayNo &&
         cleanGpay.toLowerCase() ===
-          duplicate.gpayNo.toLowerCase()
+          String(
+            duplicate.gpayNo
+          ).toLowerCase()
       ) {
         similarity = 97;
       }
 
+      /*
+        SECURITY:
+        Do not return the complete database document.
+        Only return safe information.
+      */
+
       return res.status(409).json({
         success: false,
+
         duplicate: true,
+
         message:
           "Possible duplicate expense found. Manager or Admin approval is required to save it anyway.",
+
         similarity,
-        existingExpense:
-          duplicate,
+
+        existingExpense: {
+          id: duplicate._id,
+          date: duplicate.date,
+          natureOfExpense:
+            duplicate.natureOfExpense,
+          amount:
+            duplicate.amount,
+          payeeName:
+            duplicate.payeeName,
+          billNo:
+            duplicate.billNo || "",
+        },
       });
     }
+
+    /* -------------------------
+       CREATE
+    ------------------------- */
 
     const expense =
       await Expense.create({
         date: parsedDate,
+
         natureOfExpense:
           cleanNature,
+
         amount:
           expenseAmount,
+
         gpayNo:
           cleanGpay,
+
         payeeName:
           cleanPayee,
+
         billNo:
           cleanBillNo,
+
         description:
           cleanDescription,
+
         createdBy:
           req.user._id,
+
         status:
           "pending",
+
         duplicateOverrideBy:
           isOverride
             ? req.user._id
             : null,
+
         duplicateOverrideAt:
           isOverride
             ? new Date()
@@ -238,7 +342,9 @@ export const createExpense = async (
       "EXPENSE_CREATED",
       expense._id,
       {
-        amount: expenseAmount,
+        amount:
+          expenseAmount,
+
         duplicateOverride:
           isOverride,
       }
@@ -246,9 +352,12 @@ export const createExpense = async (
 
     return res.status(201).json({
       success: true,
+
       duplicate: false,
+
       message:
         "Expense created successfully.",
+
       expense,
     });
   } catch (error) {
@@ -265,16 +374,30 @@ export const createExpense = async (
   }
 };
 
+/* =========================================================
+   GET ALL EXPENSES
+========================================================= */
+
 export const getExpenses = async (
   req,
   res
 ) => {
   try {
+    if (!req.user?._id) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authentication required.",
+      });
+    }
+
     const filter = {
       isDeleted: false,
     };
 
-    if (!canSeeAllExpenses(req.user)) {
+    if (
+      !canSeeAllExpenses(req.user)
+    ) {
       filter.createdBy =
         req.user._id;
     }
@@ -296,12 +419,15 @@ export const getExpenses = async (
         .sort({
           date: -1,
           createdAt: -1,
-        });
+        })
+        .lean();
 
     return res.status(200).json({
       success: true,
+
       count:
         expenses.length,
+
       expenses,
     });
   } catch (error) {
@@ -318,15 +444,20 @@ export const getExpenses = async (
   }
 };
 
+/* =========================================================
+   GET EXPENSE BY ID
+========================================================= */
+
 export const getExpenseById = async (
   req,
   res
 ) => {
   try {
+    const { id } =
+      req.params;
+
     if (
-      !mongoose.isValidObjectId(
-        req.params.id
-      )
+      !validExpenseId(id)
     ) {
       return res.status(400).json({
         success: false,
@@ -337,8 +468,7 @@ export const getExpenseById = async (
 
     const expense =
       await Expense.findOne({
-        _id:
-          req.params.id,
+        _id: id,
         isDeleted: false,
       })
         .populate(
@@ -352,7 +482,8 @@ export const getExpenseById = async (
         .populate(
           "rejectedBy",
           "name email role"
-        );
+        )
+        .lean();
 
     if (!expense) {
       return res.status(404).json({
@@ -366,7 +497,9 @@ export const getExpenseById = async (
       !canSeeAllExpenses(
         req.user
       ) &&
-      String(expense.createdBy?._id) !==
+      String(
+        expense.createdBy?._id
+      ) !==
         String(req.user._id)
     ) {
       return res.status(403).json({
@@ -394,15 +527,20 @@ export const getExpenseById = async (
   }
 };
 
+/* =========================================================
+   UPDATE EXPENSE
+========================================================= */
+
 export const updateExpense = async (
   req,
   res
 ) => {
   try {
+    const { id } =
+      req.params;
+
     if (
-      !mongoose.isValidObjectId(
-        req.params.id
-      )
+      !validExpenseId(id)
     ) {
       return res.status(400).json({
         success: false,
@@ -413,8 +551,7 @@ export const updateExpense = async (
 
     const expense =
       await Expense.findOne({
-        _id:
-          req.params.id,
+        _id: id,
         isDeleted: false,
       });
 
@@ -440,7 +577,8 @@ export const updateExpense = async (
     }
 
     if (
-      expense.status !== "pending"
+      expense.status !==
+      "pending"
     ) {
       return res.status(409).json({
         success: false,
@@ -449,76 +587,150 @@ export const updateExpense = async (
       });
     }
 
-    const allowedFields = [
-      "date",
-      "natureOfExpense",
-      "amount",
-      "gpayNo",
-      "payeeName",
-      "billNo",
-      "description",
-    ];
+    const body =
+      req.body || {};
 
-    for (const field of allowedFields) {
-      if (
-        req.body?.[field] !==
-        undefined
-      ) {
-        if (
-          field === "amount"
-        ) {
-          const value =
-            Number(
-              req.body[field]
-            );
+    /* -------------------------
+       DATE
+    ------------------------- */
 
-          if (
-            !Number.isFinite(value) ||
-            value <= 0
-          ) {
-            return res.status(400).json({
-              success: false,
-              message:
-                "Invalid amount.",
-            });
-          }
+    if (
+      body.date !== undefined
+    ) {
+      const date =
+        parseDate(
+          body.date
+        );
 
-          expense.amount =
-            value;
-        } else if (
-          field === "date"
-        ) {
-          const value =
-            new Date(
-              req.body[field]
-            );
-
-          if (
-            Number.isNaN(
-              value.getTime()
-            )
-          ) {
-            return res.status(400).json({
-              success: false,
-              message:
-                "Invalid date.",
-            });
-          }
-
-          expense.date =
-            value;
-        } else {
-          expense[field] =
-            cleanString(
-              req.body[field],
-              field ===
-                "description"
-                ? 2000
-                : 150
-            );
-        }
+      if (!date) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid date.",
+        });
       }
+
+      expense.date =
+        date;
     }
+
+    /* -------------------------
+       NATURE
+    ------------------------- */
+
+    if (
+      body.natureOfExpense !==
+      undefined
+    ) {
+      const value =
+        cleanString(
+          body.natureOfExpense,
+          150
+        );
+
+      if (!value) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Nature of expense is required.",
+        });
+      }
+
+      expense.natureOfExpense =
+        value;
+    }
+
+    /* -------------------------
+       AMOUNT
+    ------------------------- */
+
+    if (
+      body.amount !==
+      undefined
+    ) {
+      const amount =
+        parseAmount(
+          body.amount
+        );
+
+      if (amount === null) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid amount.",
+        });
+      }
+
+      expense.amount =
+        amount;
+    }
+
+    /* -------------------------
+       PAYEE
+    ------------------------- */
+
+    if (
+      body.payeeName !==
+      undefined
+    ) {
+      const value =
+        cleanString(
+          body.payeeName,
+          150
+        );
+
+      if (!value) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Payee name is required.",
+        });
+      }
+
+      expense.payeeName =
+        value;
+    }
+
+    /* -------------------------
+       OTHER FIELDS
+    ------------------------- */
+
+    if (
+      body.gpayNo !==
+      undefined
+    ) {
+      expense.gpayNo =
+        cleanString(
+          body.gpayNo,
+          120
+        );
+    }
+
+    if (
+      body.billNo !==
+      undefined
+    ) {
+      expense.billNo =
+        cleanString(
+          body.billNo,
+          120
+        );
+    }
+
+    if (
+      body.description !==
+      undefined
+    ) {
+      expense.description =
+        cleanString(
+          body.description,
+          2000
+        );
+    }
+
+    /* -------------------------
+       UPDATE AUDIT
+    ------------------------- */
 
     expense.updatedBy =
       req.user._id;
@@ -533,8 +745,10 @@ export const updateExpense = async (
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense updated successfully.",
+
       expense,
     });
   } catch (error) {
@@ -551,13 +765,19 @@ export const updateExpense = async (
   }
 };
 
+/* =========================================================
+   DELETE EXPENSE
+   ADMIN ONLY
+========================================================= */
+
 export const deleteExpense = async (
   req,
   res
 ) => {
   try {
     if (
-      req.user.role !== "Admin"
+      req.user?.role !==
+      "Admin"
     ) {
       return res.status(403).json({
         success: false,
@@ -566,10 +786,11 @@ export const deleteExpense = async (
       });
     }
 
+    const { id } =
+      req.params;
+
     if (
-      !mongoose.isValidObjectId(
-        req.params.id
-      )
+      !validExpenseId(id)
     ) {
       return res.status(400).json({
         success: false,
@@ -580,8 +801,7 @@ export const deleteExpense = async (
 
     const expense =
       await Expense.findOne({
-        _id:
-          req.params.id,
+        _id: id,
         isDeleted: false,
       });
 
@@ -593,11 +813,15 @@ export const deleteExpense = async (
       });
     }
 
-    expense.isDeleted = true;
+    expense.isDeleted =
+      true;
+
     expense.deletedBy =
       req.user._id;
+
     expense.deletedAt =
       new Date();
+
     expense.updatedBy =
       req.user._id;
 
@@ -628,14 +852,18 @@ export const deleteExpense = async (
   }
 };
 
+/* =========================================================
+   APPROVE EXPENSE
+========================================================= */
+
 export const approveExpense = async (
   req,
   res
 ) => {
   try {
     if (
-      !["Admin", "Manager"].includes(
-        req.user.role
+      !isAdminOrManager(
+        req.user
       )
     ) {
       return res.status(403).json({
@@ -645,10 +873,22 @@ export const approveExpense = async (
       });
     }
 
+    const { id } =
+      req.params;
+
+    if (
+      !validExpenseId(id)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid expense ID.",
+      });
+    }
+
     const expense =
       await Expense.findOne({
-        _id:
-          req.params.id,
+        _id: id,
         isDeleted: false,
       });
 
@@ -661,7 +901,8 @@ export const approveExpense = async (
     }
 
     if (
-      expense.status !== "pending"
+      expense.status !==
+      "pending"
     ) {
       return res.status(409).json({
         success: false,
@@ -672,16 +913,22 @@ export const approveExpense = async (
 
     expense.status =
       "approved";
+
     expense.approvedBy =
       req.user._id;
+
     expense.approvedAt =
       new Date();
+
     expense.rejectedBy =
       null;
+
     expense.rejectedAt =
       null;
+
     expense.rejectedReason =
       "";
+
     expense.updatedBy =
       req.user._id;
 
@@ -695,8 +942,10 @@ export const approveExpense = async (
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense approved successfully.",
+
       expense,
     });
   } catch (error) {
@@ -713,14 +962,18 @@ export const approveExpense = async (
   }
 };
 
+/* =========================================================
+   REJECT EXPENSE
+========================================================= */
+
 export const rejectExpense = async (
   req,
   res
 ) => {
   try {
     if (
-      !["Admin", "Manager"].includes(
-        req.user.role
+      !isAdminOrManager(
+        req.user
       )
     ) {
       return res.status(403).json({
@@ -730,10 +983,22 @@ export const rejectExpense = async (
       });
     }
 
+    const { id } =
+      req.params;
+
+    if (
+      !validExpenseId(id)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid expense ID.",
+      });
+    }
+
     const expense =
       await Expense.findOne({
-        _id:
-          req.params.id,
+        _id: id,
         isDeleted: false,
       });
 
@@ -746,7 +1011,8 @@ export const rejectExpense = async (
     }
 
     if (
-      expense.status !== "pending"
+      expense.status !==
+      "pending"
     ) {
       return res.status(409).json({
         success: false,
@@ -755,12 +1021,32 @@ export const rejectExpense = async (
       });
     }
 
+    const reason =
+      cleanString(
+        req.body?.reason,
+        1000
+      );
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Rejection reason is required.",
+      });
+    }
+
     expense.status =
       "rejected";
+
     expense.rejectedBy =
       req.user._id;
+
     expense.rejectedAt =
       new Date();
+
+    expense.rejectedReason =
+      reason;
+
     expense.updatedBy =
       req.user._id;
 
@@ -769,13 +1055,18 @@ export const rejectExpense = async (
     await audit(
       req,
       "EXPENSE_REJECTED",
-      expense._id
+      expense._id,
+      {
+        reason,
+      }
     );
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense rejected successfully.",
+
       expense,
     });
   } catch (error) {
