@@ -58,7 +58,9 @@ function parseAmount(value) {
 }
 
 function parseDate(value) {
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
 
   const date = new Date(value);
 
@@ -67,6 +69,26 @@ function parseDate(value) {
   }
 
   return date;
+}
+
+/* =========================================================
+   SAFE EXPENSE RESPONSE
+   Prevent accidental exposure of internal fields
+========================================================= */
+
+function safeExpense(expense) {
+  if (!expense) {
+    return null;
+  }
+
+  const data =
+    typeof expense.toObject === "function"
+      ? expense.toObject()
+      : { ...expense };
+
+  delete data.__v;
+
+  return data;
 }
 
 /* =========================================================
@@ -81,16 +103,28 @@ async function audit(
 ) {
   try {
     await AuditLog.create({
-      actorUser: req.user?._id || null,
+      actorUser:
+        req.user?._id || null,
+
       action,
+
       entity: "Expense",
+
       entityId,
+
       metadata,
+
       ip: getClientIp(req),
+
       userAgent:
         req.headers["user-agent"] || "",
     });
   } catch (error) {
+    /*
+      Audit failure must never expose
+      database details to the client.
+    */
+
     console.error(
       "AUDIT LOG ERROR:",
       error.message
@@ -126,33 +160,45 @@ export const createExpense = async (
       forceSave,
     } = req.body || {};
 
-    const parsedDate = parseDate(date);
-    const expenseAmount = parseAmount(amount);
+    const parsedDate =
+      parseDate(date);
 
-    const cleanNature = cleanString(
-      natureOfExpense,
-      150
-    );
+    const expenseAmount =
+      parseAmount(amount);
 
-    const cleanPayee = cleanString(
-      payeeName,
-      150
-    );
+    const cleanNature =
+      cleanString(
+        natureOfExpense,
+        150
+      );
 
-    const cleanGpay = cleanString(
-      gpayNo,
-      120
-    );
+    const cleanPayee =
+      cleanString(
+        payeeName,
+        150
+      );
 
-    const cleanBillNo = cleanString(
-      billNo,
-      120
-    );
+    const cleanGpay =
+      cleanString(
+        gpayNo,
+        120
+      );
 
-    const cleanDescription = cleanString(
-      description,
-      2000
-    );
+    const cleanBillNo =
+      cleanString(
+        billNo,
+        120
+      );
+
+    const cleanDescription =
+      cleanString(
+        description,
+        2000
+      );
+
+    /* -------------------------
+       VALIDATION
+    ------------------------- */
 
     if (!parsedDate) {
       return res.status(400).json({
@@ -186,22 +232,30 @@ export const createExpense = async (
       });
     }
 
-    /* =====================================================
+    /* -------------------------
        DUPLICATE DETECTION
-    ===================================================== */
+    ------------------------- */
 
     const duplicate =
       await Expense.findOne({
         isDeleted: false,
-        amount: expenseAmount,
+
+        amount:
+          expenseAmount,
+
         payeeName: {
           $regex:
-            escapeRegex(cleanPayee),
+            escapeRegex(
+              cleanPayee
+            ),
           $options: "i",
         },
+
         natureOfExpense: {
           $regex:
-            escapeRegex(cleanNature),
+            escapeRegex(
+              cleanNature
+            ),
           $options: "i",
         },
       })
@@ -210,9 +264,16 @@ export const createExpense = async (
         })
         .lean();
 
+    /*
+      Only Admin / Manager can bypass
+      duplicate protection.
+    */
+
     const isOverride =
       Boolean(forceSave) &&
-      isAdminOrManager(req.user);
+      isAdminOrManager(
+        req.user
+      );
 
     if (
       duplicate &&
@@ -240,53 +301,82 @@ export const createExpense = async (
         similarity = 97;
       }
 
+      /*
+        SECURITY:
+        Never return the complete MongoDB
+        document to the client.
+      */
+
       return res.status(409).json({
         success: false,
+
         duplicate: true,
+
         message:
           "Possible duplicate expense found. Manager or Admin approval is required to save it anyway.",
+
         similarity,
+
         existingExpense: {
-          id: duplicate._id,
-          date: duplicate.date,
+          id:
+            duplicate._id,
+
+          date:
+            duplicate.date,
+
           natureOfExpense:
             duplicate.natureOfExpense,
-          amount: duplicate.amount,
+
+          amount:
+            duplicate.amount,
+
           payeeName:
             duplicate.payeeName,
+
           billNo:
             duplicate.billNo || "",
         },
       });
     }
 
-    /* =====================================================
-       CREATE
-    ===================================================== */
+    /* -------------------------
+       CREATE EXPENSE
+    ------------------------- */
 
     const expense =
       await Expense.create({
-        date: parsedDate,
+        date:
+          parsedDate,
+
         natureOfExpense:
           cleanNature,
+
         amount:
           expenseAmount,
+
         gpayNo:
           cleanGpay,
+
         payeeName:
           cleanPayee,
+
         billNo:
           cleanBillNo,
+
         description:
           cleanDescription,
+
         createdBy:
           req.user._id,
+
         status:
           "pending",
+
         duplicateOverrideBy:
           isOverride
             ? req.user._id
             : null,
+
         duplicateOverrideAt:
           isOverride
             ? new Date()
@@ -300,6 +390,7 @@ export const createExpense = async (
       {
         amount:
           expenseAmount,
+
         duplicateOverride:
           isOverride,
       }
@@ -307,10 +398,14 @@ export const createExpense = async (
 
     return res.status(201).json({
       success: true,
+
       duplicate: false,
+
       message:
         "Expense created successfully.",
-      expense,
+
+      expense:
+        safeExpense(expense),
     });
   } catch (error) {
     console.error(
@@ -347,8 +442,18 @@ export const getExpenses = async (
       isDeleted: false,
     };
 
+    /*
+      Admin / Manager:
+      see all expenses.
+
+      Employee:
+      see only own expenses.
+    */
+
     if (
-      !canSeeAllExpenses(req.user)
+      !canSeeAllExpenses(
+        req.user
+      )
     ) {
       filter.createdBy =
         req.user._id;
@@ -376,8 +481,10 @@ export const getExpenses = async (
 
     return res.status(200).json({
       success: true,
+
       count:
         expenses.length,
+
       expenses,
     });
   } catch (error) {
@@ -403,9 +510,12 @@ export const getExpenseById = async (
   res
 ) => {
   try {
-    const { id } = req.params;
+    const { id } =
+      req.params;
 
-    if (!validExpenseId(id)) {
+    if (
+      !validExpenseId(id)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -416,6 +526,7 @@ export const getExpenseById = async (
     const expense =
       await Expense.findOne({
         _id: id,
+
         isDeleted: false,
       })
         .populate(
@@ -440,6 +551,11 @@ export const getExpenseById = async (
       });
     }
 
+    /*
+      Employee can only access
+      their own expense.
+    */
+
     if (
       !canSeeAllExpenses(
         req.user
@@ -447,7 +563,9 @@ export const getExpenseById = async (
       String(
         expense.createdBy?._id
       ) !==
-        String(req.user._id)
+        String(
+          req.user._id
+        )
     ) {
       return res.status(403).json({
         success: false,
@@ -458,6 +576,7 @@ export const getExpenseById = async (
 
     return res.status(200).json({
       success: true,
+
       expense,
     });
   } catch (error) {
@@ -483,9 +602,12 @@ export const updateExpense = async (
   res
 ) => {
   try {
-    const { id } = req.params;
+    const { id } =
+      req.params;
 
-    if (!validExpenseId(id)) {
+    if (
+      !validExpenseId(id)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -496,6 +618,7 @@ export const updateExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
+
         isDeleted: false,
       });
 
@@ -506,6 +629,10 @@ export const updateExpense = async (
           "Expense not found.",
       });
     }
+
+    /*
+      Authorization check.
+    */
 
     if (
       !canManageExpense(
@@ -520,6 +647,11 @@ export const updateExpense = async (
       });
     }
 
+    /*
+      Only pending expenses
+      can be edited.
+    */
+
     if (
       expense.status !==
       "pending"
@@ -531,13 +663,21 @@ export const updateExpense = async (
       });
     }
 
-    const body = req.body || {};
+    const body =
+      req.body || {};
+
+    /* -------------------------
+       DATE
+    ------------------------- */
 
     if (
-      body.date !== undefined
+      body.date !==
+      undefined
     ) {
       const date =
-        parseDate(body.date);
+        parseDate(
+          body.date
+        );
 
       if (!date) {
         return res.status(400).json({
@@ -547,8 +687,13 @@ export const updateExpense = async (
         });
       }
 
-      expense.date = date;
+      expense.date =
+        date;
     }
+
+    /* -------------------------
+       NATURE
+    ------------------------- */
 
     if (
       body.natureOfExpense !==
@@ -572,15 +717,22 @@ export const updateExpense = async (
         value;
     }
 
+    /* -------------------------
+       AMOUNT
+    ------------------------- */
+
     if (
-      body.amount !== undefined
+      body.amount !==
+      undefined
     ) {
       const amount =
         parseAmount(
           body.amount
         );
 
-      if (amount === null) {
+      if (
+        amount === null
+      ) {
         return res.status(400).json({
           success: false,
           message:
@@ -591,6 +743,10 @@ export const updateExpense = async (
       expense.amount =
         amount;
     }
+
+    /* -------------------------
+       PAYEE
+    ------------------------- */
 
     if (
       body.payeeName !==
@@ -614,8 +770,13 @@ export const updateExpense = async (
         value;
     }
 
+    /* -------------------------
+       GPAY
+    ------------------------- */
+
     if (
-      body.gpayNo !== undefined
+      body.gpayNo !==
+      undefined
     ) {
       expense.gpayNo =
         cleanString(
@@ -624,8 +785,13 @@ export const updateExpense = async (
         );
     }
 
+    /* -------------------------
+       BILL NUMBER
+    ------------------------- */
+
     if (
-      body.billNo !== undefined
+      body.billNo !==
+      undefined
     ) {
       expense.billNo =
         cleanString(
@@ -633,6 +799,10 @@ export const updateExpense = async (
           120
         );
     }
+
+    /* -------------------------
+       DESCRIPTION
+    ------------------------- */
 
     if (
       body.description !==
@@ -658,9 +828,12 @@ export const updateExpense = async (
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense updated successfully.",
-      expense,
+
+      expense:
+        safeExpense(expense),
     });
   } catch (error) {
     console.error(
@@ -697,9 +870,12 @@ export const deleteExpense = async (
       });
     }
 
-    const { id } = req.params;
+    const { id } =
+      req.params;
 
-    if (!validExpenseId(id)) {
+    if (
+      !validExpenseId(id)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -710,6 +886,7 @@ export const deleteExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
+
         isDeleted: false,
       });
 
@@ -721,11 +898,20 @@ export const deleteExpense = async (
       });
     }
 
-    expense.isDeleted = true;
+    /*
+      Soft delete.
+      Data remains in database for audit.
+    */
+
+    expense.isDeleted =
+      true;
+
     expense.deletedBy =
       req.user._id;
+
     expense.deletedAt =
       new Date();
+
     expense.updatedBy =
       req.user._id;
 
@@ -739,6 +925,7 @@ export const deleteExpense = async (
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense deleted successfully.",
     });
@@ -758,6 +945,7 @@ export const deleteExpense = async (
 
 /* =========================================================
    APPROVE EXPENSE
+   ADMIN / MANAGER ONLY
 ========================================================= */
 
 export const approveExpense = async (
@@ -777,9 +965,12 @@ export const approveExpense = async (
       });
     }
 
-    const { id } = req.params;
+    const { id } =
+      req.params;
 
-    if (!validExpenseId(id)) {
+    if (
+      !validExpenseId(id)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -790,6 +981,7 @@ export const approveExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
+
         isDeleted: false,
       });
 
@@ -821,9 +1013,14 @@ export const approveExpense = async (
     expense.approvedAt =
       new Date();
 
-    expense.rejectedBy = null;
-    expense.rejectedAt = null;
-    expense.rejectedReason = "";
+    expense.rejectedBy =
+      null;
+
+    expense.rejectedAt =
+      null;
+
+    expense.rejectedReason =
+      "";
 
     expense.updatedBy =
       req.user._id;
@@ -838,9 +1035,12 @@ export const approveExpense = async (
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense approved successfully.",
-      expense,
+
+      expense:
+        safeExpense(expense),
     });
   } catch (error) {
     console.error(
@@ -858,6 +1058,7 @@ export const approveExpense = async (
 
 /* =========================================================
    REJECT EXPENSE
+   ADMIN / MANAGER ONLY
 ========================================================= */
 
 export const rejectExpense = async (
@@ -877,9 +1078,12 @@ export const rejectExpense = async (
       });
     }
 
-    const { id } = req.params;
+    const { id } =
+      req.params;
 
-    if (!validExpenseId(id)) {
+    if (
+      !validExpenseId(id)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -890,6 +1094,7 @@ export const rejectExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
+
         isDeleted: false,
       });
 
@@ -954,9 +1159,12 @@ export const rejectExpense = async (
 
     return res.status(200).json({
       success: true,
+
       message:
         "Expense rejected successfully.",
-      expense,
+
+      expense:
+        safeExpense(expense),
     });
   } catch (error) {
     console.error(
@@ -968,68 +1176,6 @@ export const rejectExpense = async (
       success: false,
       message:
         "Unable to reject expense.",
-    });
-  }
-};
-export const getMe = async (req, res) => {
-  try {
-    if (!req.user?._id) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required.",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      user: {
-        id: req.user._id.toString(),
-        name: req.user.name || "",
-        email: req.user.email || "",
-        role: req.user.role || "Employee",
-        isVerified: Boolean(req.user.isVerified),
-        isActive: Boolean(req.user.isActive),
-      },
-    });
-  } catch (error) {
-    console.error(
-      "GET ME ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to fetch profile.",
-    });
-  }
-};
-
-export const getMe = async (req, res) => {
-  try {
-    if (!req.user?._id) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required.",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      user: {
-        id: req.user._id.toString(),
-        name: req.user.name || "",
-        email: req.user.email || "",
-        role: req.user.role || "Employee",
-        isVerified: Boolean(req.user.isVerified),
-        isActive: Boolean(req.user.isActive),
-      },
-    });
-  } catch (error) {
-    console.error("GET ME ERROR:", error.message);
-
-    return res.status(500).json({
-      success: false,
-      message: "Unable to fetch profile.",
     });
   }
 };
