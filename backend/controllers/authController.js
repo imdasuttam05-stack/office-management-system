@@ -81,25 +81,16 @@ async function audit(
 ) {
   try {
     await AuditLog.create({
-      actorUser:
-        req.user?._id || null,
-
+      actorUser: req.user?._id || null,
       action,
-
       entity: "Expense",
-
       entityId,
-
       metadata,
-
       ip: getClientIp(req),
-
       userAgent:
         req.headers["user-agent"] || "",
     });
   } catch (error) {
-    // Audit failure must never expose internal
-    // database information to the client.
     console.error(
       "AUDIT LOG ERROR:",
       error.message
@@ -119,7 +110,8 @@ export const createExpense = async (
     if (!req.user?._id) {
       return res.status(401).json({
         success: false,
-        message: "Authentication required.",
+        message:
+          "Authentication required.",
       });
     }
 
@@ -134,45 +126,33 @@ export const createExpense = async (
       forceSave,
     } = req.body || {};
 
-    const parsedDate =
-      parseDate(date);
+    const parsedDate = parseDate(date);
+    const expenseAmount = parseAmount(amount);
 
-    const expenseAmount =
-      parseAmount(amount);
+    const cleanNature = cleanString(
+      natureOfExpense,
+      150
+    );
 
-    const cleanNature =
-      cleanString(
-        natureOfExpense,
-        150
-      );
+    const cleanPayee = cleanString(
+      payeeName,
+      150
+    );
 
-    const cleanPayee =
-      cleanString(
-        payeeName,
-        150
-      );
+    const cleanGpay = cleanString(
+      gpayNo,
+      120
+    );
 
-    const cleanGpay =
-      cleanString(
-        gpayNo,
-        120
-      );
+    const cleanBillNo = cleanString(
+      billNo,
+      120
+    );
 
-    const cleanBillNo =
-      cleanString(
-        billNo,
-        120
-      );
-
-    const cleanDescription =
-      cleanString(
-        description,
-        2000
-      );
-
-    /* -------------------------
-       VALIDATION
-    ------------------------- */
+    const cleanDescription = cleanString(
+      description,
+      2000
+    );
 
     if (!parsedDate) {
       return res.status(400).json({
@@ -206,22 +186,19 @@ export const createExpense = async (
       });
     }
 
-    /* -------------------------
+    /* =====================================================
        DUPLICATE DETECTION
-    ------------------------- */
+    ===================================================== */
 
     const duplicate =
       await Expense.findOne({
         isDeleted: false,
-
         amount: expenseAmount,
-
         payeeName: {
           $regex:
             escapeRegex(cleanPayee),
           $options: "i",
         },
-
         natureOfExpense: {
           $regex:
             escapeRegex(cleanNature),
@@ -263,29 +240,18 @@ export const createExpense = async (
         similarity = 97;
       }
 
-      /*
-        SECURITY:
-        Do not return the complete database document.
-        Only return safe information.
-      */
-
       return res.status(409).json({
         success: false,
-
         duplicate: true,
-
         message:
           "Possible duplicate expense found. Manager or Admin approval is required to save it anyway.",
-
         similarity,
-
         existingExpense: {
           id: duplicate._id,
           date: duplicate.date,
           natureOfExpense:
             duplicate.natureOfExpense,
-          amount:
-            duplicate.amount,
+          amount: duplicate.amount,
           payeeName:
             duplicate.payeeName,
           billNo:
@@ -294,43 +260,33 @@ export const createExpense = async (
       });
     }
 
-    /* -------------------------
+    /* =====================================================
        CREATE
-    ------------------------- */
+    ===================================================== */
 
     const expense =
       await Expense.create({
         date: parsedDate,
-
         natureOfExpense:
           cleanNature,
-
         amount:
           expenseAmount,
-
         gpayNo:
           cleanGpay,
-
         payeeName:
           cleanPayee,
-
         billNo:
           cleanBillNo,
-
         description:
           cleanDescription,
-
         createdBy:
           req.user._id,
-
         status:
           "pending",
-
         duplicateOverrideBy:
           isOverride
             ? req.user._id
             : null,
-
         duplicateOverrideAt:
           isOverride
             ? new Date()
@@ -344,7 +300,6 @@ export const createExpense = async (
       {
         amount:
           expenseAmount,
-
         duplicateOverride:
           isOverride,
       }
@@ -352,12 +307,9 @@ export const createExpense = async (
 
     return res.status(201).json({
       success: true,
-
       duplicate: false,
-
       message:
         "Expense created successfully.",
-
       expense,
     });
   } catch (error) {
@@ -375,7 +327,7 @@ export const createExpense = async (
 };
 
 /* =========================================================
-   GET ALL EXPENSES
+   GET EXPENSES
 ========================================================= */
 
 export const getExpenses = async (
@@ -424,10 +376,8 @@ export const getExpenses = async (
 
     return res.status(200).json({
       success: true,
-
       count:
         expenses.length,
-
       expenses,
     });
   } catch (error) {
@@ -453,12 +403,9 @@ export const getExpenseById = async (
   res
 ) => {
   try {
-    const { id } =
-      req.params;
+    const { id } = req.params;
 
-    if (
-      !validExpenseId(id)
-    ) {
+    if (!validExpenseId(id)) {
       return res.status(400).json({
         success: false,
         message:
@@ -536,12 +483,9 @@ export const updateExpense = async (
   res
 ) => {
   try {
-    const { id } =
-      req.params;
+    const { id } = req.params;
 
-    if (
-      !validExpenseId(id)
-    ) {
+    if (!validExpenseId(id)) {
       return res.status(400).json({
         success: false,
         message:
@@ -587,20 +531,13 @@ export const updateExpense = async (
       });
     }
 
-    const body =
-      req.body || {};
-
-    /* -------------------------
-       DATE
-    ------------------------- */
+    const body = req.body || {};
 
     if (
       body.date !== undefined
     ) {
       const date =
-        parseDate(
-          body.date
-        );
+        parseDate(body.date);
 
       if (!date) {
         return res.status(400).json({
@@ -610,13 +547,8 @@ export const updateExpense = async (
         });
       }
 
-      expense.date =
-        date;
+      expense.date = date;
     }
-
-    /* -------------------------
-       NATURE
-    ------------------------- */
 
     if (
       body.natureOfExpense !==
@@ -640,13 +572,8 @@ export const updateExpense = async (
         value;
     }
 
-    /* -------------------------
-       AMOUNT
-    ------------------------- */
-
     if (
-      body.amount !==
-      undefined
+      body.amount !== undefined
     ) {
       const amount =
         parseAmount(
@@ -664,10 +591,6 @@ export const updateExpense = async (
       expense.amount =
         amount;
     }
-
-    /* -------------------------
-       PAYEE
-    ------------------------- */
 
     if (
       body.payeeName !==
@@ -691,13 +614,8 @@ export const updateExpense = async (
         value;
     }
 
-    /* -------------------------
-       OTHER FIELDS
-    ------------------------- */
-
     if (
-      body.gpayNo !==
-      undefined
+      body.gpayNo !== undefined
     ) {
       expense.gpayNo =
         cleanString(
@@ -707,8 +625,7 @@ export const updateExpense = async (
     }
 
     if (
-      body.billNo !==
-      undefined
+      body.billNo !== undefined
     ) {
       expense.billNo =
         cleanString(
@@ -728,10 +645,6 @@ export const updateExpense = async (
         );
     }
 
-    /* -------------------------
-       UPDATE AUDIT
-    ------------------------- */
-
     expense.updatedBy =
       req.user._id;
 
@@ -745,10 +658,8 @@ export const updateExpense = async (
 
     return res.status(200).json({
       success: true,
-
       message:
         "Expense updated successfully.",
-
       expense,
     });
   } catch (error) {
@@ -786,12 +697,9 @@ export const deleteExpense = async (
       });
     }
 
-    const { id } =
-      req.params;
+    const { id } = req.params;
 
-    if (
-      !validExpenseId(id)
-    ) {
+    if (!validExpenseId(id)) {
       return res.status(400).json({
         success: false,
         message:
@@ -813,15 +721,11 @@ export const deleteExpense = async (
       });
     }
 
-    expense.isDeleted =
-      true;
-
+    expense.isDeleted = true;
     expense.deletedBy =
       req.user._id;
-
     expense.deletedAt =
       new Date();
-
     expense.updatedBy =
       req.user._id;
 
@@ -873,12 +777,9 @@ export const approveExpense = async (
       });
     }
 
-    const { id } =
-      req.params;
+    const { id } = req.params;
 
-    if (
-      !validExpenseId(id)
-    ) {
+    if (!validExpenseId(id)) {
       return res.status(400).json({
         success: false,
         message:
@@ -920,14 +821,9 @@ export const approveExpense = async (
     expense.approvedAt =
       new Date();
 
-    expense.rejectedBy =
-      null;
-
-    expense.rejectedAt =
-      null;
-
-    expense.rejectedReason =
-      "";
+    expense.rejectedBy = null;
+    expense.rejectedAt = null;
+    expense.rejectedReason = "";
 
     expense.updatedBy =
       req.user._id;
@@ -942,10 +838,8 @@ export const approveExpense = async (
 
     return res.status(200).json({
       success: true,
-
       message:
         "Expense approved successfully.",
-
       expense,
     });
   } catch (error) {
@@ -983,12 +877,9 @@ export const rejectExpense = async (
       });
     }
 
-    const { id } =
-      req.params;
+    const { id } = req.params;
 
-    if (
-      !validExpenseId(id)
-    ) {
+    if (!validExpenseId(id)) {
       return res.status(400).json({
         success: false,
         message:
@@ -1063,10 +954,8 @@ export const rejectExpense = async (
 
     return res.status(200).json({
       success: true,
-
       message:
         "Expense rejected successfully.",
-
       expense,
     });
   } catch (error) {
