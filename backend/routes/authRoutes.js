@@ -1,4 +1,5 @@
 import express from "express";
+
 import {
   sendOtp,
   verifyOtp,
@@ -6,7 +7,9 @@ import {
   logout,
   getMe,
 } from "../controllers/authController.js";
+
 import auth from "../middleware/auth.js";
+
 import {
   sendOtpLimiter,
   verifyOtpLimiter,
