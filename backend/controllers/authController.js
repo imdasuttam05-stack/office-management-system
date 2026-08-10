@@ -73,7 +73,6 @@ function parseDate(value) {
 
 /* =========================================================
    SAFE EXPENSE RESPONSE
-   Prevent accidental exposure of internal fields
 ========================================================= */
 
 function safeExpense(expense) {
@@ -103,8 +102,7 @@ async function audit(
 ) {
   try {
     await AuditLog.create({
-      actorUser:
-        req.user?._id || null,
+      actorUser: req.user?._id || null,
 
       action,
 
@@ -120,11 +118,6 @@ async function audit(
         req.headers["user-agent"] || "",
     });
   } catch (error) {
-    /*
-      Audit failure must never expose
-      database details to the client.
-    */
-
     console.error(
       "AUDIT LOG ERROR:",
       error.message
@@ -240,8 +233,7 @@ export const createExpense = async (
       await Expense.findOne({
         isDeleted: false,
 
-        amount:
-          expenseAmount,
+        amount: expenseAmount,
 
         payeeName: {
           $regex:
@@ -301,12 +293,6 @@ export const createExpense = async (
         similarity = 97;
       }
 
-      /*
-        SECURITY:
-        Never return the complete MongoDB
-        document to the client.
-      */
-
       return res.status(409).json({
         success: false,
 
@@ -340,7 +326,7 @@ export const createExpense = async (
     }
 
     /* -------------------------
-       CREATE EXPENSE
+       CREATE
     ------------------------- */
 
     const expense =
@@ -444,10 +430,10 @@ export const getExpenses = async (
 
     /*
       Admin / Manager:
-      see all expenses.
+      See all expenses.
 
       Employee:
-      see only own expenses.
+      See only own expenses.
     */
 
     if (
@@ -526,7 +512,6 @@ export const getExpenseById = async (
     const expense =
       await Expense.findOne({
         _id: id,
-
         isDeleted: false,
       })
         .populate(
@@ -564,7 +549,7 @@ export const getExpenseById = async (
         expense.createdBy?._id
       ) !==
         String(
-          req.user._id
+          req.user?._id
         )
     ) {
       return res.status(403).json({
@@ -576,7 +561,6 @@ export const getExpenseById = async (
 
     return res.status(200).json({
       success: true,
-
       expense,
     });
   } catch (error) {
@@ -618,7 +602,6 @@ export const updateExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
-
         isDeleted: false,
       });
 
@@ -629,10 +612,6 @@ export const updateExpense = async (
           "Expense not found.",
       });
     }
-
-    /*
-      Authorization check.
-    */
 
     if (
       !canManageExpense(
@@ -886,7 +865,6 @@ export const deleteExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
-
         isDeleted: false,
       });
 
@@ -981,7 +959,6 @@ export const approveExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
-
         isDeleted: false,
       });
 
@@ -1094,7 +1071,6 @@ export const rejectExpense = async (
     const expense =
       await Expense.findOne({
         _id: id,
-
         isDeleted: false,
       });
 
