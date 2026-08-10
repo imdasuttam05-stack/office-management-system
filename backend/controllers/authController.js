@@ -971,3 +971,35 @@ export const rejectExpense = async (
     });
   }
 };
+export const getMe = async (req, res) => {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user: {
+        id: req.user._id.toString(),
+        name: req.user.name || "",
+        email: req.user.email || "",
+        role: req.user.role || "Employee",
+        isVerified: Boolean(req.user.isVerified),
+        isActive: Boolean(req.user.isActive),
+      },
+    });
+  } catch (error) {
+    console.error(
+      "GET ME ERROR:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch profile.",
+    });
+  }
+};
