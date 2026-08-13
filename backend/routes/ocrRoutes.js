@@ -1,39 +1,19 @@
 import express from "express";
-import multer from "multer";
+
+import {
+  createExpense,
+  getExpenses,
+  getExpenseById,
+  updateExpense,
+  deleteExpense,
+  approveExpense,
+  rejectExpense,
+} from "../controllers/expenseController.js";
+
 import auth from "../middleware/auth.js";
 import requireRole from "../middleware/role.js";
-import { ocrLimiter } from "../middleware/rateLimit.js";
-import { processOcr } from "../controllers/ocrController.js";
 
 const router = express.Router();
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize:
-      10 * 1024 * 1024,
-    files: 1,
-  },
-  fileFilter: (req, file, cb) => {
-    const allowed = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/bmp",
-      "image/tiff",
-    ];
-
-    if (!allowed.includes(file.mimetype)) {
-      return cb(
-        new Error(
-          "Only JPG, PNG, WEBP, BMP and TIFF images are allowed."
-        )
-      );
-    }
-
-    cb(null, true);
-  },
-});
 
 router.post(
   "/",
@@ -43,9 +23,52 @@ router.post(
     "Manager",
     "Employee"
   ),
-  ocrLimiter,
-  upload.single("file"),
-  processOcr
+  createExpense
+);
+
+router.get(
+  "/",
+  auth,
+  getExpenses
+);
+
+router.get(
+  "/:id",
+  auth,
+  getExpenseById
+);
+
+router.put(
+  "/:id",
+  auth,
+  updateExpense
+);
+
+router.delete(
+  "/:id",
+  auth,
+  requireRole("Admin"),
+  deleteExpense
+);
+
+router.patch(
+  "/:id/approve",
+  auth,
+  requireRole(
+    "Admin",
+    "Manager"
+  ),
+  approveExpense
+);
+
+router.patch(
+  "/:id/reject",
+  auth,
+  requireRole(
+    "Admin",
+    "Manager"
+  ),
+  rejectExpense
 );
 
 export default router;
