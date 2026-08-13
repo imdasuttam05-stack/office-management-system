@@ -5,11 +5,28 @@ import os
 import tempfile
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/health": {"origins": "*"}})
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_FILE_SIZE = 10 * 1024 * 1024
+OCR_API_SECRET = os.environ.get("OCR_API_SECRET", "").strip()
 
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
+
+ALLOWED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".bmp",
+    ".tiff",
+    ".tif",
+}
+
+
+def is_authorized():
+    if not OCR_API_SECRET:
+        return False
+    return request.headers.get("X-OCR-SECRET", "") == OCR_API_SECRET
 
 
 @app.route("/", methods=["GET"])
@@ -17,7 +34,7 @@ def home():
     return jsonify({
         "status": "ok",
         "service": "Office Management OCR API",
-        "ocr": "Tesseract"
+        "ocr": "Tesseract",
     })
 
 
@@ -25,16 +42,22 @@ def home():
 def health():
     return jsonify({
         "status": "healthy",
-        "ocr": "tesseract"
+        "ocr": "tesseract",
     })
 
 
 @app.route("/ocr", methods=["POST"])
 def ocr():
+    if not is_authorized():
+        return jsonify({
+            "success": False,
+            "error": "Unauthorized",
+        }), 401
+
     if "file" not in request.files:
         return jsonify({
             "success": False,
-            "error": "No file uploaded"
+            "error": "No file uploaded",
         }), 400
 
     file = request.files["file"]
@@ -42,26 +65,15 @@ def ocr():
     if not file or file.filename == "":
         return jsonify({
             "success": False,
-            "error": "No file selected"
+            "error": "No file selected",
         }), 400
 
-    allowed_extensions = {
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".bmp",
-        ".tiff",
-        ".tif"
-    }
+    extension = os.path.splitext(file.filename.lower())[1]
 
-    filename = file.filename.lower()
-    extension = os.path.splitext(filename)[1]
-
-    if extension not in allowed_extensions:
+    if extension not in ALLOWED_EXTENSIONS:
         return jsonify({
             "success": False,
-            "error": "Unsupported image format"
+            "error": "Unsupported image format",
         }), 400
 
     temp_path = None
@@ -69,24 +81,28 @@ def ocr():
     try:
         with tempfile.NamedTemporaryFile(
             delete=False,
-            suffix=extension
+            suffix=extension,
         ) as temp_file:
-
             file.save(temp_file.name)
             temp_path = temp_file.name
 
-        result = extract_text(temp_path)
+        result = extract_text(
+            temp_path,
+            lang=os.environ.get("OCR_LANG", "eng"),
+        )
 
         return jsonify({
             "success": True,
-            "text": result.get("text", ""),
-            "lines": result.get("lines", [])
+            "text": result.get("text", "")[:20000],
+            "lines": result.get("lines", [])[:500],
+            "confidence": result.get("confidence"),
+            "fields": result.get("fields", {}),
         })
 
-    except Exception as e:
+    except Exception:
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": "OCR processing failed.",
         }), 500
 
     finally:
@@ -101,14 +117,11 @@ def ocr():
 def file_too_large(error):
     return jsonify({
         "success": False,
-        "error": "File too large. Maximum size is 10 MB."
+        "error": "File too large. Maximum size is 10 MB.",
     }), 413
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    app.run(host="0.0.0.0", port=port)
+    
