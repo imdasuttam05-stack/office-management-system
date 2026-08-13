@@ -1,1157 +1,369 @@
-import mongoose from "mongoose";
-import Expense from "../models/Expense.js";
-import AuditLog from "../models/AuditLog.js";
-import { getClientIp } from "../utils/security.js";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import User from "../models/User.js";
+import Otp from "../models/Otp.js";
+import RefreshToken from "../models/RefreshToken.js";
+import { sendOtpEmail } from "../services/emailService.js";
+import {
+  clearRefreshCookie,
+  createOpaqueToken,
+  getClientIp,
+  hashOtp,
+  setRefreshCookie,
+  sha256,
+} from "../utils/security.js";
 
-/* =========================================================
-   HELPERS
-========================================================= */
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const MAX_OTP_ATTEMPTS = 5;
 
-function cleanString(value, maxLength = 2000) {
-  return String(value ?? "")
-    .trim()
-    .slice(0, maxLength);
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
-function escapeRegex(value) {
-  return String(value || "").replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function isAdminOrManager(user) {
-  return ["Admin", "Manager"].includes(user?.role);
+function getAllowedLoginEmails() {
+  return String(process.env.ALLOWED_LOGIN_EMAILS || "")
+    .split(",")
+    .map((item) => normalizeEmail(item))
+    .filter(Boolean);
 }
 
-function canSeeAllExpenses(user) {
-  return isAdminOrManager(user);
-}
-
-function canManageExpense(user, expense) {
-  if (isAdminOrManager(user)) {
-    return true;
-  }
-
+function isBootstrapAdmin(email) {
   return (
-    String(expense.createdBy) ===
-    String(user?._id)
+    normalizeEmail(process.env.BOOTSTRAP_ADMIN_EMAIL) === email &&
+    Boolean(email)
   );
 }
 
-function validExpenseId(id) {
-  return mongoose.isValidObjectId(id);
+function canCreateNewUser(email) {
+  return (
+    isBootstrapAdmin(email) ||
+    getAllowedLoginEmails().includes(email) ||
+    String(process.env.AUTO_REGISTER_EMPLOYEES || "").toLowerCase() === "true"
+  );
 }
 
-function parseAmount(value) {
-  const amount = Number(value);
-
-  if (
-    !Number.isFinite(amount) ||
-    amount <= 0 ||
-    amount > 1000000000
-  ) {
-    return null;
-  }
-
-  return amount;
+function userResponse(user) {
+  return {
+    id: String(user._id),
+    name: user.name || "User",
+    email: user.email,
+    role: user.role,
+    isVerified: Boolean(user.isVerified),
+    isActive: Boolean(user.isActive),
+    lastLogin: user.lastLogin || null,
+  };
 }
 
-function parseDate(value) {
-  if (!value) {
-    return null;
+function signAccessToken(user) {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET is not configured.");
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
+  return jwt.sign(
+    {
+      userId: String(user._id),
+      role: user.role,
+      email: user.email,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: process.env.JWT_EXPIRES_IN || "15m",
+    }
+  );
 }
 
-/* =========================================================
-   SAFE EXPENSE RESPONSE
-========================================================= */
+async function issueRefreshToken(req, res, user) {
+  const rawToken = createOpaqueToken();
+  const ttlDays = Math.max(
+    1,
+    Number(process.env.REFRESH_TOKEN_DAYS || 7)
+  );
 
-function safeExpense(expense) {
-  if (!expense) {
-    return null;
-  }
+  await RefreshToken.create({
+    tokenHash: sha256(rawToken),
+    userId: user._id,
+    expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000),
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 500),
+    ip: getClientIp(req).slice(0, 100),
+  });
 
-  const data =
-    typeof expense.toObject === "function"
-      ? expense.toObject()
-      : { ...expense };
-
-  delete data.__v;
-
-  return data;
+  setRefreshCookie(res, rawToken);
+  return rawToken;
 }
 
-/* =========================================================
-   AUDIT LOG
-========================================================= */
+async function revokeRefreshToken(rawToken) {
+  if (!rawToken) return;
 
-async function audit(
-  req,
-  action,
-  entityId = null,
-  metadata = {}
-) {
+  await RefreshToken.updateOne(
+    {
+      tokenHash: sha256(rawToken),
+      revokedAt: null,
+    },
+    {
+      $set: { revokedAt: new Date() },
+    }
+  );
+}
+
+export const sendOtp = async (req, res) => {
   try {
-    await AuditLog.create({
-      actorUser: req.user?._id || null,
+    const email = normalizeEmail(req.body?.email);
 
-      action,
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid email address.",
+      });
+    }
 
-      entity: "Expense",
+    let user = await User.findOne({ email });
 
-      entityId,
+    if (user && !user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is inactive. Please contact an administrator.",
+      });
+    }
 
-      metadata,
+    if (!user && !canCreateNewUser(email)) {
+      return res.status(403).json({
+        success: false,
+        message: "This email is not authorized to access the system.",
+      });
+    }
 
-      ip: getClientIp(req),
+    const latestOtp = await Otp.findOne({
+      email,
+      consumedAt: null,
+    }).sort({ createdAt: -1 });
 
-      userAgent:
-        req.headers["user-agent"] || "",
+    if (
+      latestOtp &&
+      Date.now() - new Date(latestOtp.createdAt).getTime() <
+        OTP_RESEND_COOLDOWN_MS
+    ) {
+      return res.status(429).json({
+        success: false,
+        message: "Please wait 60 seconds before requesting another OTP.",
+      });
+    }
+
+    if (!user) {
+      user = await User.create({
+        name: isBootstrapAdmin(email) ? "Administrator" : "User",
+        email,
+        role: isBootstrapAdmin(email) ? "Admin" : "Employee",
+        isVerified: false,
+        isActive: true,
+      });
+    }
+
+    await Otp.deleteMany({
+      email,
+      consumedAt: null,
+    });
+
+    const otp = String(crypto.randomInt(100000, 1000000));
+
+    await Otp.create({
+      email,
+      otpHash: hashOtp(otp),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+    });
+
+    await sendOtpEmail(email, otp);
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent successfully.",
     });
   } catch (error) {
-    console.error(
-      "AUDIT LOG ERROR:",
-      error.message
-    );
+    console.error("SEND OTP ERROR:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to send OTP. Please try again.",
+    });
   }
-}
+};
 
-/* =========================================================
-   CREATE EXPENSE
-========================================================= */
+export const verifyOtp = async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const otp = String(req.body?.otp || "").trim();
 
-export const createExpense = async (
-  req,
-  res
-) => {
+    if (!isValidEmail(email) || !/^\d{6}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email and 6-digit OTP.",
+      });
+    }
+
+    const record = await Otp.findOne({
+      email,
+      consumedAt: null,
+    }).sort({ createdAt: -1 });
+
+    if (!record || record.expiresAt.getTime() <= Date.now()) {
+      return res.status(401).json({
+        success: false,
+        message: "OTP has expired. Please request a new OTP.",
+      });
+    }
+
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+      return res.status(429).json({
+        success: false,
+        message: "Too many incorrect OTP attempts. Please request a new OTP.",
+      });
+    }
+
+    const isCorrect =
+      String(record.otpHash) === String(hashOtp(otp));
+
+    if (!isCorrect) {
+      record.attempts += 1;
+      await record.save();
+
+      return res.status(401).json({
+        success: false,
+        message: "Invalid OTP.",
+      });
+    }
+
+    record.consumedAt = new Date();
+    await record.save();
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.isActive) {
+      clearRefreshCookie(res);
+      return res.status(403).json({
+        success: false,
+        message: "Your account is inactive or unavailable.",
+      });
+    }
+
+    user.isVerified = true;
+    user.lastLogin = new Date();
+    await user.save();
+
+    const token = signAccessToken(user);
+    await issueRefreshToken(req, res, user);
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful.",
+      token,
+      user: userResponse(user),
+    });
+  } catch (error) {
+    console.error("VERIFY OTP ERROR:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to verify OTP. Please try again.",
+    });
+  }
+};
+
+export const refreshAccessToken = async (req, res) => {
+  try {
+    const rawToken = req.cookies?.refresh_token;
+
+    if (!rawToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token missing.",
+      });
+    }
+
+    const tokenRecord = await RefreshToken.findOne({
+      tokenHash: sha256(rawToken),
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!tokenRecord) {
+      clearRefreshCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token expired or invalid.",
+      });
+    }
+
+    const user = await User.findById(tokenRecord.userId);
+
+    if (!user || !user.isActive) {
+      await revokeRefreshToken(rawToken);
+      clearRefreshCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: "User account is unavailable.",
+      });
+    }
+
+    await revokeRefreshToken(rawToken);
+
+    const token = signAccessToken(user);
+    await issueRefreshToken(req, res, user);
+
+    return res.status(200).json({
+      success: true,
+      token,
+      user: userResponse(user),
+    });
+  } catch (error) {
+    console.error("REFRESH TOKEN ERROR:", error.message);
+
+    clearRefreshCookie(res);
+
+    return res.status(401).json({
+      success: false,
+      message: "Unable to refresh session.",
+    });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    await revokeRefreshToken(req.cookies?.refresh_token);
+  } catch (error) {
+    console.error("LOGOUT TOKEN ERROR:", error.message);
+  }
+
+  clearRefreshCookie(res);
+
+  return res.status(200).json({
+    success: true,
+    message: "Logged out successfully.",
+  });
+};
+
+export const getMe = async (req, res) => {
   try {
     if (!req.user?._id) {
       return res.status(401).json({
         success: false,
-        message:
-          "Authentication required.",
-      });
-    }
-
-    const {
-      date,
-      natureOfExpense,
-      amount,
-      gpayNo,
-      payeeName,
-      billNo,
-      description,
-      forceSave,
-    } = req.body || {};
-
-    const parsedDate =
-      parseDate(date);
-
-    const expenseAmount =
-      parseAmount(amount);
-
-    const cleanNature =
-      cleanString(
-        natureOfExpense,
-        150
-      );
-
-    const cleanPayee =
-      cleanString(
-        payeeName,
-        150
-      );
-
-    const cleanGpay =
-      cleanString(
-        gpayNo,
-        120
-      );
-
-    const cleanBillNo =
-      cleanString(
-        billNo,
-        120
-      );
-
-    const cleanDescription =
-      cleanString(
-        description,
-        2000
-      );
-
-    /* -------------------------
-       VALIDATION
-    ------------------------- */
-
-    if (!parsedDate) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "A valid expense date is required.",
-      });
-    }
-
-    if (!cleanNature) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Nature of expense is required.",
-      });
-    }
-
-    if (expenseAmount === null) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "A valid expense amount is required.",
-      });
-    }
-
-    if (!cleanPayee) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Payee name is required.",
-      });
-    }
-
-    /* -------------------------
-       DUPLICATE DETECTION
-    ------------------------- */
-
-    const duplicate =
-      await Expense.findOne({
-        isDeleted: false,
-
-        amount: expenseAmount,
-
-        payeeName: {
-          $regex:
-            escapeRegex(
-              cleanPayee
-            ),
-          $options: "i",
-        },
-
-        natureOfExpense: {
-          $regex:
-            escapeRegex(
-              cleanNature
-            ),
-          $options: "i",
-        },
-      })
-        .sort({
-          createdAt: -1,
-        })
-        .lean();
-
-    /*
-      Only Admin / Manager can bypass
-      duplicate protection.
-    */
-
-    const isOverride =
-      Boolean(forceSave) &&
-      isAdminOrManager(
-        req.user
-      );
-
-    if (
-      duplicate &&
-      !isOverride
-    ) {
-      let similarity = 85;
-
-      if (
-        cleanBillNo &&
-        duplicate.billNo &&
-        cleanBillNo.toLowerCase() ===
-          String(
-            duplicate.billNo
-          ).toLowerCase()
-      ) {
-        similarity = 98;
-      } else if (
-        cleanGpay &&
-        duplicate.gpayNo &&
-        cleanGpay.toLowerCase() ===
-          String(
-            duplicate.gpayNo
-          ).toLowerCase()
-      ) {
-        similarity = 97;
-      }
-
-      return res.status(409).json({
-        success: false,
-
-        duplicate: true,
-
-        message:
-          "Possible duplicate expense found. Manager or Admin approval is required to save it anyway.",
-
-        similarity,
-
-        existingExpense: {
-          id:
-            duplicate._id,
-
-          date:
-            duplicate.date,
-
-          natureOfExpense:
-            duplicate.natureOfExpense,
-
-          amount:
-            duplicate.amount,
-
-          payeeName:
-            duplicate.payeeName,
-
-          billNo:
-            duplicate.billNo || "",
-        },
-      });
-    }
-
-    /* -------------------------
-       CREATE
-    ------------------------- */
-
-    const expense =
-      await Expense.create({
-        date:
-          parsedDate,
-
-        natureOfExpense:
-          cleanNature,
-
-        amount:
-          expenseAmount,
-
-        gpayNo:
-          cleanGpay,
-
-        payeeName:
-          cleanPayee,
-
-        billNo:
-          cleanBillNo,
-
-        description:
-          cleanDescription,
-
-        createdBy:
-          req.user._id,
-
-        status:
-          "pending",
-
-        duplicateOverrideBy:
-          isOverride
-            ? req.user._id
-            : null,
-
-        duplicateOverrideAt:
-          isOverride
-            ? new Date()
-            : null,
-      });
-
-    await audit(
-      req,
-      "EXPENSE_CREATED",
-      expense._id,
-      {
-        amount:
-          expenseAmount,
-
-        duplicateOverride:
-          isOverride,
-      }
-    );
-
-    return res.status(201).json({
-      success: true,
-
-      duplicate: false,
-
-      message:
-        "Expense created successfully.",
-
-      expense:
-        safeExpense(expense),
-    });
-  } catch (error) {
-    console.error(
-      "CREATE EXPENSE ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to create expense.",
-    });
-  }
-};
-
-/* =========================================================
-   GET EXPENSES
-========================================================= */
-
-export const getExpenses = async (
-  req,
-  res
-) => {
-  try {
-    if (!req.user?._id) {
-      return res.status(401).json({
-        success: false,
-        message:
-          "Authentication required.",
-      });
-    }
-
-    const filter = {
-      isDeleted: false,
-    };
-
-    /*
-      Admin / Manager:
-      See all expenses.
-
-      Employee:
-      See only own expenses.
-    */
-
-    if (
-      !canSeeAllExpenses(
-        req.user
-      )
-    ) {
-      filter.createdBy =
-        req.user._id;
-    }
-
-    const expenses =
-      await Expense.find(filter)
-        .populate(
-          "createdBy",
-          "name email role"
-        )
-        .populate(
-          "approvedBy",
-          "name email role"
-        )
-        .populate(
-          "rejectedBy",
-          "name email role"
-        )
-        .sort({
-          date: -1,
-          createdAt: -1,
-        })
-        .lean();
-
-    return res.status(200).json({
-      success: true,
-
-      count:
-        expenses.length,
-
-      expenses,
-    });
-  } catch (error) {
-    console.error(
-      "GET EXPENSES ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to fetch expenses.",
-    });
-  }
-};
-
-/* =========================================================
-   GET EXPENSE BY ID
-========================================================= */
-
-export const getExpenseById = async (
-  req,
-  res
-) => {
-  try {
-    const { id } =
-      req.params;
-
-    if (
-      !validExpenseId(id)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid expense ID.",
-      });
-    }
-
-    const expense =
-      await Expense.findOne({
-        _id: id,
-        isDeleted: false,
-      })
-        .populate(
-          "createdBy",
-          "name email role"
-        )
-        .populate(
-          "approvedBy",
-          "name email role"
-        )
-        .populate(
-          "rejectedBy",
-          "name email role"
-        )
-        .lean();
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Expense not found.",
-      });
-    }
-
-    /*
-      Employee can only access
-      their own expense.
-    */
-
-    if (
-      !canSeeAllExpenses(
-        req.user
-      ) &&
-      String(
-        expense.createdBy?._id
-      ) !==
-        String(
-          req.user?._id
-        )
-    ) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "You do not have access to this expense.",
+        message: "Authentication required.",
       });
     }
 
     return res.status(200).json({
       success: true,
-      expense,
+      user: userResponse(req.user),
     });
   } catch (error) {
-    console.error(
-      "GET EXPENSE ERROR:",
-      error.message
-    );
+    console.error("GET ME ERROR:", error.message);
 
     return res.status(500).json({
       success: false,
-      message:
-        "Unable to fetch expense.",
-    });
-  }
-};
-
-/* =========================================================
-   UPDATE EXPENSE
-========================================================= */
-
-export const updateExpense = async (
-  req,
-  res
-) => {
-  try {
-    const { id } =
-      req.params;
-
-    if (
-      !validExpenseId(id)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid expense ID.",
-      });
-    }
-
-    const expense =
-      await Expense.findOne({
-        _id: id,
-        isDeleted: false,
-      });
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Expense not found.",
-      });
-    }
-
-    if (
-      !canManageExpense(
-        req.user,
-        expense
-      )
-    ) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "You do not have permission to edit this expense.",
-      });
-    }
-
-    /*
-      Only pending expenses
-      can be edited.
-    */
-
-    if (
-      expense.status !==
-      "pending"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "Approved or rejected expenses cannot be edited.",
-      });
-    }
-
-    const body =
-      req.body || {};
-
-    /* -------------------------
-       DATE
-    ------------------------- */
-
-    if (
-      body.date !==
-      undefined
-    ) {
-      const date =
-        parseDate(
-          body.date
-        );
-
-      if (!date) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid date.",
-        });
-      }
-
-      expense.date =
-        date;
-    }
-
-    /* -------------------------
-       NATURE
-    ------------------------- */
-
-    if (
-      body.natureOfExpense !==
-      undefined
-    ) {
-      const value =
-        cleanString(
-          body.natureOfExpense,
-          150
-        );
-
-      if (!value) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Nature of expense is required.",
-        });
-      }
-
-      expense.natureOfExpense =
-        value;
-    }
-
-    /* -------------------------
-       AMOUNT
-    ------------------------- */
-
-    if (
-      body.amount !==
-      undefined
-    ) {
-      const amount =
-        parseAmount(
-          body.amount
-        );
-
-      if (
-        amount === null
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid amount.",
-        });
-      }
-
-      expense.amount =
-        amount;
-    }
-
-    /* -------------------------
-       PAYEE
-    ------------------------- */
-
-    if (
-      body.payeeName !==
-      undefined
-    ) {
-      const value =
-        cleanString(
-          body.payeeName,
-          150
-        );
-
-      if (!value) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Payee name is required.",
-        });
-      }
-
-      expense.payeeName =
-        value;
-    }
-
-    /* -------------------------
-       GPAY
-    ------------------------- */
-
-    if (
-      body.gpayNo !==
-      undefined
-    ) {
-      expense.gpayNo =
-        cleanString(
-          body.gpayNo,
-          120
-        );
-    }
-
-    /* -------------------------
-       BILL NUMBER
-    ------------------------- */
-
-    if (
-      body.billNo !==
-      undefined
-    ) {
-      expense.billNo =
-        cleanString(
-          body.billNo,
-          120
-        );
-    }
-
-    /* -------------------------
-       DESCRIPTION
-    ------------------------- */
-
-    if (
-      body.description !==
-      undefined
-    ) {
-      expense.description =
-        cleanString(
-          body.description,
-          2000
-        );
-    }
-
-    expense.updatedBy =
-      req.user._id;
-
-    await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_UPDATED",
-      expense._id
-    );
-
-    return res.status(200).json({
-      success: true,
-
-      message:
-        "Expense updated successfully.",
-
-      expense:
-        safeExpense(expense),
-    });
-  } catch (error) {
-    console.error(
-      "UPDATE EXPENSE ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to update expense.",
-    });
-  }
-};
-
-/* =========================================================
-   DELETE EXPENSE
-   ADMIN ONLY
-========================================================= */
-
-export const deleteExpense = async (
-  req,
-  res
-) => {
-  try {
-    if (
-      req.user?.role !==
-      "Admin"
-    ) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Only Admin can delete expenses.",
-      });
-    }
-
-    const { id } =
-      req.params;
-
-    if (
-      !validExpenseId(id)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid expense ID.",
-      });
-    }
-
-    const expense =
-      await Expense.findOne({
-        _id: id,
-        isDeleted: false,
-      });
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Expense not found.",
-      });
-    }
-
-    /*
-      Soft delete.
-      Data remains in database for audit.
-    */
-
-    expense.isDeleted =
-      true;
-
-    expense.deletedBy =
-      req.user._id;
-
-    expense.deletedAt =
-      new Date();
-
-    expense.updatedBy =
-      req.user._id;
-
-    await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_DELETED",
-      expense._id
-    );
-
-    return res.status(200).json({
-      success: true,
-
-      message:
-        "Expense deleted successfully.",
-    });
-  } catch (error) {
-    console.error(
-      "DELETE EXPENSE ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to delete expense.",
-    });
-  }
-};
-
-/* =========================================================
-   APPROVE EXPENSE
-   ADMIN / MANAGER ONLY
-========================================================= */
-
-export const approveExpense = async (
-  req,
-  res
-) => {
-  try {
-    if (
-      !isAdminOrManager(
-        req.user
-      )
-    ) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Only Manager or Admin can approve expenses.",
-      });
-    }
-
-    const { id } =
-      req.params;
-
-    if (
-      !validExpenseId(id)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid expense ID.",
-      });
-    }
-
-    const expense =
-      await Expense.findOne({
-        _id: id,
-        isDeleted: false,
-      });
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Expense not found.",
-      });
-    }
-
-    if (
-      expense.status !==
-      "pending"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "Only pending expenses can be approved.",
-      });
-    }
-
-    expense.status =
-      "approved";
-
-    expense.approvedBy =
-      req.user._id;
-
-    expense.approvedAt =
-      new Date();
-
-    expense.rejectedBy =
-      null;
-
-    expense.rejectedAt =
-      null;
-
-    expense.rejectedReason =
-      "";
-
-    expense.updatedBy =
-      req.user._id;
-
-    await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_APPROVED",
-      expense._id
-    );
-
-    return res.status(200).json({
-      success: true,
-
-      message:
-        "Expense approved successfully.",
-
-      expense:
-        safeExpense(expense),
-    });
-  } catch (error) {
-    console.error(
-      "APPROVE EXPENSE ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to approve expense.",
-    });
-  }
-};
-
-/* =========================================================
-   REJECT EXPENSE
-   ADMIN / MANAGER ONLY
-========================================================= */
-
-export const rejectExpense = async (
-  req,
-  res
-) => {
-  try {
-    if (
-      !isAdminOrManager(
-        req.user
-      )
-    ) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Only Manager or Admin can reject expenses.",
-      });
-    }
-
-    const { id } =
-      req.params;
-
-    if (
-      !validExpenseId(id)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid expense ID.",
-      });
-    }
-
-    const expense =
-      await Expense.findOne({
-        _id: id,
-        isDeleted: false,
-      });
-
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        message:
-          "Expense not found.",
-      });
-    }
-
-    if (
-      expense.status !==
-      "pending"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message:
-          "Only pending expenses can be rejected.",
-      });
-    }
-
-    const reason =
-      cleanString(
-        req.body?.reason,
-        1000
-      );
-
-    if (!reason) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Rejection reason is required.",
-      });
-    }
-
-    expense.status =
-      "rejected";
-
-    expense.rejectedBy =
-      req.user._id;
-
-    expense.rejectedAt =
-      new Date();
-
-    expense.rejectedReason =
-      reason;
-
-    expense.updatedBy =
-      req.user._id;
-
-    await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_REJECTED",
-      expense._id,
-      {
-        reason,
-      }
-    );
-
-    return res.status(200).json({
-      success: true,
-
-      message:
-        "Expense rejected successfully.",
-
-      expense:
-        safeExpense(expense),
-    });
-  } catch (error) {
-    console.error(
-      "REJECT EXPENSE ERROR:",
-      error.message
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Unable to reject expense.",
+      message: "Unable to load user profile.",
     });
   }
 };
