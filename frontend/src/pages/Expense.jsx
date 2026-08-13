@@ -8,17 +8,6 @@ const API_URL =
   import.meta.env.VITE_API_URL ||
   "https://office-management-system-ikx8.onrender.com";
 
-/*
-  IMPORTANT:
-  এখানে আপনার Python OCR Render service-এর URL দিন।
-
-  Example:
-  https://office-management-python.onrender.com
-*/
-
-const PYTHON_OCR_URL =
-  import.meta.env.VITE_PYTHON_API_URL ||
-  "https://YOUR-PYTHON-OCR-SERVICE.onrender.com";
 
 /* =========================================================
    AUTH
@@ -315,26 +304,19 @@ export default function Expense() {
 
   async function useUploadedBill() {
     if (!selectedFile) {
-      setError(
-        "Please select a bill or invoice first."
-      );
+      setError("Please select a bill or invoice first.");
       return;
     }
 
     if (!selectedFile.type.startsWith("image/")) {
-      setError(
-        "Please select an image file."
-      );
+      setError("Please select a JPG, PNG, WEBP, BMP or TIFF image.");
       return;
     }
 
-    if (
-      !PYTHON_OCR_URL ||
-      PYTHON_OCR_URL.includes("YOUR-PYTHON")
-    ) {
-      setError(
-        "Python OCR URL is not configured. Please set VITE_PYTHON_API_URL."
-      );
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      setError("Your session has expired. Please login again.");
       return;
     }
 
@@ -344,386 +326,93 @@ export default function Expense() {
       setMessage("");
 
       const formData = new FormData();
-
-      formData.append(
-        "file",
-        selectedFile
-      );
-
-      /*
-        IMPORTANT:
-        Do NOT send Content-Type manually.
-
-        Browser automatically creates:
-        multipart/form-data boundary.
-      */
+      formData.append("file", selectedFile);
 
       const response = await fetch(
-        PYTHON_OCR_URL.replace(/\/$/, "") +
-          "/ocr",
+        API_URL.replace(/\/$/, "") + "/api/ocr",
         {
           method: "POST",
+          headers: {
+            Authorization: "Bearer " + token,
+          },
           body: formData,
         }
       );
 
-      let data;
-
+      let data = {};
       try {
         data = await response.json();
       } catch {
+        throw new Error("OCR server returned an invalid response.");
+      }
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        throw new Error("Your session has expired. Please login again.");
+      }
+
+      if (!response.ok || !data.success) {
         throw new Error(
-          "Python OCR server returned an invalid response."
+          data.message || data.error || "OCR processing failed."
         );
       }
 
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            data.message ||
-            "OCR processing failed."
-        );
+      const extractedText = String(data.text || "").trim();
+      const lines = Array.isArray(data.lines) ? data.lines : [];
+
+      if (!extractedText && !lines.length) {
+        throw new Error("No readable text was found in this image.");
       }
 
-      if (!data.success) {
-        throw new Error(
-          data.error ||
-            "OCR could not process this bill."
-        );
-      }
-
-      /*
-        Tesseract response:
-
-        {
-          success: true,
-          text: "...",
-          lines: [...]
-        }
-      */
-
-      const extractedText =
-        data.text || "";
-
-      const lines =
-        Array.isArray(data.lines)
-          ? data.lines
-          : [];
-
-      console.log(
-        "========== OCR TEXT =========="
-      );
-
-      console.log(
-        extractedText
-      );
-
-      console.log(
-        "========== OCR LINES =========="
-      );
-
-      console.log(lines);
-
-      /*
-        -----------------------------------------------------
-        BASIC LIGHTWEIGHT FIELD EXTRACTION
-        -----------------------------------------------------
-      */
-
-      const parsed = parseOCRText(
-        extractedText,
-        lines
-      );
-
-      console.log(
-        "========== PARSED OCR DATA =========="
-      );
-
-      console.log(parsed);
-
-      /*
-        AUTO FILL FORM
-      */
+      const ocrFields = data.fields && typeof data.fields === "object"
+        ? data.fields
+        : {};
 
       setForm((previous) => ({
         ...previous,
-
-        date:
-          parsed.date ||
-          previous.date,
-
-        natureOfExpense:
-          parsed.natureOfExpense ||
-          previous.natureOfExpense,
-
-        amount:
-          parsed.amount ||
-          previous.amount,
-
-        gpayNo:
-          parsed.gpayNo ||
-          previous.gpayNo,
-
-        payeeName:
-          parsed.payeeName ||
-          previous.payeeName,
-
-        billNo:
-          parsed.billNo ||
-          previous.billNo,
-
-        description:
-          parsed.description ||
-          extractedText ||
-          previous.description,
+        amount: ocrFields.amount || previous.amount,
+        date: normalizeOcrDate(ocrFields.date) || previous.date,
+        payeeName: ocrFields.payeeName || previous.payeeName,
+        billNo: ocrFields.billNo || previous.billNo,
+        description: extractedText
+          ? extractedText.slice(0, 2000)
+          : previous.description,
       }));
 
       setMessage(
-        "✓ Bill scanned successfully. Please review the extracted details before saving."
+        `Bill scanned successfully${data.confidence != null ? ` (${Number(data.confidence).toFixed(0)}% confidence)` : ""}. Please review the extracted values before saving.`
       );
 
       setShowUploadModal(false);
+      setSelectedFile(null);
+      setPreviewUrl("");
     } catch (err) {
-      console.error(
-        "TESSERACT OCR ERROR:",
-        err
-      );
-
-      setError(
-        err.message ||
-          "Unable to process bill with OCR."
-      );
+      console.error("OCR ERROR:", err);
+      setError(err.message || "Unable to scan the bill.");
     } finally {
       setOcrLoading(false);
     }
   }
 
-  /* =========================================================
-     OCR TEXT PARSER
-  ========================================================= */
+  function normalizeOcrDate(value) {
+    if (!value) return "";
 
-  function parseOCRText(text, lines) {
-    const result = {
-      date: "",
-      natureOfExpense: "",
-      amount: "",
-      gpayNo: "",
-      payeeName: "",
-      billNo: "",
-      description: "",
-    };
+    const raw = String(value).trim();
 
-    if (!text) {
-      return result;
+    let match = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    if (match) {
+      const [, dd, mm, yyyy] = match;
+      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
     }
 
-    const cleanText = text
-      .replace(/\r/g, "")
-      .trim();
-
-    const cleanLines = (
-      lines.length
-        ? lines
-        : cleanText.split("\n")
-    )
-      .map((line) =>
-        String(line).trim()
-      )
-      .filter(Boolean);
-
-    /*
-      DATE
-    */
-
-    const datePatterns = [
-      /\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/,
-      /\b(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\b/,
-    ];
-
-    for (const line of cleanLines) {
-      for (const pattern of datePatterns) {
-        const match =
-          line.match(pattern);
-
-        if (match) {
-          if (
-            match[0].startsWith("20")
-          ) {
-            result.date =
-              `${match[1]}-${String(
-                match[2]
-              ).padStart(2, "0")}-${String(
-                match[3]
-              ).padStart(2, "0")}`;
-          } else {
-            result.date =
-              `${match[3]}-${String(
-                match[2]
-              ).padStart(2, "0")}-${String(
-                match[1]
-              ).padStart(2, "0")}`;
-          }
-
-          break;
-        }
-      }
-
-      if (result.date) {
-        break;
-      }
+    match = raw.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    if (match) {
+      const [, yyyy, mm, dd] = match;
+      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
     }
 
-    /*
-      AMOUNT
-
-      Looks for:
-      Total
-      Grand Total
-      Amount
-      Net Amount
-    */
-
-    const amountKeywords =
-      /(?:grand\s*total|total\s*amount|net\s*amount|amount|total)\s*[:\-]?\s*(?:₹|rs\.?|inr)?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i;
-
-    const amountMatch =
-      cleanText.match(
-        amountKeywords
-      );
-
-    if (amountMatch) {
-      result.amount =
-        amountMatch[1].replace(
-          /,/g,
-          ""
-        );
-    }
-
-    /*
-      If no keyword amount found,
-      search for currency amount.
-    */
-
-    if (!result.amount) {
-      const currencyMatch =
-        cleanText.match(
-          /(?:₹|Rs\.?|INR)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i
-        );
-
-      if (currencyMatch) {
-        result.amount =
-          currencyMatch[1].replace(
-            /,/g,
-            ""
-          );
-      }
-    }
-
-    /*
-      BILL / INVOICE NUMBER
-    */
-
-    const billMatch =
-      cleanText.match(
-        /(?:invoice\s*(?:no|number)?|bill\s*(?:no|number)?|inv\s*(?:no|number)?)\s*[:#\-]?\s*([A-Z0-9\/\-_]+)/i
-      );
-
-    if (billMatch) {
-      result.billNo =
-        billMatch[1].trim();
-    }
-
-    /*
-      UPI / GPAY
-    */
-
-    const upiMatch =
-      cleanText.match(
-        /(?:upi|gpay|google\s*pay|transaction\s*(?:id|no|number)|txn\s*(?:id|no)?)\s*[:#\-]?\s*([A-Z0-9@._\-]{6,})/i
-      );
-
-    if (upiMatch) {
-      result.gpayNo =
-        upiMatch[1].trim();
-    }
-
-    /*
-      PAYEE / VENDOR
-
-      Looks for:
-      Vendor
-      Supplier
-      Payee
-      Name
-      Merchant
-    */
-
-    const payeeMatch =
-      cleanText.match(
-        /(?:vendor|supplier|payee|merchant|party|name)\s*[:\-]\s*([^\n]+)/i
-      );
-
-    if (payeeMatch) {
-      result.payeeName =
-        payeeMatch[1].trim();
-    }
-
-    /*
-      NATURE OF EXPENSE
-
-      If a clear keyword is found.
-    */
-
-    const expenseMatch =
-      cleanText.match(
-        /(?:expense|description|particular|item|service)\s*[:\-]\s*([^\n]+)/i
-      );
-
-    if (expenseMatch) {
-      result.natureOfExpense =
-        expenseMatch[1].trim();
-    }
-
-    /*
-      FALLBACK PAYEE
-
-      If no explicit vendor/payee
-      found, use first meaningful
-      text line.
-    */
-
-    if (!result.payeeName) {
-      const ignoredWords =
-        /^(invoice|tax invoice|bill|receipt|gst|date|total|amount|thank you)/i;
-
-      const possibleName =
-        cleanLines.find(
-          (line) =>
-            line.length >= 3 &&
-            line.length <= 80 &&
-            !ignoredWords.test(
-              line
-            ) &&
-            !/^\d+$/.test(line)
-        );
-
-      if (possibleName) {
-        result.payeeName =
-          possibleName;
-      }
-    }
-
-    /*
-      DESCRIPTION
-    */
-
-    result.description =
-      cleanText.substring(
-        0,
-        2000
-      );
-
-    return result;
+    return "";
   }
 
   /* =========================================================
