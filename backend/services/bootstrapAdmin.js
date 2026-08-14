@@ -45,15 +45,11 @@ export async function ensureBootstrapAdmin() {
     process.env.BOOTSTRAP_ADMIN_PASSWORD || ""
   );
 
-  /*
-   * Admin environment variables না থাকলেও
-   * backend যেন বন্ধ না হয়ে যায়।
-   */
+  // Admin env না থাকলেও backend বন্ধ হবে না
   if (!email || !mobile || !password) {
     console.warn(
       "Bootstrap admin skipped: admin environment variables are not fully configured."
     );
-
     return null;
   }
 
@@ -78,9 +74,6 @@ export async function ensureBootstrapAdmin() {
     );
   }
 
-  /*
-   * Existing admin/user খুঁজবে
-   */
   let admin = await User.findOne({
     $or: [
       { email },
@@ -88,12 +81,27 @@ export async function ensureBootstrapAdmin() {
     ],
   }).select("+passwordHash");
 
-  /*
-   * Existing user পাওয়া গেলে
-   * password overwrite করবে না।
-   */
+  // Existing user
   if (admin) {
     let changed = false;
+
+    if (admin.name !== name && name) {
+      admin.name = name;
+      changed = true;
+    }
+
+    if (admin.email !== email) {
+      admin.email = email;
+      changed = true;
+    }
+
+    if (
+      !admin.mobile ||
+      admin.mobile !== mobile
+    ) {
+      admin.mobile = mobile;
+      changed = true;
+    }
 
     if (admin.role !== "Admin") {
       admin.role = "Admin";
@@ -105,14 +113,25 @@ export async function ensureBootstrapAdmin() {
       changed = true;
     }
 
-    if (!admin.name && name) {
-      admin.name = name;
-      changed = true;
-    }
+    /*
+     * পুরোনো OTP user-এর passwordHash না থাকলে
+     * এখন bootstrap password দিয়ে password তৈরি করবে।
+     */
+    if (!admin.passwordHash) {
+      admin.passwordHash =
+        await bcrypt.hash(
+          password,
+          BCRYPT_ROUNDS
+        );
 
-    if (!admin.mobile && mobile) {
-      admin.mobile = mobile;
+      admin.passwordChangedAt =
+        new Date();
+
       changed = true;
+
+      console.log(
+        `Password initialized for existing admin: ${email}`
+      );
     }
 
     if (changed) {
@@ -126,9 +145,7 @@ export async function ensureBootstrapAdmin() {
     return admin;
   }
 
-  /*
-   * New Admin create
-   */
+  // New admin
   const passwordHash =
     await bcrypt.hash(
       password,
@@ -150,6 +167,8 @@ export async function ensureBootstrapAdmin() {
     isVerified: true,
 
     isActive: true,
+
+    passwordChangedAt: new Date(),
   });
 
   console.log(
