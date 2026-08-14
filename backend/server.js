@@ -10,6 +10,8 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
 import {
   apiLimiter,
 } from "./middleware/rateLimit.js";
@@ -30,6 +32,7 @@ const allowedOrigins = (
   .filter(Boolean);
 
 await connectDB();
+await ensureBootstrapAdmin();
 
 app.set(
   "trust proxy",
@@ -165,6 +168,11 @@ app.use(
 app.use(
   "/api/expenses",
   expenseRoutes
+);
+
+app.use(
+  "/api/users",
+  userRoutes
 );
 
 app.use(
