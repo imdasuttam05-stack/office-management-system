@@ -11,6 +11,11 @@ import { hrAuth, hrAdmin } from "../middleware/hrAuth.js";
 const router = express.Router();
 router.use(hrAuth);
 
+// Payroll landing endpoint used by older frontend versions.
+// Returns the latest salary records instead of "route not found".
+router.get("/", salaries);
+
+
 router.get("/employees", employees);
 router.post("/employees", hrAdmin, createEmployee);
 router.put("/employees/:id", hrAdmin, updateEmployee);
