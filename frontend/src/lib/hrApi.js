@@ -4,7 +4,7 @@ const API_URL =
 
 async function request(path, options = {}) {
   const token = localStorage.getItem("token") || "";
-  const res = await fetch(`${API_URL}/api/hr${path}`, {
+  const res = await fetch(`${API_URL}/api/payroll${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
