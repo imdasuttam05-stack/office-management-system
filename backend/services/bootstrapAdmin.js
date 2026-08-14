@@ -1,0 +1,160 @@
+import bcrypt from "bcrypt";
+import User from "../models/User.js";
+
+const BCRYPT_ROUNDS = Math.max(
+  10,
+  Number(process.env.BCRYPT_ROUNDS || 12)
+);
+
+function normalizeEmail(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeMobile(value) {
+  return String(value || "")
+    .replace(/[^0-9+]/g, "")
+    .trim();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidMobile(mobile) {
+  const digits = mobile.replace(/^\+/, "");
+  return /^\d{10,15}$/.test(digits);
+}
+
+export async function ensureBootstrapAdmin() {
+  const name = String(
+    process.env.BOOTSTRAP_ADMIN_NAME ||
+      "Administrator"
+  ).trim();
+
+  const email = normalizeEmail(
+    process.env.BOOTSTRAP_ADMIN_EMAIL
+  );
+
+  const mobile = normalizeMobile(
+    process.env.BOOTSTRAP_ADMIN_MOBILE
+  );
+
+  const password = String(
+    process.env.BOOTSTRAP_ADMIN_PASSWORD || ""
+  );
+
+  /*
+   * Admin environment variables না থাকলেও
+   * backend যেন বন্ধ না হয়ে যায়।
+   */
+  if (!email || !mobile || !password) {
+    console.warn(
+      "Bootstrap admin skipped: admin environment variables are not fully configured."
+    );
+
+    return null;
+  }
+
+  if (!isValidEmail(email)) {
+    throw new Error(
+      "BOOTSTRAP_ADMIN_EMAIL is invalid."
+    );
+  }
+
+  if (!isValidMobile(mobile)) {
+    throw new Error(
+      "BOOTSTRAP_ADMIN_MOBILE is invalid."
+    );
+  }
+
+  if (
+    password.length < 8 ||
+    password.length > 128
+  ) {
+    throw new Error(
+      "BOOTSTRAP_ADMIN_PASSWORD must be between 8 and 128 characters."
+    );
+  }
+
+  /*
+   * Existing admin/user খুঁজবে
+   */
+  let admin = await User.findOne({
+    $or: [
+      { email },
+      { mobile },
+    ],
+  }).select("+passwordHash");
+
+  /*
+   * Existing user পাওয়া গেলে
+   * password overwrite করবে না।
+   */
+  if (admin) {
+    let changed = false;
+
+    if (admin.role !== "Admin") {
+      admin.role = "Admin";
+      changed = true;
+    }
+
+    if (!admin.isActive) {
+      admin.isActive = true;
+      changed = true;
+    }
+
+    if (!admin.name && name) {
+      admin.name = name;
+      changed = true;
+    }
+
+    if (!admin.mobile && mobile) {
+      admin.mobile = mobile;
+      changed = true;
+    }
+
+    if (changed) {
+      await admin.save();
+    }
+
+    console.log(
+      `Bootstrap admin ready: ${admin.email}`
+    );
+
+    return admin;
+  }
+
+  /*
+   * New Admin create
+   */
+  const passwordHash =
+    await bcrypt.hash(
+      password,
+      BCRYPT_ROUNDS
+    );
+
+  admin = await User.create({
+    name:
+      name || "Administrator",
+
+    email,
+
+    mobile,
+
+    passwordHash,
+
+    role: "Admin",
+
+    isVerified: true,
+
+    isActive: true,
+  });
+
+  console.log(
+    `Bootstrap admin created: ${admin.email}`
+  );
+
+  return admin;
+}
