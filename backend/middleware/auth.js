@@ -34,7 +34,7 @@ export default async function auth(req, res, next) {
     }
 
     const user = await User.findById(decoded.userId)
-      .select("_id name email role isVerified isActive lastLogin");
+      .select("_id name email mobile role isVerified isActive lastLogin");
 
     if (!user) {
       return res.status(401).json({
