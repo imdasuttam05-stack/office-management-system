@@ -1,119 +1,45 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "https://office-management-system-ikx8.onrender.com";
-
-/* =========================================================
-   AUTH HELPERS
-========================================================= */
-
-function getStoredUser() {
-  try {
-    const raw =
-      localStorage.getItem("user") ||
-      localStorage.getItem("currentUser");
-
-    if (!raw) return null;
-
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function getToken() {
-  return (
-    localStorage.getItem("token") ||
-    localStorage.getItem("accessToken") ||
-    ""
-  );
-}
-
-/* =========================================================
-   ICON
-========================================================= */
-
-function Icon({ children }) {
-  return (
-    <span className="side-icon">
-      {children}
-    </span>
-  );
-}
-
-/* =========================================================
-   DASHBOARD
-========================================================= */
 
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  const sidebarRef = useRef(null);
-
-  const [sidebarOpen, setSidebarOpen] =
-    useState(false);
-
-  const [user, setUser] = useState(
-    getStoredUser()
-  );
-
-  const [expenseTotal, setExpenseTotal] =
-    useState(0);
-
-  const [pendingApproval, setPendingApproval] =
-    useState(0);
-
-  const [employeeCount, setEmployeeCount] =
-    useState(0);
-
-  const [pendingTasks, setPendingTasks] =
-    useState(0);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  /* =======================================================
-     USER
-  ======================================================= */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const storedUser = getStoredUser();
+    try {
+      const storedUser =
+        localStorage.getItem("user") ||
+        localStorage.getItem("currentUser");
 
-    if (storedUser) {
-      setUser(storedUser);
+      if (storedUser) {
+        setUser(JSON.parse(storedUser));
+      }
+    } catch (error) {
+      console.warn("Unable to read user data");
     }
   }, []);
 
-  /* =======================================================
-     CLOSE SIDEBAR ON OUTSIDE CLICK
-  ======================================================= */
-
   useEffect(() => {
-    function handleOutsideClick(event) {
-      if (!sidebarOpen) return;
+    if (!sidebarOpen) return;
 
+    const handleOutsideClick = (event) => {
       const sidebar =
-        sidebarRef.current;
+        document.getElementById("office-sidebar");
 
       const menuButton =
-        document.querySelector(
-          ".dashboard-menu-btn"
-        );
+        document.getElementById("office-menu-button");
 
       if (
         sidebar &&
-        !sidebar.contains(
-          event.target
-        ) &&
-        !menuButton?.contains(
-          event.target
-        )
+        !sidebar.contains(event.target) &&
+        menuButton &&
+        !menuButton.contains(event.target)
       ) {
         setSidebarOpen(false);
       }
-    }
+    };
 
     document.addEventListener(
       "mousedown",
@@ -128,264 +54,92 @@ export default function Dashboard() {
     };
   }, [sidebarOpen]);
 
-  /* =======================================================
-     ESC CLOSE
-  ======================================================= */
-
-  useEffect(() => {
-    function handleEscape(event) {
-      if (event.key === "Escape") {
-        setSidebarOpen(false);
-      }
-    }
-
-    document.addEventListener(
-      "keydown",
-      handleEscape
+  const getUserName = () => {
+    return (
+      user?.name ||
+      user?.fullName ||
+      user?.username ||
+      "User"
     );
+  };
 
-    return () => {
-      document.removeEventListener(
-        "keydown",
-        handleEscape
-      );
-    };
-  }, []);
-
-  /* =======================================================
-     LOAD DASHBOARD DATA
-  ======================================================= */
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadDashboard() {
-      setLoading(true);
-
-      const token = getToken();
-
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `${API_URL}/api/expenses`,
-          {
-            method: "GET",
-            headers: {
-              Authorization:
-                `Bearer ${token}`,
-              "Content-Type":
-                "application/json",
-            },
-          }
-        );
-
-        if (response.status === 401) {
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(
-            "Failed to load expenses"
-          );
-        }
-
-        const data =
-          await response.json();
-
-        if (cancelled) return;
-
-        const expenses =
-          Array.isArray(data)
-            ? data
-            : Array.isArray(
-                data?.expenses
-              )
-            ? data.expenses
-            : Array.isArray(
-                data?.data
-              )
-            ? data.data
-            : [];
-
-        let total = 0;
-        let pending = 0;
-
-        expenses.forEach(
-          (expense) => {
-            const amount =
-              Number(
-                expense?.amount
-              ) || 0;
-
-            total += amount;
-
-            const status =
-              String(
-                expense?.status ||
-                  expense?.approvalStatus ||
-                  ""
-              ).toLowerCase();
-
-            if (
-              status === "pending" ||
-              status === "pending approval"
-            ) {
-              pending += 1;
-            }
-          }
-        );
-
-        setExpenseTotal(total);
-        setPendingApproval(pending);
-      } catch (error) {
-        console.error(
-          "Dashboard expense error:",
-          error
-        );
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadDashboard();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  /* =======================================================
-     USER NAME / ROLE
-  ======================================================= */
-
-  const userName =
-    user?.name ||
-    user?.fullName ||
-    user?.username ||
-    "User";
-
-  const userRole =
-    user?.role ||
-    "Employee";
+  const getUserRole = () => {
+    return user?.role || "Manager";
+  };
 
   const isAdmin =
-    String(userRole).toLowerCase() ===
+    String(getUserRole()).toLowerCase() ===
     "admin";
 
-  /* =======================================================
-     NAVIGATION
-  ======================================================= */
-
-  function goTo(path) {
+  const closeSidebar = () => {
     setSidebarOpen(false);
+  };
+
+  const goTo = (path) => {
+    closeSidebar();
     navigate(path);
-  }
+  };
 
-  /* =======================================================
-     LOGOUT
-  ======================================================= */
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+    localStorage.removeItem("currentUser");
 
-  function handleLogout() {
-    localStorage.removeItem(
-      "token"
-    );
+    sessionStorage.clear();
 
-    localStorage.removeItem(
-      "accessToken"
-    );
+    navigate("/login", {
+      replace: true,
+    });
+  };
 
-    localStorage.removeItem(
-      "refreshToken"
-    );
-
-    localStorage.removeItem(
-      "user"
-    );
-
-    localStorage.removeItem(
-      "currentUser"
-    );
-
-    navigate(
-      "/login",
-      {
-        replace: true,
-      }
-    );
-  }
-
-  /* =======================================================
-     FORMAT MONEY
-  ======================================================= */
-
-  function formatMoney(value) {
-    return new Intl.NumberFormat(
-      "en-IN",
-      {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 0,
-      }
-    ).format(value || 0);
-  }
-
-  /* =======================================================
-     RENDER
-  ======================================================= */
+  const soon = () => {
+    // Currently disabled modules.
+  };
 
   return (
-    <div className="dashboard">
-
-      {/* ===================================================
+    <div className="office-dashboard">
+      {/* =====================================================
           SIDEBAR OVERLAY
-      =================================================== */}
-
+      ====================================================== */}
       {sidebarOpen && (
         <div
           className="sidebar-overlay"
-          onClick={() =>
-            setSidebarOpen(false)
-          }
+          onClick={closeSidebar}
         />
       )}
 
-      {/* ===================================================
+      {/* =====================================================
           SIDEBAR
-      =================================================== */}
-
+      ====================================================== */}
       <aside
-        ref={sidebarRef}
-        className={`sidebar ${
-          sidebarOpen
-            ? "sidebar-open"
-            : ""
+        id="office-sidebar"
+        className={`office-sidebar ${
+          sidebarOpen ? "sidebar-open" : ""
         }`}
       >
         {/* Sidebar Header */}
-
-        <div className="sidebar-top">
-          <div>
-            <div className="sidebar-brand">
-              Office Management
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <div className="brand-icon">
+              🏢
             </div>
 
-            <div className="sidebar-subtitle">
-              Business Management System
+            <div>
+              <div className="brand-title">
+                Office Management
+              </div>
+
+              <div className="brand-subtitle">
+                Business Management System
+              </div>
             </div>
           </div>
 
           <button
-            type="button"
             className="sidebar-close"
-            onClick={() =>
-              setSidebarOpen(false)
-            }
+            onClick={closeSidebar}
             aria-label="Close menu"
           >
             ×
@@ -393,2161 +147,1549 @@ export default function Dashboard() {
         </div>
 
         {/* =================================================
-            MAIN
-        ================================================= */}
-
-        <div className="sidebar-section">
-          <div className="sidebar-heading">
-            MAIN
-          </div>
-
-          <div className="sidebar-nav">
+            MAIN MENU
+        ================================================== */}
+        <div className="sidebar-scroll">
+          <div className="menu-section">
+            <div className="menu-section-title">
+              MAIN MENU
+            </div>
 
             <button
-              type="button"
-              className="side-item"
+              className="sidebar-item active"
               onClick={() =>
                 goTo("/dashboard")
               }
             >
-              <Icon>⌂</Icon>
+              <span className="menu-icon">
+                🏠
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Dashboard
               </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
+              className="sidebar-item"
               onClick={() =>
                 goTo("/expenses")
               }
             >
-              <Icon>₹</Icon>
+              <span className="menu-icon">
+                ₹
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Expenses
               </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/approvals")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>✓</Icon>
+              <span className="menu-icon">
+                ✓
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Approvals
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            HR MANAGEMENT
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            HR MANAGEMENT
           </div>
 
-          <div className="sidebar-nav">
+          {/* =================================================
+              HR MANAGEMENT
+          ================================================== */}
+          <div className="menu-section">
+            <div className="menu-section-title">
+              HR MANAGEMENT
+            </div>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/employees")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>♟</Icon>
+              <span className="menu-icon">
+                👥
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Employees
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/attendance")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>✓</Icon>
+              <span className="menu-icon">
+                ✓
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Attendance
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/leave")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>📄</Icon>
+              <span className="menu-icon">
+                📑
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Leave Management
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/holidays")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>▦</Icon>
+              <span className="menu-icon">
+                🗓️
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Holiday Calendar
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/shifts")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>◷</Icon>
+              <span className="menu-icon">
+                ⏱
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Shift Management
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            REPORTS
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            REPORTS
           </div>
 
-          <div className="sidebar-nav">
+          {/* =================================================
+              REPORTS
+          ================================================== */}
+          <div className="menu-section">
+            <div className="menu-section-title">
+              REPORTS
+            </div>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo(
-                  "/reports/attendance"
-                )
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>▦</Icon>
+              <span className="menu-icon">
+                ▦
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Attendance Reports
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo(
-                  "/reports/leave"
-                )
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>▤</Icon>
+              <span className="menu-icon">
+                📄
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Leave Reports
               </span>
+
+              <span className="soon-badge">
+                Soon
+              </span>
             </button>
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo(
-                  "/reports/salary"
-                )
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>₹</Icon>
+              <span className="menu-icon">
+                ₹
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Salary Reports
               </span>
-            </button>
 
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/reports")
-              }
-            >
-              <Icon>▥</Icon>
-
-              <span className="side-label">
-                Business Reports
+              <span className="soon-badge">
+                Soon
               </span>
             </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            PAYROLL
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            PAYROLL
           </div>
 
-          <div className="sidebar-nav">
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/salary")
-              }
-            >
-              <Icon>₹</Icon>
-
-              <span className="side-label">
-                Salary Management
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/salary/slips")
-              }
-            >
-              <Icon>▤</Icon>
-
-              <span className="side-label">
-                Salary Slips
-              </span>
-            </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            ADMINISTRATION
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            ADMINISTRATION
-          </div>
-
-          <div className="sidebar-nav">
+          {/* =================================================
+              ADMINISTRATION
+          ================================================== */}
+          <div className="menu-section">
+            <div className="menu-section-title">
+              ADMINISTRATION
+            </div>
 
             {isAdmin && (
               <button
-                type="button"
-                className="side-item admin-item"
+                className="sidebar-item"
                 onClick={() =>
                   goTo("/users")
                 }
               >
-                <Icon>♟</Icon>
+                <span className="menu-icon">
+                  👤
+                </span>
 
-                <span className="side-label">
+                <span className="menu-text">
                   User Management
                 </span>
               </button>
             )}
 
             <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/security")
-              }
+              className="sidebar-item disabled"
+              onClick={soon}
             >
-              <Icon>🔒</Icon>
+              <span className="menu-icon">
+                🔐
+              </span>
 
-              <span className="side-label">
+              <span className="menu-text">
                 Security
               </span>
-            </button>
 
+              <span className="soon-badge">
+                Soon
+              </span>
+            </button>
           </div>
         </div>
 
         {/* =================================================
-            SIDEBAR LOGOUT
-        ================================================= */}
+            SIDEBAR FOOTER
+        ================================================== */}
+        <div className="sidebar-footer">
+          <div className="sidebar-user">
+            <div className="user-avatar">
+              {getUserName()
+                .charAt(0)
+                .toUpperCase()}
+            </div>
 
-        <div className="sidebar-bottom">
+            <div className="sidebar-user-info">
+              <strong>
+                {getUserName()}
+              </strong>
+
+              <span>
+                {getUserRole()}
+              </span>
+            </div>
+          </div>
 
           <button
-            type="button"
-            className="side-logout"
-            onClick={handleLogout}
+            className="sidebar-logout"
+            onClick={logout}
           >
-            <Icon>↪</Icon>
-
-            <span>
-              Logout
-            </span>
+            <span>↪</span>
+            Logout
           </button>
-
         </div>
       </aside>
 
-      {/* ===================================================
-          HEADER
-      =================================================== */}
-
-      <header className="dashboard-header">
-
-        <div className="header-left">
-
-          <button
-            type="button"
-            className="dashboard-menu-btn"
-            onClick={() =>
-              setSidebarOpen(true)
-            }
-            aria-label="Open menu"
-          >
-            <span />
-            <span />
-            <span />
-          </button>
-
-          <div>
-            <h1>
-              Office Management
-            </h1>
-
-            <p>
-              Business Management System
-            </p>
-          </div>
-
-        </div>
-
-        <div className="user-section">
-
-          <div className="user-info">
-            <strong>
-              {userName}
-            </strong>
-
-            <span>
-              {userRole}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            className="logout-btn"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
-
-        </div>
-
-      </header>
-
-      {/* ===================================================
-          CONTENT
-      =================================================== */}
-
-      <main className="dashboard-content">
-
-        {/* Welcome */}
-
-        <section className="welcome-card">
-
-          <div>
-
-            <div className="welcome-small">
-              OFFICE MANAGEMENT
-            </div>
-
-            <h2>
-              Welcome back,{" "}
-              {userName} 👋
-            </h2>
-
-            <p>
-              Manage your office,
-              employees, attendance,
-              leave and salary from
-              one place.
-            </p>
-
-          </div>
-
-          <div className="role-area">
-
-            <span className="role-label">
-              CURRENT ROLE
-            </span>
-
-            <span className="role-badge">
-              {userRole}
-            </span>
-
-          </div>
-
-        </section>
-
+      {/* =====================================================
+          MAIN AREA
+      ====================================================== */}
+      <div className="dashboard-main">
         {/* =================================================
-            STATS
-        ================================================= */}
-
-        <section className="stats-grid">
-
-          <div className="stat-card">
-
-            <div className="stat-icon">
-              ₹
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Total Expenses
-              </span>
-
-              <strong>
-                {loading
-                  ? "..."
-                  : formatMoney(
-                      expenseTotal
-                    )}
-              </strong>
-
-              <small>
-                Current records
-              </small>
-
-            </div>
-
-          </div>
-
-          <div className="stat-card">
-
-            <div className="stat-icon">
-              ✓
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Pending Approval
-              </span>
-
-              <strong>
-                {pendingApproval}
-              </strong>
-
-              <small>
-                Waiting for action
-              </small>
-
-            </div>
-
-          </div>
-
-          <div
-            className="stat-card clickable"
-            onClick={() =>
-              goTo("/employees")
-            }
-          >
-
-            <div className="stat-icon">
-              ♟
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Total Employees
-              </span>
-
-              <strong>
-                {employeeCount}
-              </strong>
-
-              <small>
-                Active employees
-              </small>
-
-            </div>
-
-          </div>
-
-          <div className="stat-card">
-
-            <div className="stat-icon">
-              !
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Pending Tasks
-              </span>
-
-              <strong>
-                {pendingTasks}
-              </strong>
-
-              <small>
-                Requires attention
-              </small>
-
-            </div>
-
-          </div>
-
-        </section>
-
-        {/* =================================================
-            QUICK ACCESS
-        ================================================= */}
-
-        <section className="modules-section">
-
-          <div className="section-header">
-
-            <div>
-
-              <div className="section-kicker">
-                QUICK ACCESS
-              </div>
-
-              <h2>
-                Office Modules
-              </h2>
-
-              <p>
-                Quickly access the most
-                important sections.
-              </p>
-
-            </div>
-
+            TOP HEADER
+        ================================================== */}
+        <header className="dashboard-header">
+          <div className="header-left">
             <button
-              type="button"
-              className="open-menu-link"
+              id="office-menu-button"
+              className="menu-button"
               onClick={() =>
                 setSidebarOpen(true)
               }
+              aria-label="Open menu"
             >
-              ☰ Open Menu
+              ☰
             </button>
 
+            <div className="header-brand">
+              <strong>
+                Office Management
+              </strong>
+
+              <span>
+                Business Management System
+              </span>
+            </div>
           </div>
 
-          <div className="modules-grid">
-
-            {/* Expenses */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/expenses")
-              }
-            >
-              <div className="module-icon expense">
-                ₹
+          <div className="header-right">
+            <div className="header-user">
+              <div className="header-avatar">
+                {getUserName()
+                  .charAt(0)
+                  .toUpperCase()}
               </div>
 
-              <div>
-                <h3>
-                  Expenses
-                </h3>
+              <div className="header-user-info">
+                <strong>
+                  {getUserName()}
+                </strong>
 
-                <p>
-                  Manage office expenses
-                </p>
+                <span>
+                  {getUserRole()}
+                </span>
               </div>
-
-              <span className="card-arrow">
-                →
-              </span>
             </div>
 
-            {/* Approvals */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/approvals")
-              }
+            <button
+              className="header-logout"
+              onClick={logout}
             >
-              <div className="module-icon attendance">
-                ✓
-              </div>
-
-              <div>
-                <h3>
-                  Approvals
-                </h3>
-
-                <p>
-                  Review pending approvals
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Employees */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/employees")
-              }
-            >
-              <div className="module-icon employees">
-                ♟
-              </div>
-
-              <div>
-                <h3>
-                  Employees
-                </h3>
-
-                <p>
-                  Manage employees
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Attendance */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/attendance")
-              }
-            >
-              <div className="module-icon attendance">
-                ✓
-              </div>
-
-              <div>
-                <h3>
-                  Attendance
-                </h3>
-
-                <p>
-                  Daily and monthly attendance
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Leave */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/leave")
-              }
-            >
-              <div className="module-icon leave">
-                📄
-              </div>
-
-              <div>
-                <h3>
-                  Leave Management
-                </h3>
-
-                <p>
-                  Manage employee leaves
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Holidays */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/holidays")
-              }
-            >
-              <div className="module-icon holiday">
-                ▦
-              </div>
-
-              <div>
-                <h3>
-                  Holiday Calendar
-                </h3>
-
-                <p>
-                  Manage office holidays
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Salary */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/salary")
-              }
-            >
-              <div className="module-icon payroll">
-                ₹
-              </div>
-
-              <div>
-                <h3>
-                  Salary Management
-                </h3>
-
-                <p>
-                  Salary, additions & deductions
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Salary Slip */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/salary/slips")
-              }
-            >
-              <div className="module-icon payroll">
-                ▤
-              </div>
-
-              <div>
-                <h3>
-                  Salary Slips
-                </h3>
-
-                <p>
-                  Create and view salary slips
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Reports */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/reports")
-              }
-            >
-              <div className="module-icon expense">
-                ▥
-              </div>
-
-              <div>
-                <h3>
-                  Reports
-                </h3>
-
-                <p>
-                  View business reports
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
+              Logout
+            </button>
           </div>
-        </section>
+        </header>
 
         {/* =================================================
-            ATTENDANCE / HR PREVIEW
-        ================================================= */}
-
-        <section className="attendance-preview">
-
-          <div className="attendance-preview-header">
-
+            CONTENT
+        ================================================== */}
+        <main className="dashboard-content">
+          {/* Welcome Banner */}
+          <section className="welcome-banner">
             <div>
-
-              <div className="section-kicker">
-                HR OVERVIEW
+              <div className="welcome-small">
+                OFFICE MANAGEMENT
               </div>
 
-              <h2>
-                Attendance & Payroll
-              </h2>
+              <h1>
+                Welcome back,{" "}
+                {getUserName()} 👋
+              </h1>
 
+              <p>
+                Manage your office,
+                employees, attendance,
+                expenses and salary from
+                one place.
+              </p>
             </div>
 
-            <span className="preview-badge">
-              Coming Soon
-            </span>
-
-          </div>
-
-          <div className="attendance-preview-grid">
-
-            <div className="preview-box">
-
-              <div className="preview-icon present">
-                ✓
-              </div>
-
-              <div>
-                <strong>
-                  Attendance
-                </strong>
-
-                <span>
-                  Daily / Monthly
-                </span>
-              </div>
-
+            <div className="role-badge">
+              {getUserRole()}
             </div>
+          </section>
 
-            <div className="preview-box">
-
-              <div className="preview-icon leave">
-                📄
-              </div>
-
-              <div>
-                <strong>
-                  Leave
-                </strong>
-
-                <span>
-                  Paid / Unpaid
-                </span>
-              </div>
-
-            </div>
-
-            <div className="preview-box">
-
-              <div className="preview-icon holiday">
-                ▦
-              </div>
-
-              <div>
-                <strong>
-                  Holidays
-                </strong>
-
-                <span>
-                  Company calendar
-                </span>
-              </div>
-
-            </div>
-
-            <div className="preview-box">
-
-              <div className="preview-icon salary">
+          {/* =================================================
+              SUMMARY CARDS
+          ================================================== */}
+          <section className="summary-grid">
+            <div className="summary-card">
+              <div className="summary-icon">
                 ₹
               </div>
 
               <div>
-                <strong>
-                  Salary
-                </strong>
-
                 <span>
-                  Additions & deductions
+                  Total Expenses
                 </span>
-              </div>
 
+                <strong>₹0</strong>
+
+                <small>
+                  This month
+                </small>
+              </div>
             </div>
 
-          </div>
+            <div className="summary-card">
+              <div className="summary-icon">
+                ✓
+              </div>
 
-        </section>
+              <div>
+                <span>
+                  Pending Approval
+                </span>
 
-      </main>
+                <strong>0</strong>
 
-      {/* ===================================================
+                <small>
+                  Waiting for action
+                </small>
+              </div>
+            </div>
+
+            <div className="summary-card">
+              <div className="summary-icon">
+                👥
+              </div>
+
+              <div>
+                <span>
+                  Total Employees
+                </span>
+
+                <strong>0</strong>
+
+                <small>
+                  Active employees
+                </small>
+              </div>
+            </div>
+
+            <div className="summary-card">
+              <div className="summary-icon">
+                📋
+              </div>
+
+              <div>
+                <span>
+                  Pending Tasks
+                </span>
+
+                <strong>0</strong>
+
+                <small>
+                  Requires attention
+                </small>
+              </div>
+            </div>
+          </section>
+
+          {/* =================================================
+              QUICK ACCESS
+          ================================================== */}
+          <section className="quick-section">
+            <div className="section-heading">
+              <div>
+                <h2>
+                  Quick Access
+                </h2>
+
+                <p>
+                  Frequently used modules
+                </p>
+              </div>
+            </div>
+
+            <div className="quick-grid">
+              {/* Expenses */}
+              <button
+                className="quick-card"
+                onClick={() =>
+                  navigate("/expenses")
+                }
+              >
+                <div className="quick-icon">
+                  ₹
+                </div>
+
+                <div className="quick-content">
+                  <strong>
+                    Expenses
+                  </strong>
+
+                  <span>
+                    Manage office expenses
+                  </span>
+                </div>
+
+                <div className="quick-arrow">
+                  →
+                </div>
+              </button>
+
+              {/* Approvals */}
+              <button
+                className="quick-card disabled-card"
+                onClick={soon}
+              >
+                <div className="quick-icon">
+                  ✓
+                </div>
+
+                <div className="quick-content">
+                  <strong>
+                    Approvals
+                  </strong>
+
+                  <span>
+                    Review pending approvals
+                  </span>
+                </div>
+
+                <span className="card-soon">
+                  Soon
+                </span>
+              </button>
+
+              {/* Employees */}
+              <button
+                className="quick-card disabled-card"
+                onClick={soon}
+              >
+                <div className="quick-icon">
+                  👥
+                </div>
+
+                <div className="quick-content">
+                  <strong>
+                    Employees
+                  </strong>
+
+                  <span>
+                    Manage employees
+                  </span>
+                </div>
+
+                <span className="card-soon">
+                  Soon
+                </span>
+              </button>
+
+              {/* Reports */}
+              <button
+                className="quick-card disabled-card"
+                onClick={soon}
+              >
+                <div className="quick-icon">
+                  📊
+                </div>
+
+                <div className="quick-content">
+                  <strong>
+                    Reports
+                  </strong>
+
+                  <span>
+                    View business reports
+                  </span>
+                </div>
+
+                <span className="card-soon">
+                  Soon
+                </span>
+              </button>
+            </div>
+          </section>
+
+          {/* =================================================
+              HR PREVIEW
+          ================================================== */}
+          <section className="hr-preview">
+            <div className="hr-preview-header">
+              <div>
+                <span className="section-label">
+                  HR MANAGEMENT
+                </span>
+
+                <h2>
+                  Complete Employee
+                  Management
+                </h2>
+
+                <p>
+                  Attendance, leave,
+                  holidays, shifts and
+                  salary management will
+                  be available here.
+                </p>
+              </div>
+
+              <div className="hr-symbol">
+                👥
+              </div>
+            </div>
+
+            <div className="hr-feature-grid">
+              <div className="hr-feature">
+                <span>✓</span>
+                <div>
+                  <strong>
+                    Attendance
+                  </strong>
+                  <small>
+                    Daily & monthly
+                  </small>
+                </div>
+              </div>
+
+              <div className="hr-feature">
+                <span>📅</span>
+                <div>
+                  <strong>
+                    Leave
+                  </strong>
+                  <small>
+                    Leave management
+                  </small>
+                </div>
+              </div>
+
+              <div className="hr-feature">
+                <span>₹</span>
+                <div>
+                  <strong>
+                    Salary
+                  </strong>
+                  <small>
+                    Salary & deductions
+                  </small>
+                </div>
+              </div>
+
+              <div className="hr-feature">
+                <span>🗓</span>
+                <div>
+                  <strong>
+                    Holidays
+                  </strong>
+                  <small>
+                    Holiday calendar
+                  </small>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {/* =====================================================
           STYLES
-      =================================================== */}
-
+      ====================================================== */}
       <style>{`
-
         * {
           box-sizing: border-box;
         }
 
-        body {
-          margin: 0;
-          font-family:
-            Arial,
-            Helvetica,
-            sans-serif;
-          background: #f5f7fb;
-          color: #172b4d;
-        }
-
-        button {
-          font-family: inherit;
-        }
-
-        /* ================================
-           DASHBOARD
-        ================================= */
-
-        .dashboard {
+        .office-dashboard {
           min-height: 100vh;
           background: #f5f7fb;
+          color: #102a43;
+          font-family:
+            Inter,
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            Arial,
+            sans-serif;
         }
 
-        /* ================================
-           HEADER
-        ================================= */
+        /* ================================================
+           SIDEBAR
+        ================================================= */
 
-        .dashboard-header {
-          height: 74px;
-
-          background: #ffffff;
-
-          border-bottom:
-            1px solid #e4e7ec;
-
-          display: flex;
-
-          align-items: center;
-
-          justify-content:
-            space-between;
-
-          padding:
-            0 28px;
-
-          position: sticky;
-
+        .office-sidebar {
+          position: fixed;
           top: 0;
-
-          z-index: 20;
-        }
-
-        .header-left {
-          display: flex;
-
-          align-items: center;
-
-          gap: 14px;
-        }
-
-        .dashboard-menu-btn {
-          width: 40px;
-          height: 40px;
-
-          border:
-            1px solid #d0d5dd;
-
-          border-radius: 9px;
-
+          left: 0;
+          width: 285px;
+          height: 100vh;
           background: #ffffff;
-
+          border-right: 1px solid #e5eaf0;
+          z-index: 1000;
+          transform: translateX(-105%);
+          transition:
+            transform 0.28s ease,
+            box-shadow 0.28s ease;
           display: flex;
-
           flex-direction: column;
-
-          justify-content: center;
-
-          align-items: center;
-
-          gap: 4px;
-
-          cursor: pointer;
+          box-shadow:
+            10px 0 40px
+            rgba(15, 23, 42, 0.08);
         }
 
-        .dashboard-menu-btn span {
-          width: 17px;
-          height: 2px;
-
-          border-radius: 3px;
-
-          background: #173b68;
+        .office-sidebar.sidebar-open {
+          transform: translateX(0);
+          box-shadow:
+            15px 0 50px
+            rgba(15, 23, 42, 0.16);
         }
-
-        .dashboard-header h1 {
-          margin: 0;
-
-          font-size: 20px;
-
-          color: #173b68;
-        }
-
-        .dashboard-header p {
-          margin:
-            3px 0 0;
-
-          color: #667085;
-
-          font-size: 11px;
-        }
-
-        .user-section {
-          display: flex;
-
-          align-items: center;
-
-          gap: 16px;
-        }
-
-        .user-info {
-          display: flex;
-
-          flex-direction: column;
-
-          align-items: flex-end;
-        }
-
-        .user-info strong {
-          font-size: 13px;
-        }
-
-        .user-info span {
-          margin-top: 3px;
-
-          color: #245a96;
-
-          font-size: 11px;
-        }
-
-        .logout-btn {
-          border: none;
-
-          background: #eef3f8;
-
-          color: #245a96;
-
-          padding:
-            9px 15px;
-
-          border-radius: 8px;
-
-          font-weight: 700;
-
-          cursor: pointer;
-        }
-
-        /* ================================
-           SIDEBAR OVERLAY
-        ================================= */
 
         .sidebar-overlay {
           position: fixed;
-
           inset: 0;
-
           background:
-            rgba(
-              15,
-              23,
-              42,
-              .35
-            );
-
-          z-index: 40;
+            rgba(15, 23, 42, 0.35);
+          z-index: 999;
+          backdrop-filter: blur(2px);
         }
 
-        /* ================================
-           SIDEBAR
-        ================================= */
-
-        .sidebar {
-          position: fixed;
-
-          top: 0;
-          left: 0;
-          bottom: 0;
-
-          width: 282px;
-
-          background: #ffffff;
-
-          box-shadow:
-            10px 0 32px
-            rgba(
-              15,
-              23,
-              42,
-              .15
-            );
-
-          transform:
-            translateX(-105%);
-
-          transition:
-            transform .23s ease;
-
-          z-index: 50;
-
+        .sidebar-header {
+          min-height: 76px;
+          padding: 16px 16px 14px 20px;
+          border-bottom: 1px solid #edf0f4;
           display: flex;
-
-          flex-direction: column;
-
-          padding:
-            12px;
-
-          overflow-y: auto;
-
-          overflow-x: hidden;
-
-          scrollbar-width: thin;
-
-          scrollbar-color:
-            #d0d5dd
-            transparent;
-        }
-
-        .sidebar.sidebar-open {
-          transform:
-            translateX(0);
-        }
-
-        .sidebar::-webkit-scrollbar {
-          width: 5px;
-        }
-
-        .sidebar::-webkit-scrollbar-thumb {
-          background:
-            #d0d5dd;
-
-          border-radius:
-            10px;
-        }
-
-        /* ================================
-           SIDEBAR TOP
-        ================================= */
-
-        .sidebar-top {
-          min-height: 58px;
-
-          display: flex;
-
           align-items: center;
-
-          justify-content:
-            space-between;
-
-          padding:
-            3px 7px 12px;
-
-          border-bottom:
-            1px solid #eaecf0;
-
-          flex-shrink: 0;
+          justify-content: space-between;
         }
 
         .sidebar-brand {
-          color: #173b68;
-
-          font-size: 16px;
-
-          font-weight: 800;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
         }
 
-        .sidebar-subtitle {
-          color: #98a2b3;
+        .brand-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 11px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #edf5ff;
+          font-size: 20px;
+          flex-shrink: 0;
+        }
 
-          font-size: 9px;
+        .brand-title {
+          font-size: 14px;
+          font-weight: 800;
+          color: #123b68;
+        }
 
+        .brand-subtitle {
           margin-top: 3px;
+          font-size: 10px;
+          color: #8290a3;
         }
 
         .sidebar-close {
           width: 32px;
           height: 32px;
-
-          border: none;
-
-          border-radius: 8px;
-
-          background:
-            #f2f4f7;
-
-          color: #344054;
-
-          font-size: 21px;
-
-          cursor: pointer;
-        }
-
-        /* ================================
-           SIDEBAR SECTION
-        ================================= */
-
-        .sidebar-section {
-          margin-top: 13px;
-        }
-
-        .sidebar-heading {
-          padding:
-            0 7px 6px;
-
-          font-size: 9px;
-
-          font-weight: 800;
-
-          letter-spacing: .9px;
-
-          color: #98a2b3;
-        }
-
-        .sidebar-nav {
-          display: grid;
-
-          gap: 2px;
-        }
-
-        .side-item {
-          width: 100%;
-
-          min-height: 39px;
-
-          border: none;
-
-          background:
-            transparent;
-
-          color: #667085;
-
-          padding:
-            6px 7px;
-
+          border: 0;
           border-radius: 9px;
-
-          display: flex;
-
-          align-items: center;
-
-          gap: 9px;
-
-          text-align: left;
-
-          font-size: 12px;
-
-          font-weight: 600;
-
+          background: #f2f5f8;
+          color: #64748b;
+          font-size: 22px;
           cursor: pointer;
-
-          transition:
-            background .15s ease,
-            color .15s ease;
         }
 
-        .side-item:hover {
-          background:
-            #eef4fb;
-
-          color:
-            #173b68;
+        .sidebar-close:hover {
+          background: #e8edf3;
         }
 
-        .side-icon {
-          width: 30px;
-          height: 30px;
+        .sidebar-scroll {
+          flex: 1;
+          overflow-y: auto;
+          padding: 18px 12px 15px;
+        }
 
-          border-radius: 8px;
+        .menu-section {
+          margin-bottom: 22px;
+        }
 
-          background:
-            #f3f7fc;
+        .menu-section-title {
+          padding: 0 10px 9px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 1px;
+          color: #8a98aa;
+        }
 
-          color:
-            #245a96;
-
+        .sidebar-item {
+          width: 100%;
+          min-height: 46px;
+          padding: 7px 10px;
+          border: 0;
+          border-radius: 11px;
+          background: transparent;
           display: flex;
-
           align-items: center;
+          gap: 11px;
+          color: #65748a;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          text-align: left;
+          margin-bottom: 4px;
+          transition:
+            background 0.18s ease,
+            color 0.18s ease,
+            transform 0.18s ease;
+        }
 
+        .sidebar-item:hover {
+          background: #f3f7fc;
+          color: #174f87;
+        }
+
+        .sidebar-item.active {
+          background: #eaf3ff;
+          color: #14558f;
+          font-weight: 750;
+        }
+
+        .sidebar-item.disabled {
+          opacity: 0.78;
+        }
+
+        .sidebar-item.disabled:hover {
+          background: #f7f8fa;
+          color: #65748a;
+          transform: none;
+        }
+
+        .menu-icon {
+          width: 31px;
+          height: 31px;
+          border-radius: 9px;
+          background: #f2f6fb;
+          display: flex;
+          align-items: center;
           justify-content: center;
-
+          font-size: 14px;
           flex-shrink: 0;
+        }
 
+        .sidebar-item.active .menu-icon {
+          background: #dcecff;
+        }
+
+        .menu-text {
+          flex: 1;
+        }
+
+        .soon-badge {
+          padding: 3px 8px;
+          border-radius: 20px;
+          background: #f5f6f8;
+          color: #a5afbc;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .sidebar-footer {
+          border-top: 1px solid #edf0f4;
+          padding: 13px;
+        }
+
+        .sidebar-user {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 11px;
+          padding: 7px;
+        }
+
+        .user-avatar {
+          width: 38px;
+          height: 38px;
+          border-radius: 50%;
+          background: #dcecff;
+          color: #15548d;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+        }
+
+        .sidebar-user-info {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .sidebar-user-info strong {
+          color: #183b61;
+          font-size: 12px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .sidebar-user-info span {
+          margin-top: 3px;
+          color: #8b98a9;
+          font-size: 10px;
+        }
+
+        .sidebar-logout {
+          width: 100%;
+          height: 40px;
+          border: 1px solid #e8edf2;
+          border-radius: 10px;
+          background: #fff;
+          color: #6b7789;
+          cursor: pointer;
+          font-weight: 650;
+          font-size: 12px;
+        }
+
+        .sidebar-logout:hover {
+          background: #f7f9fb;
+          color: #174f87;
+        }
+
+        .sidebar-logout span {
+          margin-right: 7px;
+        }
+
+        /* ================================================
+           MAIN
+        ================================================= */
+
+        .dashboard-main {
+          min-height: 100vh;
+        }
+
+        .dashboard-header {
+          height: 76px;
+          padding: 0 28px;
+          background: #ffffff;
+          border-bottom: 1px solid #e6eaf0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+
+        .header-left {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+        }
+
+        .menu-button {
+          width: 43px;
+          height: 43px;
+          border: 1px solid #e2e8f0;
+          border-radius: 11px;
+          background: #fff;
+          color: #174f87;
+          font-size: 22px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow:
+            0 3px 10px
+            rgba(15, 23, 42, 0.04);
+        }
+
+        .menu-button:hover {
+          background: #f3f7fc;
+        }
+
+        .header-brand {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .header-brand strong {
+          color: #123b68;
+          font-size: 16px;
+        }
+
+        .header-brand span {
+          color: #8a98aa;
+          font-size: 10px;
+          margin-top: 3px;
+        }
+
+        .header-right {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+
+        .header-user {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .header-avatar {
+          width: 37px;
+          height: 37px;
+          border-radius: 50%;
+          background: #e8f2ff;
+          color: #14558f;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
           font-size: 13px;
         }
 
-        .side-label {
-          flex: 1;
-
-          white-space: nowrap;
-        }
-
-        .admin-item {
-          background:
-            #f8fbff;
-        }
-
-        /* ================================
-           SIDEBAR BOTTOM
-        ================================= */
-
-        .sidebar-bottom {
-          margin-top: 14px;
-
-          padding-top: 10px;
-
-          border-top:
-            1px solid #eaecf0;
-
-          flex-shrink: 0;
-        }
-
-        .side-logout {
-          width: 100%;
-
-          min-height: 40px;
-
-          border: none;
-
-          border-radius: 9px;
-
-          background:
-            #fef3f2;
-
-          color:
-            #b42318;
-
+        .header-user-info {
           display: flex;
-
-          align-items: center;
-
-          gap: 9px;
-
-          padding:
-            7px;
-
-          font-size: 12px;
-
-          font-weight: 700;
-
-          cursor: pointer;
-        }
-
-        .side-logout .side-icon {
-          color: #b42318;
-
-          background:
-            #ffffff;
-        }
-
-        /* ================================
-           CONTENT
-        ================================= */
-
-        .dashboard-content {
-          max-width: 1400px;
-
-          margin:
-            0 auto;
-
-          padding:
-            30px 28px;
-        }
-
-        /* ================================
-           WELCOME
-        ================================= */
-
-        .welcome-card {
-          background:
-            linear-gradient(
-              135deg,
-              #245a96,
-              #174579
-            );
-
-          color: #ffffff;
-
-          border-radius:
-            17px;
-
-          padding:
-            27px;
-
-          display: flex;
-
-          justify-content:
-            space-between;
-
-          align-items:
-            center;
-        }
-
-        .welcome-small {
-          font-size: 9px;
-
-          font-weight: 800;
-
-          letter-spacing:
-            1px;
-
-          opacity: .7;
-
-          margin-bottom:
-            7px;
-        }
-
-        .welcome-card h2 {
-          margin: 0;
-
-          font-size: 23px;
-        }
-
-        .welcome-card p {
-          margin:
-            7px 0 0;
-
-          font-size: 12px;
-
-          opacity: .9;
-        }
-
-        .role-area {
+          flex-direction: column;
           text-align: right;
         }
 
-        .role-label {
-          display: block;
+        .header-user-info strong {
+          color: #153d65;
+          font-size: 12px;
+        }
 
-          font-size: 9px;
+        .header-user-info span {
+          color: #8996a8;
+          font-size: 10px;
+          margin-top: 2px;
+        }
 
-          opacity: .7;
+        .header-logout {
+          height: 38px;
+          padding: 0 16px;
+          border: 0;
+          border-radius: 10px;
+          background: #edf3f9;
+          color: #184f84;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
 
-          margin-bottom: 5px;
+        .header-logout:hover {
+          background: #e1ebf5;
+        }
+
+        /* ================================================
+           CONTENT
+        ================================================= */
+
+        .dashboard-content {
+          max-width: 1380px;
+          margin: 0 auto;
+          padding: 38px 28px 60px;
+        }
+
+        .welcome-banner {
+          min-height: 154px;
+          padding: 28px 30px;
+          border-radius: 18px;
+          background:
+            linear-gradient(
+              135deg,
+              #1d558e 0%,
+              #245f9b 55%,
+              #17497d 100%
+            );
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          box-shadow:
+            0 15px 35px
+            rgba(29, 85, 142, 0.18);
+        }
+
+        .welcome-small {
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 1.4px;
+          opacity: 0.72;
+          margin-bottom: 7px;
+        }
+
+        .welcome-banner h1 {
+          margin: 0;
+          font-size: 25px;
+          line-height: 1.25;
+        }
+
+        .welcome-banner p {
+          margin: 8px 0 0;
+          font-size: 13px;
+          opacity: 0.85;
+          max-width: 600px;
         }
 
         .role-badge {
-          display: inline-block;
-
-          padding:
-            7px 13px;
-
-          border-radius:
-            18px;
-
+          padding: 10px 17px;
+          border-radius: 25px;
           background:
-            rgba(
-              255,
-              255,
-              255,
-              .15
-            );
-
-          font-size: 11px;
-
-          font-weight: 700;
-        }
-
-        /* ================================
-           STATS
-        ================================= */
-
-        .stats-grid {
-          display: grid;
-
-          grid-template-columns:
-            repeat(4, 1fr);
-
-          gap:
-            16px;
-
-          margin-top:
-            20px;
-        }
-
-        .stat-card {
-          background:
-            #ffffff;
-
+            rgba(255,255,255,0.14);
           border:
-            1px solid #e4e7ec;
-
-          border-radius:
-            13px;
-
-          padding:
-            17px;
-
-          display: flex;
-
-          align-items:
-            center;
-
-          gap:
-            12px;
-        }
-
-        .stat-card.clickable {
-          cursor: pointer;
-
-          transition:
-            transform .18s ease,
-            box-shadow .18s ease;
-        }
-
-        .stat-card.clickable:hover {
-          transform:
-            translateY(-2px);
-
-          box-shadow:
-            0 8px 20px
-            rgba(
-              36,
-              90,
-              150,
-              .08
-            );
-        }
-
-        .stat-icon {
-          width: 42px;
-          height: 42px;
-
-          border-radius:
-            10px;
-
-          background:
-            #eef4fb;
-
-          color:
-            #245a96;
-
-          display: flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          font-weight:
-            800;
-
+            1px solid
+            rgba(255,255,255,0.16);
+          font-size: 12px;
+          font-weight: 750;
           flex-shrink: 0;
         }
 
-        .stat-content span {
-          display: block;
+        /* ================================================
+           SUMMARY
+        ================================================= */
 
-          color:
-            #667085;
-
-          font-size:
-            11px;
-        }
-
-        .stat-content strong {
-          display: block;
-
-          margin-top:
-            3px;
-
-          color:
-            #173b68;
-
-          font-size:
-            21px;
-        }
-
-        .stat-content small {
-          display: block;
-
-          margin-top:
-            3px;
-
-          color:
-            #98a2b3;
-
-          font-size:
-            9px;
-        }
-
-        /* ================================
-           MODULES
-        ================================= */
-
-        .modules-section {
-          margin-top:
-            28px;
-        }
-
-        .section-header {
-          display: flex;
-
-          align-items:
-            flex-end;
-
-          justify-content:
-            space-between;
-
-          margin-bottom:
-            14px;
-        }
-
-        .section-kicker {
-          color:
-            #98a2b3;
-
-          font-size:
-            9px;
-
-          font-weight:
-            800;
-
-          letter-spacing:
-            1px;
-        }
-
-        .section-header h2 {
-          margin:
-            4px 0 3px;
-
-          font-size:
-            18px;
-        }
-
-        .section-header p {
-          margin: 0;
-
-          color:
-            #667085;
-
-          font-size:
-            11px;
-        }
-
-        .open-menu-link {
-          border:
-            1px solid #d0d5dd;
-
-          background:
-            #ffffff;
-
-          color:
-            #245a96;
-
-          padding:
-            8px 11px;
-
-          border-radius:
-            8px;
-
-          font-size:
-            10px;
-
-          font-weight:
-            700;
-
-          cursor:
-            pointer;
-        }
-
-        .modules-grid {
+        .summary-grid {
           display: grid;
-
           grid-template-columns:
-            repeat(3, 1fr);
-
-          gap:
-            14px;
+            repeat(4, minmax(0, 1fr));
+          gap: 18px;
+          margin-top: 23px;
         }
 
-        .module-card {
-          background:
-            #ffffff;
-
-          border:
-            1px solid #e4e7ec;
-
-          border-radius:
-            13px;
-
-          min-height:
-            88px;
-
-          padding:
-            16px;
-
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          gap:
-            12px;
-        }
-
-        .module-card.clickable {
-          cursor:
-            pointer;
-
+        .summary-card {
+          min-height: 138px;
+          background: #fff;
+          border: 1px solid #e1e7ee;
+          border-radius: 16px;
+          padding: 21px;
+          display: flex;
+          align-items: center;
+          gap: 15px;
           transition:
-            transform .18s ease,
-            box-shadow .18s ease;
+            transform 0.2s ease,
+            box-shadow 0.2s ease;
         }
 
-        .module-card.clickable:hover {
-          transform:
-            translateY(-2px);
-
+        .summary-card:hover {
+          transform: translateY(-2px);
           box-shadow:
-            0 8px 22px
-            rgba(
-              36,
-              90,
-              150,
-              .08
-            );
+            0 12px 28px
+            rgba(15, 23, 42, 0.07);
         }
 
-        .module-icon {
-          width:
-            43px;
-
-          height:
-            43px;
-
-          border-radius:
-            10px;
-
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          flex-shrink:
-            0;
-
-          font-weight:
-            800;
+        .summary-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 13px;
+          background: #edf5ff;
+          color: #1760a0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 19px;
+          font-weight: 800;
+          flex-shrink: 0;
         }
 
-        .module-icon.expense {
-          background:
-            #eef4fb;
-
-          color:
-            #245a96;
+        .summary-card > div:last-child {
+          display: flex;
+          flex-direction: column;
         }
 
-        .module-icon.attendance {
-          background:
-            #ecfdf3;
-
-          color:
-            #027a48;
+        .summary-card span {
+          color: #66768a;
+          font-size: 11px;
         }
 
-        .module-icon.leave {
-          background:
-            #fffaeb;
-
-          color:
-            #b54708;
+        .summary-card strong {
+          color: #123f6d;
+          font-size: 25px;
+          line-height: 1.15;
+          margin-top: 6px;
         }
 
-        .module-icon.holiday {
-          background:
-            #fdf2fa;
-
-          color:
-            #c11574;
+        .summary-card small {
+          color: #99a4b3;
+          font-size: 10px;
+          margin-top: 5px;
         }
 
-        .module-icon.payroll {
-          background:
-            #f2f4ff;
+        /* ================================================
+           QUICK ACCESS
+        ================================================= */
 
-          color:
-            #5148a8;
+        .quick-section {
+          margin-top: 36px;
         }
 
-        .module-icon.employees {
-          background:
-            #eef4fb;
-
-          color:
-            #245a96;
+        .section-heading {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 15px;
         }
 
-        .module-card h3 {
-          margin:
-            0;
-
-          font-size:
-            13px;
+        .section-heading h2 {
+          margin: 0;
+          color: #123b68;
+          font-size: 19px;
         }
 
-        .module-card p {
-          margin:
-            4px 0 0;
-
-          color:
-            #667085;
-
-          font-size:
-            10px;
+        .section-heading p {
+          margin: 4px 0 0;
+          color: #8b98a9;
+          font-size: 11px;
         }
 
-        .card-arrow {
-          margin-left:
-            auto;
-
-          color:
-            #98a2b3;
-
-          font-size:
-            15px;
-        }
-
-        /* ================================
-           HR PREVIEW
-        ================================= */
-
-        .attendance-preview {
-          margin-top:
-            20px;
-
-          background:
-            #ffffff;
-
-          border:
-            1px solid #e4e7ec;
-
-          border-radius:
-            14px;
-
-          padding:
-            20px;
-        }
-
-        .attendance-preview-header {
-          display:
-            flex;
-
-          justify-content:
-            space-between;
-
-          align-items:
-            center;
-        }
-
-        .attendance-preview-header h2 {
-          margin:
-            4px 0 0;
-
-          font-size:
-            17px;
-        }
-
-        .preview-badge {
-          padding:
-            4px 8px;
-
-          border-radius:
-            8px;
-
-          background:
-            #f2f4f7;
-
-          color:
-            #667085;
-
-          font-size:
-            8px;
-
-          font-weight:
-            700;
-        }
-
-        .attendance-preview-grid {
-          display:
-            grid;
-
+        .quick-grid {
+          display: grid;
           grid-template-columns:
-            repeat(4, 1fr);
-
-          gap:
-            12px;
-
-          margin-top:
-            16px;
+            repeat(4, minmax(0, 1fr));
+          gap: 17px;
         }
 
-        .preview-box {
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          gap:
-            9px;
-
-          border:
-            1px solid #eaecf0;
-
-          border-radius:
-            10px;
-
-          padding:
-            11px;
+        .quick-card {
+          min-height: 108px;
+          border: 1px solid #e1e7ee;
+          border-radius: 15px;
+          background: #fff;
+          padding: 18px;
+          display: flex;
+          align-items: center;
+          gap: 13px;
+          text-align: left;
+          cursor: pointer;
+          transition:
+            transform 0.2s ease,
+            box-shadow 0.2s ease,
+            border-color 0.2s ease;
         }
 
-        .preview-icon {
-          width:
-            34px;
-
-          height:
-            34px;
-
-          border-radius:
-            8px;
-
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          flex-shrink:
-            0;
+        .quick-card:hover {
+          transform: translateY(-2px);
+          border-color: #cbdced;
+          box-shadow:
+            0 12px 26px
+            rgba(15, 23, 42, 0.07);
         }
 
-        .preview-icon.present {
-          background:
-            #ecfdf3;
-
-          color:
-            #027a48;
+        .quick-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 11px;
+          background: #edf5ff;
+          color: #1760a0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+          flex-shrink: 0;
         }
 
-        .preview-icon.leave {
-          background:
-            #fffaeb;
-
-          color:
-            #b54708;
+        .quick-content {
+          display: flex;
+          flex-direction: column;
+          flex: 1;
         }
 
-        .preview-icon.holiday {
-          background:
-            #fdf2fa;
-
-          color:
-            #c11574;
+        .quick-content strong {
+          color: #143c65;
+          font-size: 13px;
         }
 
-        .preview-icon.salary {
-          background:
-            #f2f4ff;
-
-          color:
-            #5148a8;
+        .quick-content span {
+          color: #8290a3;
+          font-size: 10px;
+          margin-top: 4px;
         }
 
-        .preview-box strong {
-          display:
-            block;
-
-          font-size:
-            11px;
+        .quick-arrow {
+          color: #91a0b1;
+          font-size: 18px;
         }
 
-        .preview-box span {
-          display:
-            block;
-
-          margin-top:
-            3px;
-
-          color:
-            #98a2b3;
-
-          font-size:
-            9px;
+        .disabled-card {
+          cursor: default;
         }
 
-        /* ================================
-           RESPONSIVE
-        ================================= */
+        .disabled-card:hover {
+          transform: none;
+          border-color: #e1e7ee;
+        }
+
+        .card-soon {
+          padding: 4px 8px;
+          border-radius: 20px;
+          background: #f4f6f8;
+          color: #a1abb8;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        /* ================================================
+           HR PREVIEW
+        ================================================= */
+
+        .hr-preview {
+          margin-top: 28px;
+          background: #fff;
+          border: 1px solid #e1e7ee;
+          border-radius: 18px;
+          padding: 25px;
+        }
+
+        .hr-preview-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .section-label {
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 1.2px;
+          color: #8b98a9;
+        }
+
+        .hr-preview h2 {
+          margin: 6px 0 5px;
+          color: #153e67;
+          font-size: 19px;
+        }
+
+        .hr-preview-header p {
+          margin: 0;
+          color: #8794a5;
+          font-size: 11px;
+          max-width: 650px;
+          line-height: 1.6;
+        }
+
+        .hr-symbol {
+          width: 58px;
+          height: 58px;
+          border-radius: 15px;
+          background: #edf5ff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 25px;
+        }
+
+        .hr-feature-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(4, minmax(0, 1fr));
+          gap: 12px;
+          margin-top: 22px;
+        }
+
+        .hr-feature {
+          padding: 14px;
+          border-radius: 12px;
+          background: #f8fafc;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .hr-feature > span {
+          width: 34px;
+          height: 34px;
+          border-radius: 9px;
+          background: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+        }
+
+        .hr-feature div {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .hr-feature strong {
+          color: #31506f;
+          font-size: 11px;
+        }
+
+        .hr-feature small {
+          color: #99a4b2;
+          font-size: 9px;
+          margin-top: 3px;
+        }
+
+        /* ================================================
+           TABLET
+        ================================================= */
 
         @media (max-width: 1100px) {
-
-          .stats-grid {
+          .summary-grid {
             grid-template-columns:
-              repeat(2, 1fr);
+              repeat(2, minmax(0, 1fr));
           }
 
-          .modules-grid {
+          .quick-grid {
             grid-template-columns:
-              repeat(2, 1fr);
+              repeat(2, minmax(0, 1fr));
           }
 
-          .attendance-preview-grid {
+          .hr-feature-grid {
             grid-template-columns:
-              repeat(2, 1fr);
+              repeat(2, minmax(0, 1fr));
           }
         }
 
-        @media (max-width: 650px) {
+        /* ================================================
+           MOBILE
+        ================================================= */
 
+        @media (max-width: 700px) {
           .dashboard-header {
-            height:
-              64px;
-
-            padding:
-              0 14px;
+            height: 66px;
+            padding: 0 14px;
           }
 
-          .dashboard-header h1 {
-            font-size:
-              16px;
+          .header-brand span {
+            display: none;
           }
 
-          .dashboard-header p {
-            font-size:
-              9px;
+          .header-brand strong {
+            font-size: 13px;
           }
 
-          .user-info {
-            display:
-              none;
+          .header-user-info {
+            display: none;
           }
 
-          .logout-btn {
-            padding:
-              8px 10px;
+          .header-logout {
+            padding: 0 11px;
+            font-size: 11px;
+          }
 
-            font-size:
-              10px;
+          .menu-button {
+            width: 39px;
+            height: 39px;
           }
 
           .dashboard-content {
-            padding:
-              18px 14px;
+            padding: 20px 14px 40px;
           }
 
-          .welcome-card {
-            flex-direction:
-              column;
-
-            align-items:
-              flex-start;
-
-            gap:
-              14px;
-
-            padding:
-              21px;
+          .welcome-banner {
+            padding: 22px;
+            min-height: auto;
+            align-items: flex-start;
+            gap: 18px;
           }
 
-          .welcome-card h2 {
-            font-size:
-              19px;
+          .welcome-banner h1 {
+            font-size: 21px;
           }
 
-          .role-area {
-            text-align:
-              left;
+          .welcome-banner p {
+            font-size: 11px;
+            line-height: 1.55;
           }
 
-          .stats-grid,
-          .modules-grid,
-          .attendance-preview-grid {
+          .role-badge {
+            display: none;
+          }
+
+          .summary-grid {
             grid-template-columns:
-              1fr;
+              repeat(2, minmax(0, 1fr));
+            gap: 10px;
           }
 
-          .section-header {
-            flex-direction:
-              column;
-
-            align-items:
-              flex-start;
-
-            gap:
-              10px;
+          .summary-card {
+            min-height: 115px;
+            padding: 14px;
+            gap: 9px;
           }
 
-          .sidebar {
-            width:
-              min(
-                88vw,
-                300px
-              );
+          .summary-icon {
+            width: 38px;
+            height: 38px;
+            font-size: 15px;
+          }
+
+          .summary-card span {
+            font-size: 9px;
+          }
+
+          .summary-card strong {
+            font-size: 20px;
+          }
+
+          .summary-card small {
+            font-size: 8px;
+          }
+
+          .quick-grid {
+            grid-template-columns: 1fr;
+            gap: 10px;
+          }
+
+          .quick-card {
+            min-height: 85px;
+          }
+
+          .hr-feature-grid {
+            grid-template-columns:
+              repeat(2, minmax(0, 1fr));
+          }
+
+          .hr-preview {
+            padding: 18px;
+          }
+
+          .hr-preview-header {
+            align-items: flex-start;
+          }
+
+          .hr-symbol {
+            display: none;
+          }
+
+          .office-sidebar {
+            width: min(285px, 88vw);
           }
         }
 
+        @media (max-width: 430px) {
+          .header-right {
+            gap: 7px;
+          }
+
+          .header-avatar {
+            display: none;
+          }
+
+          .summary-card {
+            padding: 11px;
+          }
+
+          .summary-icon {
+            display: none;
+          }
+
+          .hr-feature {
+            padding: 11px;
+          }
+        }
       `}</style>
     </div>
   );
