@@ -9,32 +9,26 @@ import {
 import Login from "./pages/Login.jsx";
 import Expense from "./pages/Expense.jsx";
 import Users from "./pages/Users.jsx";
-import Payroll from "./pages/Payroll.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { startSessionManager } from "./lib/sessionManager.js";
 
-// Start one global session manager for the whole SPA.
-// It keeps the session alive while the user is active
-// and logs the user out after 60 minutes of inactivity.
+import Employees from "./pages/Employees.jsx";
+import Attendance from "./pages/Attendance.jsx";
+import LeaveManagement from "./pages/LeaveManagement.jsx";
+import HolidayCalendar from "./pages/HolidayCalendar.jsx";
+import Salary from "./pages/Salary.jsx";
+
 startSessionManager();
 
-const Dashboard = lazy(
-  () => import("./pages/Dashboard.jsx")
-);
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
 
 function LoadingScreen() {
   return (
     <div className="app-loading">
       <div className="loading-card">
-        <div className="loading-spinner"></div>
-
-        <h3>
-          Office Management
-        </h3>
-
-        <p>
-          Loading...
-        </p>
+        <div className="loading-spinner" />
+        <h3>Office Management</h3>
+        <p>Loading...</p>
       </div>
     </div>
   );
@@ -43,195 +37,79 @@ function LoadingScreen() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Suspense
-        fallback={<LoadingScreen />}
-      >
+      <Suspense fallback={<LoadingScreen />}>
         <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-          {/* =====================================
-              ROOT
-          ====================================== */}
+          <Route path="/login" element={<Login />} />
 
-          <Route
-            path="/"
-            element={
-              <Navigate
-                to="/dashboard"
-                replace
-              />
-            }
-          />
+          <Route element={<ProtectedRoute />}>
+            {/* Existing modules */}
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/expenses" element={<Expense />} />
 
-          {/* =====================================
-              LOGIN
-          ====================================== */}
+            {/* HR MODULE */}
+            <Route path="/employees" element={<Employees />} />
+            <Route path="/attendance" element={<Attendance />} />
+            <Route path="/leave" element={<LeaveManagement />} />
+            <Route path="/holidays" element={<HolidayCalendar />} />
 
-          <Route
-            path="/login"
-            element={<Login />}
-          />
-
-          {/* =====================================
-              PROTECTED USER ROUTES
-          ====================================== */}
-
-          <Route
-            element={
-              <ProtectedRoute />
-            }
-          >
-
-            {/* Dashboard */}
-            <Route
-              path="/dashboard"
-              element={<Dashboard />}
-            />
-
-            {/* Expenses */}
-            <Route
-              path="/expenses"
-              element={<Expense />}
-            />
-
-            {/* Payroll */}
-            <Route
-              path="/payroll"
-              element={<Payroll />}
-            />
-
+            {/* Salary / Payroll: all dashboard salary links open the same working page */}
+            <Route path="/salary" element={<Salary />} />
+            <Route path="/salary/slips" element={<Salary />} />
+            <Route path="/payroll" element={<Salary />} />
           </Route>
 
-          {/* =====================================
-              ADMIN ONLY
-          ====================================== */}
-
-          <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={[
-                  "Admin",
-                ]}
-              />
-            }
-          >
-
-            {/* User Management */}
-            <Route
-              path="/users"
-              element={<Users />}
-            />
-
+          {/* Admin only */}
+          <Route element={<ProtectedRoute allowedRoles={["Admin"]} />}>
+            <Route path="/users" element={<Users />} />
           </Route>
 
-          {/* =====================================
-              UNKNOWN ROUTE
-          ====================================== */}
+          {/* These pages are not implemented yet; keep the user inside the app */}
+          <Route path="/approvals" element={<Navigate to="/expenses" replace />} />
+          <Route path="/reports" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/reports/attendance" element={<Navigate to="/attendance" replace />} />
+          <Route path="/reports/leave" element={<Navigate to="/leave" replace />} />
+          <Route path="/reports/salary" element={<Navigate to="/salary" replace />} />
+          <Route path="/shifts" element={<Navigate to="/attendance" replace />} />
+          <Route path="/security" element={<Navigate to="/dashboard" replace />} />
 
-          <Route
-            path="*"
-            element={
-              <Navigate
-                to="/dashboard"
-                replace
-              />
-            }
-          />
-
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Suspense>
 
-      {/* =======================================
-          LOADING STYLES
-      ======================================== */}
-
       <style>{`
-
         .app-loading {
           min-height: 100vh;
-
           display: flex;
-
           align-items: center;
-
           justify-content: center;
-
           background: #f5f7fb;
-
-          font-family:
-            Arial,
-            sans-serif;
+          font-family: Arial, sans-serif;
         }
-
         .loading-card {
           width: 280px;
-
-          padding:
-            30px 25px;
-
+          padding: 30px 25px;
           background: #fff;
-
           border-radius: 16px;
-
           text-align: center;
-
-          box-shadow:
-            0 10px 35px
-            rgba(0, 0, 0, 0.08);
+          box-shadow: 0 10px 35px rgba(0,0,0,.08);
         }
-
         .loading-spinner {
           width: 38px;
           height: 38px;
-
-          margin:
-            0 auto 18px;
-
-          border:
-            4px solid #e5e7eb;
-
-          border-top-color:
-            #245a96;
-
+          margin: 0 auto 18px;
+          border: 4px solid #e5e7eb;
+          border-top-color: #245a96;
           border-radius: 50%;
-
-          animation:
-            officeAppSpin
-            0.8s
-            linear
-            infinite;
+          animation: officeAppSpin .8s linear infinite;
         }
-
-        .loading-card h3 {
-          margin: 0;
-
-          color:
-            #172b4d;
-        }
-
-        .loading-card p {
-          margin:
-            7px 0 0;
-
-          color:
-            #667085;
-
-          font-size: 13px;
-        }
-
+        .loading-card h3 { margin: 0; color: #172b4d; }
+        .loading-card p { margin: 7px 0 0; color: #667085; font-size: 13px; }
         @keyframes officeAppSpin {
-
-          from {
-            transform:
-              rotate(0deg);
-          }
-
-          to {
-            transform:
-              rotate(360deg);
-          }
-
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
-
       `}</style>
     </BrowserRouter>
   );
