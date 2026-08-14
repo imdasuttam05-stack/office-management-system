@@ -10,7 +10,6 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
-import payrollRoutes from "./routes/payrollRoutes.js";
 
 import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
 
@@ -27,7 +26,6 @@ const PORT =
 
 /* =========================================================
    OPTIONAL USER ROUTES
-   Prevent Render crash if userRoutes.js is not yet deployed
 ========================================================= */
 
 let userRoutes = null;
@@ -45,6 +43,32 @@ try {
 } catch (error) {
   console.warn(
     "WARNING: userRoutes.js not found. User Management API is disabled."
+  );
+
+  console.warn(
+    error?.message || error
+  );
+}
+
+/* =========================================================
+   OPTIONAL PAYROLL / HR ROUTES
+========================================================= */
+
+let payrollRoutes = null;
+
+try {
+  const payrollModule =
+    await import("./routes/payrollRoutes.js");
+
+  payrollRoutes =
+    payrollModule.default || null;
+
+  console.log(
+    "Payroll / HR routes loaded successfully."
+  );
+} catch (error) {
+  console.warn(
+    "WARNING: payrollRoutes.js not found. Payroll / HR API is disabled."
   );
 
   console.warn(
@@ -109,7 +133,8 @@ app.use(
 app.use(
   cors({
     origin(origin, callback) {
-      // Allow server-to-server / Postman requests
+
+      // Allow Postman / server-to-server
       if (!origin) {
         return callback(
           null,
@@ -239,7 +264,7 @@ app.get(
         Boolean(userRoutes),
 
       payrollRoutes:
-        true,
+        Boolean(payrollRoutes),
     });
   }
 );
@@ -276,32 +301,56 @@ app.use(
 ========================================================= */
 
 if (userRoutes) {
+
   app.use(
     "/api/users",
     userRoutes
   );
+
 } else {
+
   app.use(
     "/api/users",
     (req, res) => {
+
       res.status(503).json({
         success: false,
 
         message:
           "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
       });
+
     }
   );
 }
 
 /* =========================================================
-   PAYROLL
+   PAYROLL / HR
 ========================================================= */
 
-app.use(
-  "/api/payroll",
-  payrollRoutes
-);
+if (payrollRoutes) {
+
+  app.use(
+    "/api/payroll",
+    payrollRoutes
+  );
+
+} else {
+
+  app.use(
+    "/api/payroll",
+    (req, res) => {
+
+      res.status(503).json({
+        success: false,
+
+        message:
+          "Payroll / HR API is not deployed yet. Please deploy backend/routes/payrollRoutes.js.",
+      });
+
+    }
+  );
+}
 
 /* =========================================================
    OCR
@@ -318,6 +367,7 @@ app.use(
 
 app.use(
   (req, res) => {
+
     res.status(404).json({
       success: false,
 
@@ -330,6 +380,7 @@ app.use(
       method:
         req.method,
     });
+
   }
 );
 
@@ -344,6 +395,7 @@ app.use(
     res,
     next
   ) => {
+
     console.error(
       "SERVER ERROR:",
       err?.stack ||
@@ -366,23 +418,27 @@ app.use(
       err?.code ===
       "LIMIT_FILE_SIZE"
     ) {
+
       return res.status(413).json({
         success: false,
 
         message:
           "Image is too large. Maximum size is 10 MB.",
       });
+
     }
 
     /* Invalid upload */
 
     if (isUploadError) {
+
       return res.status(400).json({
         success: false,
 
         message:
           "Invalid image upload.",
       });
+
     }
 
     /* CORS error */
@@ -394,17 +450,20 @@ app.use(
         "CORS origin not allowed"
       )
     ) {
+
       return res.status(403).json({
         success: false,
 
         message:
           "CORS origin not allowed.",
       });
+
     }
 
     return res.status(
       err?.statusCode || 500
     ).json({
+
       success: false,
 
       message:
@@ -414,6 +473,7 @@ app.use(
           : err?.message ||
             "Internal server error.",
     });
+
   }
 );
 
@@ -425,6 +485,7 @@ app.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
       `Office Management Backend running on port ${PORT}`
     );
@@ -438,7 +499,12 @@ app.listen(
     );
 
     console.log(
-      "Payroll API: ENABLED"
+      `Payroll / HR: ${
+        payrollRoutes
+          ? "ENABLED"
+          : "DISABLED"
+      }`
     );
+
   }
 );
