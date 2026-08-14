@@ -4,15 +4,24 @@ import { useNavigate } from "react-router-dom";
 function Dashboard() {
   const navigate = useNavigate();
 
-  const userData = localStorage.getItem("user");
+  const userData =
+    localStorage.getItem("user");
 
   let user = {};
 
   try {
-    user = JSON.parse(userData || "{}");
+    user = JSON.parse(
+      userData || "{}"
+    );
   } catch {
     user = {};
   }
+
+  const role =
+    user.role || "Employee";
+
+  const isAdmin =
+    role === "Admin";
 
   const logout = () => {
     localStorage.removeItem("token");
@@ -27,6 +36,14 @@ function Dashboard() {
     navigate("/expenses");
   };
 
+  const openUsers = () => {
+    if (!isAdmin) {
+      return;
+    }
+
+    navigate("/users");
+  };
+
   return (
     <div className="dashboard">
       {/* ==========================================
@@ -36,15 +53,20 @@ function Dashboard() {
       <header className="dashboard-header">
         <div>
           <h1>Office Management</h1>
-          <p>Business Management System</p>
+
+          <p>
+            Business Management System
+          </p>
         </div>
 
         <div className="user-section">
           <div className="user-info">
-            <strong>{user.name || "User"}</strong>
+            <strong>
+              {user.name || "User"}
+            </strong>
 
             <span>
-              {user.role || "Employee"}
+              {role}
             </span>
           </div>
 
@@ -71,7 +93,8 @@ function Dashboard() {
         <div className="welcome-card">
           <div>
             <h2>
-              Welcome back, {user.name || "User"} 👋
+              Welcome back,{" "}
+              {user.name || "User"} 👋
             </h2>
 
             <p>
@@ -80,7 +103,7 @@ function Dashboard() {
           </div>
 
           <div className="role-badge">
-            {user.role || "Employee"}
+            {role}
           </div>
         </div>
 
@@ -91,9 +114,13 @@ function Dashboard() {
         <div className="stats-grid">
 
           <div className="stat-card">
-            <span>Total Expenses</span>
+            <span>
+              Total Expenses
+            </span>
 
-            <strong>₹0</strong>
+            <strong>
+              ₹0
+            </strong>
 
             <small>
               This month
@@ -101,9 +128,13 @@ function Dashboard() {
           </div>
 
           <div className="stat-card">
-            <span>Pending Approval</span>
+            <span>
+              Pending Approval
+            </span>
 
-            <strong>0</strong>
+            <strong>
+              0
+            </strong>
 
             <small>
               Waiting for action
@@ -111,9 +142,13 @@ function Dashboard() {
           </div>
 
           <div className="stat-card">
-            <span>Total Employees</span>
+            <span>
+              Total Employees
+            </span>
 
-            <strong>0</strong>
+            <strong>
+              0
+            </strong>
 
             <small>
               Active employees
@@ -121,9 +156,13 @@ function Dashboard() {
           </div>
 
           <div className="stat-card">
-            <span>Pending Tasks</span>
+            <span>
+              Pending Tasks
+            </span>
 
-            <strong>0</strong>
+            <strong>
+              0
+            </strong>
 
             <small>
               Requires attention
@@ -249,7 +288,69 @@ function Dashboard() {
               </div>
             </div>
 
+            {/* ====================================
+                USER MANAGEMENT
+                ADMIN ONLY
+            ==================================== */}
+
+            {isAdmin && (
+              <div
+                className="module-card clickable admin-module"
+                onClick={openUsers}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" ||
+                    event.key === " "
+                  ) {
+                    openUsers();
+                  }
+                }}
+              >
+                <div className="module-icon">
+                  👤
+                </div>
+
+                <div>
+                  <h3>
+                    User Management
+                  </h3>
+
+                  <p>
+                    Create and manage users
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ====================================
+                CHANGE PASSWORD
+                ALL USERS
+            ==================================== */}
+
+            <div
+              className="module-card"
+              role="button"
+              tabIndex={0}
+            >
+              <div className="module-icon">
+                🔐
+              </div>
+
+              <div>
+                <h3>
+                  Security
+                </h3>
+
+                <p>
+                  Change your password
+                </p>
+              </div>
+            </div>
+
           </div>
+
         </section>
 
       </main>
@@ -266,18 +367,25 @@ function Dashboard() {
 
         body {
           margin: 0;
+
           font-family:
             Arial,
             Helvetica,
             sans-serif;
 
-          background: #f5f7fb;
-          color: #172b4d;
+          background:
+            #f5f7fb;
+
+          color:
+            #172b4d;
         }
 
         .dashboard {
-          min-height: 100vh;
-          background: #f5f7fb;
+          min-height:
+            100vh;
+
+          background:
+            #f5f7fb;
         }
 
         /* ========================================
@@ -285,16 +393,20 @@ function Dashboard() {
         ======================================== */
 
         .dashboard-header {
-          min-height: 76px;
+          min-height:
+            76px;
 
-          background: #ffffff;
+          background:
+            #ffffff;
 
           border-bottom:
             1px solid #e4e7ec;
 
-          display: flex;
+          display:
+            flex;
 
-          align-items: center;
+          align-items:
+            center;
 
           justify-content:
             space-between;
@@ -306,18 +418,22 @@ function Dashboard() {
         .dashboard-header h1 {
           margin: 0;
 
-          font-size: 21px;
+          font-size:
+            21px;
 
-          color: #173b68;
+          color:
+            #173b68;
         }
 
         .dashboard-header p {
           margin:
             4px 0 0;
 
-          color: #667085;
+          color:
+            #667085;
 
-          font-size: 13px;
+          font-size:
+            13px;
         }
 
         /* ========================================
@@ -325,55 +441,73 @@ function Dashboard() {
         ======================================== */
 
         .user-section {
-          display: flex;
+          display:
+            flex;
 
-          align-items: center;
+          align-items:
+            center;
 
-          gap: 20px;
+          gap:
+            20px;
         }
 
         .user-info {
-          display: flex;
+          display:
+            flex;
 
-          flex-direction: column;
+          flex-direction:
+            column;
 
-          align-items: flex-end;
+          align-items:
+            flex-end;
         }
 
         .user-info strong {
-          font-size: 14px;
+          font-size:
+            14px;
         }
 
         .user-info span {
-          margin-top: 3px;
+          margin-top:
+            3px;
 
-          font-size: 12px;
+          font-size:
+            12px;
 
-          color: #245a96;
+          color:
+            #245a96;
         }
 
         .logout-btn {
-          border: none;
+          border:
+            none;
 
-          background: #eef3f8;
+          background:
+            #eef3f8;
 
-          color: #245a96;
+          color:
+            #245a96;
 
           padding:
             9px 16px;
 
-          border-radius: 8px;
+          border-radius:
+            8px;
 
-          font-weight: 600;
+          font-weight:
+            600;
 
-          cursor: pointer;
+          cursor:
+            pointer;
 
           transition:
-            background 0.2s ease;
+            background
+            0.2s ease;
         }
 
         .logout-btn:hover {
-          background: #e2ebf5;
+          background:
+            #e2ebf5;
         }
 
         /* ========================================
@@ -381,11 +515,14 @@ function Dashboard() {
         ======================================== */
 
         .dashboard-content {
-          width: 100%;
+          width:
+            100%;
 
-          max-width: 1400px;
+          max-width:
+            1400px;
 
-          margin: 0 auto;
+          margin:
+            0 auto;
 
           padding:
             38px 32px;
@@ -403,18 +540,23 @@ function Dashboard() {
               #174579
             );
 
-          color: white;
+          color:
+            white;
 
-          border-radius: 16px;
+          border-radius:
+            16px;
 
-          padding: 28px;
+          padding:
+            28px;
 
-          display: flex;
+          display:
+            flex;
 
           justify-content:
             space-between;
 
-          align-items: center;
+          align-items:
+            center;
 
           box-shadow:
             0 8px 24px
@@ -427,16 +569,19 @@ function Dashboard() {
         }
 
         .welcome-card h2 {
-          margin: 0;
+          margin:
+            0;
 
-          font-size: 23px;
+          font-size:
+            23px;
         }
 
         .welcome-card p {
           margin:
             8px 0 0;
 
-          font-size: 14px;
+          font-size:
+            14px;
         }
 
         .role-badge {
@@ -451,9 +596,11 @@ function Dashboard() {
           padding:
             8px 14px;
 
-          border-radius: 20px;
+          border-radius:
+            20px;
 
-          font-size: 13px;
+          font-size:
+            13px;
         }
 
         /* ========================================
@@ -461,29 +608,37 @@ function Dashboard() {
         ======================================== */
 
         .stats-grid {
-          display: grid;
+          display:
+            grid;
 
           grid-template-columns:
             repeat(4, 1fr);
 
-          gap: 18px;
+          gap:
+            18px;
 
-          margin-top: 24px;
+          margin-top:
+            24px;
         }
 
         .stat-card {
-          background: white;
+          background:
+            white;
 
           border:
             1px solid #e4e7ec;
 
-          border-radius: 14px;
+          border-radius:
+            14px;
 
-          padding: 22px;
+          padding:
+            22px;
 
           transition:
-            transform 0.2s ease,
-            box-shadow 0.2s ease;
+            transform
+            0.2s ease,
+            box-shadow
+            0.2s ease;
         }
 
         .stat-card:hover {
@@ -501,29 +656,39 @@ function Dashboard() {
         }
 
         .stat-card span {
-          display: block;
+          display:
+            block;
 
-          color: #667085;
+          color:
+            #667085;
 
-          font-size: 13px;
+          font-size:
+            13px;
         }
 
         .stat-card strong {
-          display: block;
+          display:
+            block;
 
-          margin-top: 10px;
+          margin-top:
+            10px;
 
-          font-size: 28px;
+          font-size:
+            28px;
 
-          color: #173b68;
+          color:
+            #173b68;
         }
 
         .stat-card small {
-          display: block;
+          display:
+            block;
 
-          margin-top: 6px;
+          margin-top:
+            6px;
 
-          color: #98a2b3;
+          color:
+            #98a2b3;
         }
 
         /* ========================================
@@ -531,51 +696,66 @@ function Dashboard() {
         ======================================== */
 
         .modules-section {
-          margin-top: 34px;
+          margin-top:
+            34px;
         }
 
         .modules-section h2 {
-          font-size: 18px;
+          font-size:
+            18px;
 
           margin:
             0 0 16px;
         }
 
         .modules-grid {
-          display: grid;
+          display:
+            grid;
 
           grid-template-columns:
             repeat(4, 1fr);
 
-          gap: 18px;
+          gap:
+            18px;
         }
 
         .module-card {
-          background: white;
+          background:
+            white;
 
           border:
             1px solid #e4e7ec;
 
-          border-radius: 14px;
+          border-radius:
+            14px;
 
-          padding: 20px;
+          padding:
+            20px;
 
-          display: flex;
+          display:
+            flex;
 
-          align-items: center;
+          align-items:
+            center;
 
-          gap: 15px;
+          gap:
+            15px;
 
-          min-height: 100px;
+          min-height:
+            100px;
         }
 
         .module-card.clickable {
-          cursor: pointer;
+          cursor:
+            pointer;
 
           transition:
-            transform 0.2s ease,
-            box-shadow 0.2s ease,
-            border-color 0.2s ease;
+            transform
+            0.2s ease,
+            box-shadow
+            0.2s ease,
+            border-color
+            0.2s ease;
         }
 
         .module-card.clickable:hover {
@@ -599,44 +779,64 @@ function Dashboard() {
           outline:
             2px solid #245a96;
 
-          outline-offset: 2px;
+          outline-offset:
+            2px;
+        }
+
+        .admin-module {
+          border-color:
+            #c7d8eb;
         }
 
         .module-icon {
-          width: 44px;
+          width:
+            44px;
 
-          height: 44px;
+          height:
+            44px;
 
-          border-radius: 10px;
+          border-radius:
+            10px;
 
-          background: #eef4fb;
+          background:
+            #eef4fb;
 
-          color: #245a96;
+          color:
+            #245a96;
 
-          display: flex;
+          display:
+            flex;
 
-          align-items: center;
+          align-items:
+            center;
 
-          justify-content: center;
+          justify-content:
+            center;
 
-          font-weight: 700;
+          font-weight:
+            700;
 
-          flex-shrink: 0;
+          flex-shrink:
+            0;
         }
 
         .module-card h3 {
-          margin: 0;
+          margin:
+            0;
 
-          font-size: 15px;
+          font-size:
+            15px;
         }
 
         .module-card p {
           margin:
             5px 0 0;
 
-          color: #667085;
+          color:
+            #667085;
 
-          font-size: 12px;
+          font-size:
+            12px;
         }
 
         /* ========================================
@@ -670,23 +870,27 @@ function Dashboard() {
           }
 
           .user-info {
-            display: none;
+            display:
+              none;
           }
 
           .welcome-card {
-            padding: 22px;
+            padding:
+              22px;
 
             align-items:
               flex-start;
 
-            gap: 16px;
+            gap:
+              16px;
 
             flex-direction:
               column;
           }
 
           .welcome-card h2 {
-            font-size: 20px;
+            font-size:
+              20px;
           }
 
           .stats-grid,
@@ -696,13 +900,13 @@ function Dashboard() {
           }
 
           .module-card {
-            min-height: 88px;
+            min-height:
+              88px;
           }
 
         }
 
       `}</style>
-
     </div>
   );
 }
