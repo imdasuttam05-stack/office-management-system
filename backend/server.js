@@ -10,17 +10,50 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
-import userRoutes from "./routes/userRoutes.js";
+
 import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
+
 import {
   apiLimiter,
 } from "./middleware/rateLimit.js";
+
 import connectDB from "./config/db.js";
 
 const app = express();
 
 const PORT =
   Number(process.env.PORT) || 10000;
+
+/* =========================================================
+   OPTIONAL USER ROUTES
+   Prevent Render crash if userRoutes.js is not yet deployed
+========================================================= */
+
+let userRoutes = null;
+
+try {
+  const userModule =
+    await import("./routes/userRoutes.js");
+
+  userRoutes =
+    userModule.default || null;
+
+  console.log(
+    "User routes loaded successfully."
+  );
+} catch (error) {
+  console.warn(
+    "WARNING: userRoutes.js not found. User Management API is disabled."
+  );
+
+  console.warn(
+    error?.message || error
+  );
+}
+
+/* =========================================================
+   CORS
+========================================================= */
 
 const allowedOrigins = (
   process.env.CLIENT_URL || ""
@@ -31,8 +64,21 @@ const allowedOrigins = (
   )
   .filter(Boolean);
 
+/* =========================================================
+   DATABASE
+========================================================= */
+
 await connectDB();
+
+/* =========================================================
+   BOOTSTRAP ADMIN
+========================================================= */
+
 await ensureBootstrapAdmin();
+
+/* =========================================================
+   APP SETTINGS
+========================================================= */
 
 app.set(
   "trust proxy",
@@ -43,6 +89,10 @@ app.disable(
   "x-powered-by"
 );
 
+/* =========================================================
+   SECURITY
+========================================================= */
+
 app.use(
   helmet({
     crossOriginResourcePolicy: {
@@ -51,9 +101,14 @@ app.use(
   })
 );
 
+/* =========================================================
+   CORS
+========================================================= */
+
 app.use(
   cors({
     origin(origin, callback) {
+      // Allow server-to-server / Postman requests
       if (!origin) {
         return callback(
           null,
@@ -61,6 +116,7 @@ app.use(
         );
       }
 
+      // Allow configured frontend URLs
       if (
         allowedOrigins.includes(
           origin
@@ -83,7 +139,9 @@ app.use(
         )
       );
     },
+
     credentials: true,
+
     methods: [
       "GET",
       "POST",
@@ -92,12 +150,17 @@ app.use(
       "DELETE",
       "OPTIONS",
     ],
+
     allowedHeaders: [
       "Content-Type",
       "Authorization",
     ],
   })
 );
+
+/* =========================================================
+   BODY PARSERS
+========================================================= */
 
 app.use(
   express.json({
@@ -116,13 +179,22 @@ app.use(
   cookieParser()
 );
 
+/* =========================================================
+   LOGGER
+========================================================= */
+
 if (
-  process.env.NODE_ENV !== "test"
+  process.env.NODE_ENV !==
+  "test"
 ) {
   app.use(
     morgan("combined")
   );
 }
+
+/* =========================================================
+   ROOT
+========================================================= */
 
 app.get(
   "/",
@@ -131,54 +203,104 @@ app.get(
       success: true,
       message:
         "Office Management API is running",
+
       environment:
         process.env.NODE_ENV ||
         "development",
+
       timestamp:
         new Date().toISOString(),
     });
   }
 );
+
+/* =========================================================
+   HEALTH
+========================================================= */
 
 app.get(
   "/api/health",
   (req, res) => {
     res.status(200).json({
       success: true,
+
       service:
         "office-management-backend",
+
       database:
         "MongoDB Atlas",
+
       timestamp:
         new Date().toISOString(),
+
+      userRoutes:
+        Boolean(userRoutes),
     });
   }
 );
+
+/* =========================================================
+   API RATE LIMIT
+========================================================= */
 
 app.use(
   "/api",
   apiLimiter
 );
 
+/* =========================================================
+   AUTH
+========================================================= */
+
 app.use(
   "/api/auth",
   authRoutes
 );
+
+/* =========================================================
+   EXPENSE
+========================================================= */
 
 app.use(
   "/api/expenses",
   expenseRoutes
 );
 
-app.use(
-  "/api/users",
-  userRoutes
-);
+/* =========================================================
+   USERS
+========================================================= */
+
+if (userRoutes) {
+  app.use(
+    "/api/users",
+    userRoutes
+  );
+} else {
+  // Prevent "API route not found" confusion
+  app.use(
+    "/api/users",
+    (req, res) => {
+      res.status(503).json({
+        success: false,
+        message:
+          "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
+      });
+    }
+  );
+}
+
+/* =========================================================
+   OCR
+========================================================= */
 
 app.use(
   "/api/ocr",
   ocrRoutes
 );
+
+/* =========================================================
+   404
+========================================================= */
 
 app.use(
   (req, res) => {
@@ -186,15 +308,28 @@ app.use(
       success: false,
       message:
         "API route not found.",
+      path: req.originalUrl,
+      method: req.method,
     });
   }
 );
 
+/* =========================================================
+   GLOBAL ERROR HANDLER
+========================================================= */
+
 app.use(
-  (err, req, res, next) => {
+  (
+    err,
+    req,
+    res,
+    next
+  ) => {
     console.error(
       "SERVER ERROR:",
-      err.message
+      err?.stack ||
+        err?.message ||
+        err
     );
 
     const isUploadError =
@@ -206,6 +341,7 @@ app.use(
         "Only JPG"
       );
 
+    /* File too large */
     if (
       err?.code ===
       "LIMIT_FILE_SIZE"
@@ -217,6 +353,7 @@ app.use(
       });
     }
 
+    /* Invalid upload */
     if (isUploadError) {
       return res.status(400).json({
         success: false,
@@ -225,19 +362,39 @@ app.use(
       });
     }
 
+    /* CORS error */
+    if (
+      String(
+        err?.message || ""
+      ).includes(
+        "CORS origin not allowed"
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "CORS origin not allowed.",
+      });
+    }
+
     return res.status(
-      err.statusCode || 500
+      err?.statusCode || 500
     ).json({
       success: false,
+
       message:
         process.env.NODE_ENV ===
         "production"
           ? "Internal server error."
-          : err.message ||
+          : err?.message ||
             "Internal server error.",
     });
   }
 );
+
+/* =========================================================
+   START SERVER
+========================================================= */
 
 app.listen(
   PORT,
@@ -245,6 +402,14 @@ app.listen(
   () => {
     console.log(
       `Office Management Backend running on port ${PORT}`
+    );
+
+    console.log(
+      `User Management: ${
+        userRoutes
+          ? "ENABLED"
+          : "DISABLED"
+      }`
     );
   }
 );
