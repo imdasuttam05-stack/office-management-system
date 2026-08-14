@@ -4,8 +4,10 @@ const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
+      required: true,
       trim: true,
-      default: "User",
+      minlength: 2,
+      maxlength: 120,
     },
 
     email: {
@@ -14,6 +16,22 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
+      index: true,
+    },
+
+    mobile: {
+      type: String,
+      required: true,
+      unique: true,
+      sparse: true,
+      trim: true,
+      index: true,
+    },
+
+    passwordHash: {
+      type: String,
+      required: false,
+      select: false,
     },
 
     role: {
@@ -24,7 +42,7 @@ const userSchema = new mongoose.Schema(
 
     isVerified: {
       type: Boolean,
-      default: false,
+      default: true,
     },
 
     isActive: {
@@ -36,14 +54,17 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-const User =
-  mongoose.models.User ||
-  mongoose.model("User", userSchema);
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 
 export default User;
