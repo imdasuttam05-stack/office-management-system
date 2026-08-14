@@ -1,215 +1,350 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-function Dashboard() {
-  const navigate = useNavigate();
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://office-management-system-ikx8.onrender.com";
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+/* =========================================================
+   AUTH HELPERS
+========================================================= */
+
+function getStoredUser() {
+  try {
+    const raw =
+      localStorage.getItem("user") ||
+      localStorage.getItem("currentUser");
+
+    if (!raw) return null;
+
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function getToken() {
+  return (
+    localStorage.getItem("token") ||
+    localStorage.getItem("accessToken") ||
+    ""
+  );
+}
+
+/* =========================================================
+   ICON
+========================================================= */
+
+function Icon({ children }) {
+  return (
+    <span className="side-icon">
+      {children}
+    </span>
+  );
+}
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+
+export default function Dashboard() {
+  const navigate = useNavigate();
 
   const sidebarRef = useRef(null);
 
-  const userData =
-    localStorage.getItem("user");
+  const [sidebarOpen, setSidebarOpen] =
+    useState(false);
 
-  let user = {};
+  const [user, setUser] = useState(
+    getStoredUser()
+  );
 
-  try {
-    user = JSON.parse(
-      userData || "{}"
+  const [expenseTotal, setExpenseTotal] =
+    useState(0);
+
+  const [pendingApproval, setPendingApproval] =
+    useState(0);
+
+  const [employeeCount, setEmployeeCount] =
+    useState(0);
+
+  const [pendingTasks, setPendingTasks] =
+    useState(0);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  /* =======================================================
+     USER
+  ======================================================= */
+
+  useEffect(() => {
+    const storedUser = getStoredUser();
+
+    if (storedUser) {
+      setUser(storedUser);
+    }
+  }, []);
+
+  /* =======================================================
+     CLOSE SIDEBAR ON OUTSIDE CLICK
+  ======================================================= */
+
+  useEffect(() => {
+    function handleOutsideClick(event) {
+      if (!sidebarOpen) return;
+
+      const sidebar =
+        sidebarRef.current;
+
+      const menuButton =
+        document.querySelector(
+          ".dashboard-menu-btn"
+        );
+
+      if (
+        sidebar &&
+        !sidebar.contains(
+          event.target
+        ) &&
+        !menuButton?.contains(
+          event.target
+        )
+      ) {
+        setSidebarOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "mousedown",
+      handleOutsideClick
     );
-  } catch {
-    user = {};
-  }
 
-  const role =
-    user.role || "Employee";
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick
+      );
+    };
+  }, [sidebarOpen]);
+
+  /* =======================================================
+     ESC CLOSE
+  ======================================================= */
+
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setSidebarOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "keydown",
+      handleEscape
+    );
+
+    return () => {
+      document.removeEventListener(
+        "keydown",
+        handleEscape
+      );
+    };
+  }, []);
+
+  /* =======================================================
+     LOAD DASHBOARD DATA
+  ======================================================= */
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboard() {
+      setLoading(true);
+
+      const token = getToken();
+
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `${API_URL}/api/expenses`,
+          {
+            method: "GET",
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+              "Content-Type":
+                "application/json",
+            },
+          }
+        );
+
+        if (response.status === 401) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            "Failed to load expenses"
+          );
+        }
+
+        const data =
+          await response.json();
+
+        if (cancelled) return;
+
+        const expenses =
+          Array.isArray(data)
+            ? data
+            : Array.isArray(
+                data?.expenses
+              )
+            ? data.expenses
+            : Array.isArray(
+                data?.data
+              )
+            ? data.data
+            : [];
+
+        let total = 0;
+        let pending = 0;
+
+        expenses.forEach(
+          (expense) => {
+            const amount =
+              Number(
+                expense?.amount
+              ) || 0;
+
+            total += amount;
+
+            const status =
+              String(
+                expense?.status ||
+                  expense?.approvalStatus ||
+                  ""
+              ).toLowerCase();
+
+            if (
+              status === "pending" ||
+              status === "pending approval"
+            ) {
+              pending += 1;
+            }
+          }
+        );
+
+        setExpenseTotal(total);
+        setPendingApproval(pending);
+      } catch (error) {
+        console.error(
+          "Dashboard expense error:",
+          error
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* =======================================================
+     USER NAME / ROLE
+  ======================================================= */
+
+  const userName =
+    user?.name ||
+    user?.fullName ||
+    user?.username ||
+    "User";
+
+  const userRole =
+    user?.role ||
+    "Employee";
 
   const isAdmin =
-    role === "Admin";
+    String(userRole).toLowerCase() ===
+    "admin";
 
-  /* =====================================================
+  /* =======================================================
      NAVIGATION
-  ===================================================== */
+  ======================================================= */
 
-  const go = (path) => {
+  function goTo(path) {
     setSidebarOpen(false);
     navigate(path);
-  };
+  }
 
-  /* =====================================================
+  /* =======================================================
      LOGOUT
-  ===================================================== */
+  ======================================================= */
 
-  const logout = () => {
+  function handleLogout() {
     localStorage.removeItem(
       "token"
+    );
+
+    localStorage.removeItem(
+      "accessToken"
+    );
+
+    localStorage.removeItem(
+      "refreshToken"
     );
 
     localStorage.removeItem(
       "user"
     );
 
-    navigate("/login", {
-      replace: true,
-    });
-  };
+    localStorage.removeItem(
+      "currentUser"
+    );
 
-  /* =====================================================
-     CLOSE SIDEBAR
-  ===================================================== */
-
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (
-        event.key === "Escape"
-      ) {
-        setSidebarOpen(false);
+    navigate(
+      "/login",
+      {
+        replace: true,
       }
-    };
-
-    document.addEventListener(
-      "keydown",
-      handleKeyDown
     );
+  }
 
-    return () => {
-      document.removeEventListener(
-        "keydown",
-        handleKeyDown
-      );
-    };
-  }, []);
+  /* =======================================================
+     FORMAT MONEY
+  ======================================================= */
 
-  /* =====================================================
-     SIDEBAR MENU
-  ===================================================== */
+  function formatMoney(value) {
+    return new Intl.NumberFormat(
+      "en-IN",
+      {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }
+    ).format(value || 0);
+  }
 
-  const mainMenu = [
-    {
-      label: "Dashboard",
-      icon: "⌂",
-      path: "/dashboard",
-      active: true,
-    },
-
-    {
-      label: "Expenses",
-      icon: "₹",
-      path: "/expenses",
-      active: true,
-    },
-
-    {
-      label: "Payroll",
-      icon: "₹",
-      path: "/payroll",
-      active: true,
-    },
-  ];
-
-  const hrMenu = [
-    {
-      label: "Employees",
-      icon: "👥",
-      path: null,
-    },
-
-    {
-      label: "Attendance",
-      icon: "✓",
-      path: null,
-    },
-
-    {
-      label: "Leave Management",
-      icon: "📝",
-      path: null,
-    },
-
-    {
-      label: "Holiday Calendar",
-      icon: "📅",
-      path: null,
-    },
-
-    {
-      label: "Shift Management",
-      icon: "⏱",
-      path: null,
-    },
-  ];
-
-  const reportMenu = [
-    {
-      label: "Attendance Reports",
-      icon: "▦",
-      path: null,
-    },
-
-    {
-      label: "Leave Reports",
-      icon: "📋",
-      path: null,
-    },
-
-    {
-      label: "Salary Reports",
-      icon: "₹",
-      path: null,
-    },
-  ];
-
-  /* =====================================================
-     MENU ITEM
-  ===================================================== */
-
-  const renderMenuItem = (
-    item,
-    index
-  ) => {
-    const disabled =
-      !item.active &&
-      !item.path;
-
-    return (
-      <button
-        key={`${item.label}-${index}`}
-        type="button"
-        className={`side-item ${
-          disabled
-            ? "disabled"
-            : ""
-        }`}
-        disabled={disabled}
-        onClick={() => {
-          if (item.path) {
-            go(item.path);
-          }
-        }}
-      >
-        <span className="side-icon">
-          {item.icon}
-        </span>
-
-        <span className="side-label">
-          {item.label}
-        </span>
-
-        {disabled && (
-          <span className="coming-soon">
-            Soon
-          </span>
-        )}
-      </button>
-    );
-  };
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   return (
     <div className="dashboard">
 
-      {/* =================================================
-          OVERLAY
-      ================================================= */}
+      {/* ===================================================
+          SIDEBAR OVERLAY
+      =================================================== */}
 
       {sidebarOpen && (
         <div
@@ -220,30 +355,29 @@ function Dashboard() {
         />
       )}
 
-      {/* =================================================
+      {/* ===================================================
           SIDEBAR
-      ================================================= */}
+      =================================================== */}
 
       <aside
         ref={sidebarRef}
         className={`sidebar ${
           sidebarOpen
-            ? "open"
+            ? "sidebar-open"
             : ""
         }`}
       >
-
-        {/* SIDEBAR HEADER */}
+        {/* Sidebar Header */}
 
         <div className="sidebar-top">
           <div>
-            <h2>
+            <div className="sidebar-brand">
               Office Management
-            </h2>
+            </div>
 
-            <span>
-              {role} Panel
-            </span>
+            <div className="sidebar-subtitle">
+              Business Management System
+            </div>
           </div>
 
           <button
@@ -258,91 +392,336 @@ function Dashboard() {
           </button>
         </div>
 
-        {/* MAIN MENU */}
+        {/* =================================================
+            MAIN
+        ================================================= */}
 
         <div className="sidebar-section">
           <div className="sidebar-heading">
             MAIN
           </div>
 
-          <nav className="sidebar-nav">
-            {mainMenu.map(
-              renderMenuItem
-            )}
-          </nav>
+          <div className="sidebar-nav">
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/dashboard")
+              }
+            >
+              <Icon>⌂</Icon>
+
+              <span className="side-label">
+                Dashboard
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/expenses")
+              }
+            >
+              <Icon>₹</Icon>
+
+              <span className="side-label">
+                Expenses
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/approvals")
+              }
+            >
+              <Icon>✓</Icon>
+
+              <span className="side-label">
+                Approvals
+              </span>
+            </button>
+
+          </div>
         </div>
 
-        {/* HR MENU */}
+        {/* =================================================
+            HR MANAGEMENT
+        ================================================= */}
 
         <div className="sidebar-section">
+
           <div className="sidebar-heading">
             HR MANAGEMENT
           </div>
 
-          <nav className="sidebar-nav">
-            {hrMenu.map(
-              renderMenuItem
-            )}
-          </nav>
+          <div className="sidebar-nav">
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/employees")
+              }
+            >
+              <Icon>♟</Icon>
+
+              <span className="side-label">
+                Employees
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/attendance")
+              }
+            >
+              <Icon>✓</Icon>
+
+              <span className="side-label">
+                Attendance
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/leave")
+              }
+            >
+              <Icon>📄</Icon>
+
+              <span className="side-label">
+                Leave Management
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/holidays")
+              }
+            >
+              <Icon>▦</Icon>
+
+              <span className="side-label">
+                Holiday Calendar
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/shifts")
+              }
+            >
+              <Icon>◷</Icon>
+
+              <span className="side-label">
+                Shift Management
+              </span>
+            </button>
+
+          </div>
         </div>
 
-        {/* REPORTS */}
+        {/* =================================================
+            REPORTS
+        ================================================= */}
 
         <div className="sidebar-section">
+
           <div className="sidebar-heading">
             REPORTS
           </div>
 
-          <nav className="sidebar-nav">
-            {reportMenu.map(
-              renderMenuItem
-            )}
-          </nav>
+          <div className="sidebar-nav">
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo(
+                  "/reports/attendance"
+                )
+              }
+            >
+              <Icon>▦</Icon>
+
+              <span className="side-label">
+                Attendance Reports
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo(
+                  "/reports/leave"
+                )
+              }
+            >
+              <Icon>▤</Icon>
+
+              <span className="side-label">
+                Leave Reports
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo(
+                  "/reports/salary"
+                )
+              }
+            >
+              <Icon>₹</Icon>
+
+              <span className="side-label">
+                Salary Reports
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/reports")
+              }
+            >
+              <Icon>▥</Icon>
+
+              <span className="side-label">
+                Business Reports
+              </span>
+            </button>
+
+          </div>
         </div>
 
-        {/* ADMIN */}
+        {/* =================================================
+            PAYROLL
+        ================================================= */}
 
-        {isAdmin && (
-          <div className="sidebar-section">
-            <div className="sidebar-heading">
-              ADMINISTRATION
-            </div>
+        <div className="sidebar-section">
 
-            <nav className="sidebar-nav">
-              {renderMenuItem({
-                label:
-                  "User Management",
-                icon: "👤",
-                path: "/users",
-                active: true,
-              }, 99)}
-            </nav>
+          <div className="sidebar-heading">
+            PAYROLL
           </div>
-        )}
 
-        {/* LOGOUT */}
+          <div className="sidebar-nav">
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/salary")
+              }
+            >
+              <Icon>₹</Icon>
+
+              <span className="side-label">
+                Salary Management
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/salary/slips")
+              }
+            >
+              <Icon>▤</Icon>
+
+              <span className="side-label">
+                Salary Slips
+              </span>
+            </button>
+
+          </div>
+        </div>
+
+        {/* =================================================
+            ADMINISTRATION
+        ================================================= */}
+
+        <div className="sidebar-section">
+
+          <div className="sidebar-heading">
+            ADMINISTRATION
+          </div>
+
+          <div className="sidebar-nav">
+
+            {isAdmin && (
+              <button
+                type="button"
+                className="side-item admin-item"
+                onClick={() =>
+                  goTo("/users")
+                }
+              >
+                <Icon>♟</Icon>
+
+                <span className="side-label">
+                  User Management
+                </span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/security")
+              }
+            >
+              <Icon>🔒</Icon>
+
+              <span className="side-label">
+                Security
+              </span>
+            </button>
+
+          </div>
+        </div>
+
+        {/* =================================================
+            SIDEBAR LOGOUT
+        ================================================= */}
 
         <div className="sidebar-bottom">
+
           <button
             type="button"
             className="side-logout"
-            onClick={logout}
+            onClick={handleLogout}
           >
-            <span className="side-icon logout-icon">
-              ↪
-            </span>
+            <Icon>↪</Icon>
 
             <span>
               Logout
             </span>
           </button>
-        </div>
 
+        </div>
       </aside>
 
-      {/* =================================================
+      {/* ===================================================
           HEADER
-      ================================================= */}
+      =================================================== */}
 
       <header className="dashboard-header">
 
@@ -350,12 +729,11 @@ function Dashboard() {
 
           <button
             type="button"
-            className="menu-btn"
+            className="dashboard-menu-btn"
             onClick={() =>
               setSidebarOpen(true)
             }
             aria-label="Open menu"
-            title="Open menu"
           >
             <span />
             <span />
@@ -377,22 +755,19 @@ function Dashboard() {
         <div className="user-section">
 
           <div className="user-info">
-
             <strong>
-              {user.name ||
-                "User"}
+              {userName}
             </strong>
 
             <span>
-              {role}
+              {userRole}
             </span>
-
           </div>
 
           <button
             type="button"
             className="logout-btn"
-            onClick={logout}
+            onClick={handleLogout}
           >
             Logout
           </button>
@@ -401,33 +776,31 @@ function Dashboard() {
 
       </header>
 
-      {/* =================================================
+      {/* ===================================================
           CONTENT
-      ================================================= */}
+      =================================================== */}
 
       <main className="dashboard-content">
 
-        {/* =================================================
-            WELCOME
-        ================================================= */}
+        {/* Welcome */}
 
         <section className="welcome-card">
 
           <div>
 
             <div className="welcome-small">
-              OFFICE MANAGEMENT SYSTEM
+              OFFICE MANAGEMENT
             </div>
 
             <h2>
               Welcome back,{" "}
-              {user.name ||
-                "User"} 👋
+              {userName} 👋
             </h2>
 
             <p>
-              Manage expenses, employees,
-              attendance and payroll from
+              Manage your office,
+              employees, attendance,
+              leave and salary from
               one place.
             </p>
 
@@ -436,19 +809,19 @@ function Dashboard() {
           <div className="role-area">
 
             <span className="role-label">
-              Current Role
+              CURRENT ROLE
             </span>
 
-            <div className="role-badge">
-              {role}
-            </div>
+            <span className="role-badge">
+              {userRole}
+            </span>
 
           </div>
 
         </section>
 
         {/* =================================================
-            STATISTICS
+            STATS
         ================================================= */}
 
         <section className="stats-grid">
@@ -460,17 +833,23 @@ function Dashboard() {
             </div>
 
             <div className="stat-content">
+
               <span>
                 Total Expenses
               </span>
 
               <strong>
-                ₹0
+                {loading
+                  ? "..."
+                  : formatMoney(
+                      expenseTotal
+                    )}
               </strong>
 
               <small>
-                This month
+                Current records
               </small>
+
             </div>
 
           </div>
@@ -482,39 +861,48 @@ function Dashboard() {
             </div>
 
             <div className="stat-content">
+
               <span>
-                Present Today
+                Pending Approval
               </span>
 
               <strong>
-                0
+                {pendingApproval}
               </strong>
 
               <small>
-                Attendance
+                Waiting for action
               </small>
+
             </div>
 
           </div>
 
-          <div className="stat-card">
+          <div
+            className="stat-card clickable"
+            onClick={() =>
+              goTo("/employees")
+            }
+          >
 
             <div className="stat-icon">
-              👥
+              ♟
             </div>
 
             <div className="stat-content">
+
               <span>
-                Employees
+                Total Employees
               </span>
 
               <strong>
-                0
+                {employeeCount}
               </strong>
 
               <small>
                 Active employees
               </small>
+
             </div>
 
           </div>
@@ -522,21 +910,23 @@ function Dashboard() {
           <div className="stat-card">
 
             <div className="stat-icon">
-              ₹
+              !
             </div>
 
             <div className="stat-content">
+
               <span>
-                Monthly Payroll
+                Pending Tasks
               </span>
 
               <strong>
-                ₹0
+                {pendingTasks}
               </strong>
 
               <small>
-                Current month
+                Requires attention
               </small>
+
             </div>
 
           </div>
@@ -552,17 +942,20 @@ function Dashboard() {
           <div className="section-header">
 
             <div>
-              <span className="section-kicker">
+
+              <div className="section-kicker">
                 QUICK ACCESS
-              </span>
+              </div>
 
               <h2>
-                Your Workspace
+                Office Modules
               </h2>
 
               <p>
-                Frequently used office modules
+                Quickly access the most
+                important sections.
               </p>
+
             </div>
 
             <button
@@ -579,12 +972,12 @@ function Dashboard() {
 
           <div className="modules-grid">
 
-            {/* EXPENSE */}
+            {/* Expenses */}
 
             <div
               className="module-card clickable"
               onClick={() =>
-                go("/expenses")
+                goTo("/expenses")
               }
             >
               <div className="module-icon expense">
@@ -604,41 +997,69 @@ function Dashboard() {
               <span className="card-arrow">
                 →
               </span>
-
             </div>
 
-            {/* PAYROLL */}
+            {/* Approvals */}
 
             <div
               className="module-card clickable"
               onClick={() =>
-                go("/payroll")
+                goTo("/approvals")
               }
             >
-              <div className="module-icon payroll">
-                ₹
+              <div className="module-icon attendance">
+                ✓
               </div>
 
               <div>
                 <h3>
-                  Payroll
+                  Approvals
                 </h3>
 
                 <p>
-                  Salary, additions and deductions
+                  Review pending approvals
                 </p>
               </div>
 
               <span className="card-arrow">
                 →
               </span>
-
             </div>
 
-            {/* ATTENDANCE */}
+            {/* Employees */}
 
             <div
-              className="module-card"
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/employees")
+              }
+            >
+              <div className="module-icon employees">
+                ♟
+              </div>
+
+              <div>
+                <h3>
+                  Employees
+                </h3>
+
+                <p>
+                  Manage employees
+                </p>
+              </div>
+
+              <span className="card-arrow">
+                →
+              </span>
+            </div>
+
+            {/* Attendance */}
+
+            <div
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/attendance")
+              }
             >
               <div className="module-icon attendance">
                 ✓
@@ -652,20 +1073,23 @@ function Dashboard() {
                 <p>
                   Daily and monthly attendance
                 </p>
-
-                <span className="soon-badge">
-                  Coming Soon
-                </span>
               </div>
+
+              <span className="card-arrow">
+                →
+              </span>
             </div>
 
-            {/* LEAVE */}
+            {/* Leave */}
 
             <div
-              className="module-card"
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/leave")
+              }
             >
               <div className="module-icon leave">
-                📝
+                📄
               </div>
 
               <div>
@@ -674,22 +1098,25 @@ function Dashboard() {
                 </h3>
 
                 <p>
-                  Leave requests and approvals
+                  Manage employee leaves
                 </p>
-
-                <span className="soon-badge">
-                  Coming Soon
-                </span>
               </div>
+
+              <span className="card-arrow">
+                →
+              </span>
             </div>
 
-            {/* HOLIDAY */}
+            {/* Holidays */}
 
             <div
-              className="module-card"
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/holidays")
+              }
             >
               <div className="module-icon holiday">
-                📅
+                ▦
               </div>
 
               <div>
@@ -698,74 +1125,101 @@ function Dashboard() {
                 </h3>
 
                 <p>
-                  Holidays and weekly offs
+                  Manage office holidays
                 </p>
-
-                <span className="soon-badge">
-                  Coming Soon
-                </span>
               </div>
+
+              <span className="card-arrow">
+                →
+              </span>
             </div>
 
-            {/* EMPLOYEES */}
+            {/* Salary */}
 
             <div
-              className="module-card"
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/salary")
+              }
             >
-              <div className="module-icon employees">
-                👥
+              <div className="module-icon payroll">
+                ₹
               </div>
 
               <div>
                 <h3>
-                  Employees
+                  Salary Management
                 </h3>
 
                 <p>
-                  Employee master and profile
+                  Salary, additions & deductions
                 </p>
-
-                <span className="soon-badge">
-                  Coming Soon
-                </span>
               </div>
+
+              <span className="card-arrow">
+                →
+              </span>
             </div>
 
-            {/* USER MANAGEMENT */}
+            {/* Salary Slip */}
 
-            {isAdmin && (
-              <div
-                className="module-card clickable admin-card"
-                onClick={() =>
-                  go("/users")
-                }
-              >
-                <div className="module-icon users">
-                  👤
-                </div>
-
-                <div>
-                  <h3>
-                    User Management
-                  </h3>
-
-                  <p>
-                    Create and manage users
-                  </p>
-                </div>
-
-                <span className="card-arrow">
-                  →
-                </span>
+            <div
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/salary/slips")
+              }
+            >
+              <div className="module-icon payroll">
+                ▤
               </div>
-            )}
+
+              <div>
+                <h3>
+                  Salary Slips
+                </h3>
+
+                <p>
+                  Create and view salary slips
+                </p>
+              </div>
+
+              <span className="card-arrow">
+                →
+              </span>
+            </div>
+
+            {/* Reports */}
+
+            <div
+              className="module-card clickable"
+              onClick={() =>
+                goTo("/reports")
+              }
+            >
+              <div className="module-icon expense">
+                ▥
+              </div>
+
+              <div>
+                <h3>
+                  Reports
+                </h3>
+
+                <p>
+                  View business reports
+                </p>
+              </div>
+
+              <span className="card-arrow">
+                →
+              </span>
+            </div>
 
           </div>
-
         </section>
 
         {/* =================================================
-            ATTENDANCE PREVIEW
+            ATTENDANCE / HR PREVIEW
         ================================================= */}
 
         <section className="attendance-preview">
@@ -773,13 +1227,15 @@ function Dashboard() {
           <div className="attendance-preview-header">
 
             <div>
-              <span className="section-kicker">
-                ATTENDANCE
-              </span>
+
+              <div className="section-kicker">
+                HR OVERVIEW
+              </div>
 
               <h2>
-                Today's Attendance
+                Attendance & Payroll
               </h2>
+
             </div>
 
             <span className="preview-badge">
@@ -788,63 +1244,78 @@ function Dashboard() {
 
           </div>
 
-          <div className="attendance-bars">
+          <div className="attendance-preview-grid">
 
-            <div className="attendance-row">
-              <span>
-                Present
-              </span>
+            <div className="preview-box">
 
-              <div className="progress">
-                <div
-                  className="progress-present"
-                  style={{
-                    width: "0%",
-                  }}
-                />
+              <div className="preview-icon present">
+                ✓
               </div>
 
-              <strong>
-                0
-              </strong>
+              <div>
+                <strong>
+                  Attendance
+                </strong>
+
+                <span>
+                  Daily / Monthly
+                </span>
+              </div>
+
             </div>
 
-            <div className="attendance-row">
-              <span>
-                Leave
-              </span>
+            <div className="preview-box">
 
-              <div className="progress">
-                <div
-                  className="progress-leave"
-                  style={{
-                    width: "0%",
-                  }}
-                />
+              <div className="preview-icon leave">
+                📄
               </div>
 
-              <strong>
-                0
-              </strong>
+              <div>
+                <strong>
+                  Leave
+                </strong>
+
+                <span>
+                  Paid / Unpaid
+                </span>
+              </div>
+
             </div>
 
-            <div className="attendance-row">
-              <span>
-                Absent
-              </span>
+            <div className="preview-box">
 
-              <div className="progress">
-                <div
-                  className="progress-absent"
-                  style={{
-                    width: "0%",
-                  }}
-                />
+              <div className="preview-icon holiday">
+                ▦
               </div>
 
-              <strong>
-                0
-              </strong>
+              <div>
+                <strong>
+                  Holidays
+                </strong>
+
+                <span>
+                  Company calendar
+                </span>
+              </div>
+
+            </div>
+
+            <div className="preview-box">
+
+              <div className="preview-icon salary">
+                ₹
+              </div>
+
+              <div>
+                <strong>
+                  Salary
+                </strong>
+
+                <span>
+                  Additions & deductions
+                </span>
+              </div>
+
             </div>
 
           </div>
@@ -853,9 +1324,9 @@ function Dashboard() {
 
       </main>
 
-      {/* =================================================
+      {/* ===================================================
           STYLES
-      ================================================= */}
+      =================================================== */}
 
       <style>{`
 
@@ -865,53 +1336,50 @@ function Dashboard() {
 
         body {
           margin: 0;
-
           font-family:
             Arial,
             Helvetica,
             sans-serif;
-
-          background:
-            #f5f7fb;
-
-          color:
-            #172b4d;
+          background: #f5f7fb;
+          color: #172b4d;
         }
+
+        button {
+          font-family: inherit;
+        }
+
+        /* ================================
+           DASHBOARD
+        ================================= */
 
         .dashboard {
           min-height: 100vh;
-
-          background:
-            #f5f7fb;
+          background: #f5f7fb;
         }
 
-        /* =============================================
+        /* ================================
            HEADER
-        ============================================== */
+        ================================= */
 
         .dashboard-header {
-          min-height: 76px;
+          height: 74px;
 
-          background:
-            #ffffff;
+          background: #ffffff;
 
           border-bottom:
             1px solid #e4e7ec;
 
-          display:
-            flex;
+          display: flex;
 
-          align-items:
-            center;
+          align-items: center;
 
           justify-content:
             space-between;
 
           padding:
-            0 32px;
+            0 28px;
 
-          position:
-            sticky;
+          position: sticky;
 
           top: 0;
 
@@ -919,395 +1387,316 @@ function Dashboard() {
         }
 
         .header-left {
-          display:
-            flex;
+          display: flex;
 
-          align-items:
-            center;
+          align-items: center;
 
-          gap:
-            14px;
+          gap: 14px;
         }
 
-        .dashboard-header h1 {
-          margin:
-            0;
-
-          font-size:
-            21px;
-
-          color:
-            #173b68;
-        }
-
-        .dashboard-header p {
-          margin:
-            4px 0 0;
-
-          color:
-            #667085;
-
-          font-size:
-            13px;
-        }
-
-        /* =============================================
-           MENU BUTTON
-        ============================================== */
-
-        .menu-btn {
-          width:
-            42px;
-
-          height:
-            42px;
+        .dashboard-menu-btn {
+          width: 40px;
+          height: 40px;
 
           border:
             1px solid #d0d5dd;
 
-          border-radius:
-            10px;
+          border-radius: 9px;
 
-          background:
-            #ffffff;
+          background: #ffffff;
 
-          cursor:
-            pointer;
+          display: flex;
 
-          display:
-            flex;
+          flex-direction: column;
 
-          flex-direction:
-            column;
+          justify-content: center;
 
-          justify-content:
-            center;
+          align-items: center;
 
-          align-items:
-            center;
+          gap: 4px;
 
-          gap:
-            4px;
-
-          transition:
-            all .2s ease;
+          cursor: pointer;
         }
 
-        .menu-btn:hover {
-          background:
-            #eef4fb;
+        .dashboard-menu-btn span {
+          width: 17px;
+          height: 2px;
 
-          border-color:
-            #b8cde4;
+          border-radius: 3px;
+
+          background: #173b68;
         }
 
-        .menu-btn span {
-          width:
-            18px;
+        .dashboard-header h1 {
+          margin: 0;
 
-          height:
-            2px;
+          font-size: 20px;
 
-          background:
-            #173b68;
-
-          border-radius:
-            3px;
+          color: #173b68;
         }
 
-        /* =============================================
-           USER SECTION
-        ============================================== */
+        .dashboard-header p {
+          margin:
+            3px 0 0;
+
+          color: #667085;
+
+          font-size: 11px;
+        }
 
         .user-section {
-          display:
-            flex;
+          display: flex;
 
-          align-items:
-            center;
+          align-items: center;
 
-          gap:
-            20px;
+          gap: 16px;
         }
 
         .user-info {
-          display:
-            flex;
+          display: flex;
 
-          flex-direction:
-            column;
+          flex-direction: column;
 
-          align-items:
-            flex-end;
+          align-items: flex-end;
         }
 
         .user-info strong {
-          font-size:
-            14px;
+          font-size: 13px;
         }
 
         .user-info span {
-          margin-top:
-            3px;
+          margin-top: 3px;
 
-          font-size:
-            12px;
+          color: #245a96;
 
-          color:
-            #245a96;
+          font-size: 11px;
         }
 
         .logout-btn {
-          border:
-            none;
+          border: none;
 
-          background:
-            #eef3f8;
+          background: #eef3f8;
 
-          color:
-            #245a96;
+          color: #245a96;
 
           padding:
-            9px 16px;
+            9px 15px;
 
-          border-radius:
-            8px;
+          border-radius: 8px;
 
-          font-weight:
-            600;
+          font-weight: 700;
 
-          cursor:
-            pointer;
+          cursor: pointer;
         }
 
-        /* =============================================
+        /* ================================
            SIDEBAR OVERLAY
-        ============================================== */
+        ================================= */
 
         .sidebar-overlay {
-          position:
-            fixed;
+          position: fixed;
 
-          inset:
-            0;
+          inset: 0;
 
           background:
             rgba(
               15,
               23,
               42,
-              .36
+              .35
             );
 
-          z-index:
-            40;
+          z-index: 40;
         }
 
-        /* =============================================
+        /* ================================
            SIDEBAR
-        ============================================== */
+        ================================= */
 
         .sidebar {
-          position:
-            fixed;
+          position: fixed;
 
-          top:
-            0;
+          top: 0;
+          left: 0;
+          bottom: 0;
 
-          left:
-            0;
+          width: 282px;
 
-          bottom:
-            0;
-
-          width:
-            300px;
-
-          background:
-            #ffffff;
+          background: #ffffff;
 
           box-shadow:
-            14px 0 40px
+            10px 0 32px
             rgba(
               15,
               23,
               42,
-              .16
+              .15
             );
 
           transform:
-            translateX(
-              -105%
-            );
+            translateX(-105%);
 
           transition:
-            transform
-            .22s
-            ease;
+            transform .23s ease;
 
-          z-index:
-            50;
+          z-index: 50;
 
-          display:
-            flex;
+          display: flex;
 
-          flex-direction:
-            column;
+          flex-direction: column;
 
           padding:
-            22px 16px 16px;
+            12px;
 
-          overflow-y:
-            auto;
+          overflow-y: auto;
+
+          overflow-x: hidden;
+
+          scrollbar-width: thin;
+
+          scrollbar-color:
+            #d0d5dd
+            transparent;
         }
 
-        .sidebar.open {
+        .sidebar.sidebar-open {
           transform:
             translateX(0);
         }
 
-        .sidebar-top {
-          display:
-            flex;
+        .sidebar::-webkit-scrollbar {
+          width: 5px;
+        }
 
-          align-items:
-            flex-start;
+        .sidebar::-webkit-scrollbar-thumb {
+          background:
+            #d0d5dd;
+
+          border-radius:
+            10px;
+        }
+
+        /* ================================
+           SIDEBAR TOP
+        ================================= */
+
+        .sidebar-top {
+          min-height: 58px;
+
+          display: flex;
+
+          align-items: center;
 
           justify-content:
             space-between;
 
           padding:
-            6px 10px 20px;
+            3px 7px 12px;
 
           border-bottom:
             1px solid #eaecf0;
+
+          flex-shrink: 0;
         }
 
-        .sidebar-top h2 {
-          margin:
-            0;
+        .sidebar-brand {
+          color: #173b68;
 
-          font-size:
-            18px;
+          font-size: 16px;
 
-          color:
-            #173b68;
+          font-weight: 800;
         }
 
-        .sidebar-top span {
-          display:
-            block;
+        .sidebar-subtitle {
+          color: #98a2b3;
 
-          margin-top:
-            5px;
+          font-size: 9px;
 
-          color:
-            #667085;
-
-          font-size:
-            12px;
+          margin-top: 3px;
         }
 
         .sidebar-close {
-          border:
-            none;
+          width: 32px;
+          height: 32px;
+
+          border: none;
+
+          border-radius: 8px;
 
           background:
             #f2f4f7;
 
-          width:
-            34px;
+          color: #344054;
 
-          height:
-            34px;
+          font-size: 21px;
 
-          border-radius:
-            8px;
-
-          font-size:
-            23px;
-
-          cursor:
-            pointer;
+          cursor: pointer;
         }
 
+        /* ================================
+           SIDEBAR SECTION
+        ================================= */
+
         .sidebar-section {
-          margin-top:
-            20px;
+          margin-top: 13px;
         }
 
         .sidebar-heading {
           padding:
-            0 10px 8px;
+            0 7px 6px;
 
-          font-size:
-            10px;
+          font-size: 9px;
 
-          font-weight:
-            800;
+          font-weight: 800;
 
-          letter-spacing:
-            1px;
+          letter-spacing: .9px;
 
-          color:
-            #98a2b3;
+          color: #98a2b3;
         }
 
         .sidebar-nav {
-          display:
-            grid;
+          display: grid;
 
-          gap:
-            5px;
+          gap: 2px;
         }
 
         .side-item {
-          width:
-            100%;
+          width: 100%;
 
-          border:
-            none;
+          min-height: 39px;
+
+          border: none;
 
           background:
             transparent;
 
-          color:
-            #344054;
+          color: #667085;
 
           padding:
-            11px 10px;
+            6px 7px;
 
-          border-radius:
-            10px;
+          border-radius: 9px;
 
-          display:
-            flex;
+          display: flex;
 
-          align-items:
-            center;
+          align-items: center;
 
-          gap:
-            10px;
+          gap: 9px;
 
-          text-align:
-            left;
+          text-align: left;
 
-          font-size:
-            13px;
+          font-size: 12px;
 
-          font-weight:
-            600;
+          font-weight: 600;
 
-          cursor:
-            pointer;
+          cursor: pointer;
 
           transition:
-            .15s ease;
+            background .15s ease,
+            color .15s ease;
         }
 
-        .side-item:hover:not(
-          :disabled
-        ) {
+        .side-item:hover {
           background:
             #eef4fb;
 
@@ -1315,79 +1704,63 @@ function Dashboard() {
             #173b68;
         }
 
-        .side-item:disabled {
-          cursor:
-            default;
-
-          opacity:
-            .65;
-        }
-
         .side-icon {
-          width:
-            30px;
+          width: 30px;
+          height: 30px;
 
-          height:
-            30px;
-
-          display:
-            inline-flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          border-radius:
-            8px;
+          border-radius: 8px;
 
           background:
-            #eef4fb;
+            #f3f7fc;
 
           color:
             #245a96;
 
-          flex-shrink:
-            0;
+          display: flex;
+
+          align-items: center;
+
+          justify-content: center;
+
+          flex-shrink: 0;
+
+          font-size: 13px;
         }
 
         .side-label {
-          flex:
-            1;
+          flex: 1;
+
+          white-space: nowrap;
         }
 
-        .coming-soon {
-          font-size:
-            9px;
-
+        .admin-item {
           background:
-            #f2f4f7;
-
-          color:
-            #98a2b3;
-
-          padding:
-            3px 6px;
-
-          border-radius:
-            10px;
+            #f8fbff;
         }
+
+        /* ================================
+           SIDEBAR BOTTOM
+        ================================= */
 
         .sidebar-bottom {
-          margin-top:
-            auto;
+          margin-top: 14px;
 
-          padding-top:
-            20px;
+          padding-top: 10px;
+
+          border-top:
+            1px solid #eaecf0;
+
+          flex-shrink: 0;
         }
 
         .side-logout {
-          width:
-            100%;
+          width: 100%;
 
-          border:
-            none;
+          min-height: 40px;
+
+          border: none;
+
+          border-radius: 9px;
 
           background:
             #fef3f2;
@@ -1395,57 +1768,46 @@ function Dashboard() {
           color:
             #b42318;
 
+          display: flex;
+
+          align-items: center;
+
+          gap: 9px;
+
           padding:
-            12px;
+            7px;
 
-          border-radius:
-            10px;
+          font-size: 12px;
 
-          display:
-            flex;
+          font-weight: 700;
 
-          align-items:
-            center;
-
-          gap:
-            10px;
-
-          font-weight:
-            700;
-
-          cursor:
-            pointer;
+          cursor: pointer;
         }
 
-        .logout-icon {
-          color:
-            #b42318;
+        .side-logout .side-icon {
+          color: #b42318;
 
           background:
             #ffffff;
         }
 
-        /* =============================================
+        /* ================================
            CONTENT
-        ============================================== */
+        ================================= */
 
         .dashboard-content {
-          width:
-            100%;
-
-          max-width:
-            1400px;
+          max-width: 1400px;
 
           margin:
             0 auto;
 
           padding:
-            34px 32px;
+            30px 28px;
         }
 
-        /* =============================================
+        /* ================================
            WELCOME
-        ============================================== */
+        ================================= */
 
         .welcome-card {
           background:
@@ -1455,98 +1817,74 @@ function Dashboard() {
               #174579
             );
 
-          color:
-            #ffffff;
+          color: #ffffff;
 
           border-radius:
-            18px;
+            17px;
 
           padding:
-            28px;
+            27px;
 
-          display:
-            flex;
+          display: flex;
 
           justify-content:
             space-between;
 
           align-items:
             center;
-
-          box-shadow:
-            0 12px 30px
-            rgba(
-              36,
-              90,
-              150,
-              .14
-            );
         }
 
         .welcome-small {
-          font-size:
-            10px;
+          font-size: 9px;
 
-          font-weight:
-            700;
+          font-weight: 800;
 
           letter-spacing:
             1px;
 
-          opacity:
-            .7;
+          opacity: .7;
 
           margin-bottom:
-            8px;
+            7px;
         }
 
         .welcome-card h2 {
-          margin:
-            0;
+          margin: 0;
 
-          font-size:
-            24px;
+          font-size: 23px;
         }
 
         .welcome-card p {
           margin:
-            8px 0 0;
+            7px 0 0;
 
-          font-size:
-            14px;
+          font-size: 12px;
 
-          opacity:
-            .88;
+          opacity: .9;
         }
 
         .role-area {
-          text-align:
-            right;
+          text-align: right;
         }
 
         .role-label {
-          display:
-            block;
+          display: block;
 
-          font-size:
-            11px;
+          font-size: 9px;
 
-          opacity:
-            .7;
+          opacity: .7;
 
-          margin-bottom:
-            6px;
+          margin-bottom: 5px;
         }
 
         .role-badge {
-          display:
-            inline-block;
+          display: inline-block;
 
           padding:
-            8px 14px;
+            7px 13px;
 
           border-radius:
-            20px;
+            18px;
 
           background:
             rgba(
@@ -1556,29 +1894,26 @@ function Dashboard() {
               .15
             );
 
-          font-size:
-            13px;
+          font-size: 11px;
 
-          font-weight:
-            700;
+          font-weight: 700;
         }
 
-        /* =============================================
-           STATISTICS
-        ============================================== */
+        /* ================================
+           STATS
+        ================================= */
 
         .stats-grid {
-          display:
-            grid;
+          display: grid;
 
           grid-template-columns:
             repeat(4, 1fr);
 
           gap:
-            18px;
+            16px;
 
           margin-top:
-            24px;
+            20px;
         }
 
         .stat-card {
@@ -1589,49 +1924,48 @@ function Dashboard() {
             1px solid #e4e7ec;
 
           border-radius:
-            14px;
+            13px;
 
           padding:
-            19px;
+            17px;
 
-          display:
-            flex;
+          display: flex;
 
           align-items:
             center;
 
           gap:
-            13px;
-
-          transition:
-            .2s ease;
+            12px;
         }
 
-        .stat-card:hover {
+        .stat-card.clickable {
+          cursor: pointer;
+
+          transition:
+            transform .18s ease,
+            box-shadow .18s ease;
+        }
+
+        .stat-card.clickable:hover {
           transform:
-            translateY(
-              -2px
-            );
+            translateY(-2px);
 
           box-shadow:
-            0 8px 24px
+            0 8px 20px
             rgba(
-              0,
-              0,
-              0,
-              .05
+              36,
+              90,
+              150,
+              .08
             );
         }
 
         .stat-icon {
-          width:
-            42px;
-
-          height:
-            42px;
+          width: 42px;
+          height: 42px;
 
           border-radius:
-            11px;
+            10px;
 
           background:
             #eef4fb;
@@ -1639,8 +1973,7 @@ function Dashboard() {
           color:
             #245a96;
 
-          display:
-            flex;
+          display: flex;
 
           align-items:
             center;
@@ -1651,38 +1984,34 @@ function Dashboard() {
           font-weight:
             800;
 
-          font-size:
-            17px;
+          flex-shrink: 0;
         }
 
         .stat-content span {
-          display:
-            block;
+          display: block;
 
           color:
             #667085;
 
           font-size:
-            12px;
+            11px;
         }
 
         .stat-content strong {
-          display:
-            block;
+          display: block;
 
           margin-top:
-            5px;
-
-          font-size:
-            23px;
+            3px;
 
           color:
             #173b68;
+
+          font-size:
+            21px;
         }
 
         .stat-content small {
-          display:
-            block;
+          display: block;
 
           margin-top:
             3px;
@@ -1691,63 +2020,61 @@ function Dashboard() {
             #98a2b3;
 
           font-size:
-            10px;
+            9px;
         }
 
-        /* =============================================
-           SECTION
-        ============================================== */
+        /* ================================
+           MODULES
+        ================================= */
 
         .modules-section {
           margin-top:
-            34px;
+            28px;
         }
 
         .section-header {
-          display:
-            flex;
+          display: flex;
 
           align-items:
-            center;
+            flex-end;
 
           justify-content:
             space-between;
 
           margin-bottom:
-            16px;
+            14px;
         }
 
         .section-kicker {
+          color:
+            #98a2b3;
+
           font-size:
-            10px;
+            9px;
 
           font-weight:
             800;
 
           letter-spacing:
             1px;
-
-          color:
-            #98a2b3;
         }
 
         .section-header h2 {
           margin:
-            4px 0 4px;
+            4px 0 3px;
 
           font-size:
-            20px;
+            18px;
         }
 
         .section-header p {
-          margin:
-            0;
+          margin: 0;
 
           color:
             #667085;
 
           font-size:
-            12px;
+            11px;
         }
 
         .open-menu-link {
@@ -1760,32 +2087,30 @@ function Dashboard() {
           color:
             #245a96;
 
-          border-radius:
-            9px;
-
           padding:
-            9px 13px;
+            8px 11px;
 
-          cursor:
-            pointer;
+          border-radius:
+            8px;
+
+          font-size:
+            10px;
 
           font-weight:
             700;
+
+          cursor:
+            pointer;
         }
 
-        /* =============================================
-           MODULES
-        ============================================== */
-
         .modules-grid {
-          display:
-            grid;
+          display: grid;
 
           grid-template-columns:
             repeat(3, 1fr);
 
           gap:
-            18px;
+            14px;
         }
 
         .module-card {
@@ -1796,10 +2121,13 @@ function Dashboard() {
             1px solid #e4e7ec;
 
           border-radius:
-            15px;
+            13px;
+
+          min-height:
+            88px;
 
           padding:
-            20px;
+            16px;
 
           display:
             flex;
@@ -1808,13 +2136,7 @@ function Dashboard() {
             center;
 
           gap:
-            14px;
-
-          min-height:
-            105px;
-
-          position:
-            relative;
+            12px;
         }
 
         .module-card.clickable {
@@ -1822,20 +2144,16 @@ function Dashboard() {
             pointer;
 
           transition:
-            .2s ease;
+            transform .18s ease,
+            box-shadow .18s ease;
         }
 
         .module-card.clickable:hover {
           transform:
-            translateY(
-              -3px
-            );
-
-          border-color:
-            #c7d8eb;
+            translateY(-2px);
 
           box-shadow:
-            0 10px 24px
+            0 8px 22px
             rgba(
               36,
               90,
@@ -1846,13 +2164,13 @@ function Dashboard() {
 
         .module-icon {
           width:
-            46px;
+            43px;
 
           height:
-            46px;
+            43px;
 
           border-radius:
-            12px;
+            10px;
 
           display:
             flex;
@@ -1876,14 +2194,6 @@ function Dashboard() {
 
           color:
             #245a96;
-        }
-
-        .module-icon.payroll {
-          background:
-            #f2f4ff;
-
-          color:
-            #5148a8;
         }
 
         .module-icon.attendance {
@@ -1910,15 +2220,15 @@ function Dashboard() {
             #c11574;
         }
 
-        .module-icon.employees {
+        .module-icon.payroll {
           background:
-            #eef4fb;
+            #f2f4ff;
 
           color:
-            #245a96;
+            #5148a8;
         }
 
-        .module-icon.users {
+        .module-icon.employees {
           background:
             #eef4fb;
 
@@ -1931,18 +2241,18 @@ function Dashboard() {
             0;
 
           font-size:
-            15px;
+            13px;
         }
 
         .module-card p {
           margin:
-            5px 0 0;
+            4px 0 0;
 
           color:
             #667085;
 
           font-size:
-            12px;
+            10px;
         }
 
         .card-arrow {
@@ -1953,47 +2263,16 @@ function Dashboard() {
             #98a2b3;
 
           font-size:
-            18px;
+            15px;
         }
 
-        .soon-badge {
-          display:
-            inline-block;
-
-          margin-top:
-            7px;
-
-          padding:
-            3px 7px;
-
-          background:
-            #f2f4f7;
-
-          color:
-            #667085;
-
-          border-radius:
-            8px;
-
-          font-size:
-            9px;
-
-          font-weight:
-            700;
-        }
-
-        .admin-card {
-          border-color:
-            #c7d8eb;
-        }
-
-        /* =============================================
-           ATTENDANCE PREVIEW
-        ============================================== */
+        /* ================================
+           HR PREVIEW
+        ================================= */
 
         .attendance-preview {
           margin-top:
-            25px;
+            20px;
 
           background:
             #ffffff;
@@ -2002,21 +2281,21 @@ function Dashboard() {
             1px solid #e4e7ec;
 
           border-radius:
-            16px;
+            14px;
 
           padding:
-            22px;
+            20px;
         }
 
         .attendance-preview-header {
           display:
             flex;
 
-          align-items:
-            center;
-
           justify-content:
             space-between;
+
+          align-items:
+            center;
         }
 
         .attendance-preview-header h2 {
@@ -2024,15 +2303,15 @@ function Dashboard() {
             4px 0 0;
 
           font-size:
-            18px;
+            17px;
         }
 
         .preview-badge {
           padding:
-            5px 9px;
+            4px 8px;
 
           border-radius:
-            10px;
+            8px;
 
           background:
             #f2f4f7;
@@ -2041,125 +2320,163 @@ function Dashboard() {
             #667085;
 
           font-size:
-            10px;
+            8px;
 
           font-weight:
             700;
         }
 
-        .attendance-bars {
-          margin-top:
-            20px;
-
-          display:
-            grid;
-
-          gap:
-            13px;
-        }
-
-        .attendance-row {
+        .attendance-preview-grid {
           display:
             grid;
 
           grid-template-columns:
-            100px 1fr 35px;
+            repeat(4, 1fr);
 
           gap:
             12px;
 
+          margin-top:
+            16px;
+        }
+
+        .preview-box {
+          display:
+            flex;
+
           align-items:
             center;
 
-          font-size:
-            12px;
+          gap:
+            9px;
+
+          border:
+            1px solid #eaecf0;
+
+          border-radius:
+            10px;
+
+          padding:
+            11px;
         }
 
-        .progress {
+        .preview-icon {
+          width:
+            34px;
+
           height:
+            34px;
+
+          border-radius:
             8px;
 
-          background:
-            #eef2f6;
+          display:
+            flex;
 
-          border-radius:
-            10px;
+          align-items:
+            center;
 
-          overflow:
-            hidden;
+          justify-content:
+            center;
+
+          flex-shrink:
+            0;
         }
 
-        .progress-present {
-          height:
-            100%;
-
+        .preview-icon.present {
           background:
-            #12b76a;
+            #ecfdf3;
 
-          border-radius:
-            10px;
+          color:
+            #027a48;
         }
 
-        .progress-leave {
-          height:
-            100%;
-
+        .preview-icon.leave {
           background:
-            #f79009;
+            #fffaeb;
 
-          border-radius:
-            10px;
+          color:
+            #b54708;
         }
 
-        .progress-absent {
-          height:
-            100%;
-
+        .preview-icon.holiday {
           background:
-            #f04438;
+            #fdf2fa;
 
-          border-radius:
-            10px;
+          color:
+            #c11574;
         }
 
-        /* =============================================
+        .preview-icon.salary {
+          background:
+            #f2f4ff;
+
+          color:
+            #5148a8;
+        }
+
+        .preview-box strong {
+          display:
+            block;
+
+          font-size:
+            11px;
+        }
+
+        .preview-box span {
+          display:
+            block;
+
+          margin-top:
+            3px;
+
+          color:
+            #98a2b3;
+
+          font-size:
+            9px;
+        }
+
+        /* ================================
            RESPONSIVE
-        ============================================== */
+        ================================= */
 
-        @media (
-          max-width: 1050px
-        ) {
+        @media (max-width: 1100px) {
 
           .stats-grid {
             grid-template-columns:
-              repeat(
-                2,
-                1fr
-              );
+              repeat(2, 1fr);
           }
 
           .modules-grid {
             grid-template-columns:
-              repeat(
-                2,
-                1fr
-              );
+              repeat(2, 1fr);
           }
 
+          .attendance-preview-grid {
+            grid-template-columns:
+              repeat(2, 1fr);
+          }
         }
 
-        @media (
-          max-width: 650px
-        ) {
+        @media (max-width: 650px) {
 
           .dashboard-header {
+            height:
+              64px;
+
             padding:
-              0 16px;
+              0 14px;
           }
 
-          .dashboard-content {
-            padding:
-              18px 16px;
+          .dashboard-header h1 {
+            font-size:
+              16px;
+          }
+
+          .dashboard-header p {
+            font-size:
+              9px;
           }
 
           .user-info {
@@ -2167,10 +2484,20 @@ function Dashboard() {
               none;
           }
 
-          .welcome-card {
+          .logout-btn {
             padding:
-              21px;
+              8px 10px;
 
+            font-size:
+              10px;
+          }
+
+          .dashboard-content {
+            padding:
+              18px 14px;
+          }
+
+          .welcome-card {
             flex-direction:
               column;
 
@@ -2178,7 +2505,15 @@ function Dashboard() {
               flex-start;
 
             gap:
-              16px;
+              14px;
+
+            padding:
+              21px;
+          }
+
+          .welcome-card h2 {
+            font-size:
+              19px;
           }
 
           .role-area {
@@ -2187,41 +2522,33 @@ function Dashboard() {
           }
 
           .stats-grid,
-          .modules-grid {
+          .modules-grid,
+          .attendance-preview-grid {
             grid-template-columns:
               1fr;
           }
 
           .section-header {
+            flex-direction:
+              column;
+
             align-items:
               flex-start;
 
             gap:
-              12px;
-
-            flex-direction:
-              column;
+              10px;
           }
 
           .sidebar {
             width:
               min(
                 88vw,
-                310px
+                300px
               );
           }
-
-          .attendance-row {
-            grid-template-columns:
-              78px 1fr 30px;
-          }
-
         }
 
       `}</style>
-
     </div>
   );
 }
-
-export default Dashboard;
