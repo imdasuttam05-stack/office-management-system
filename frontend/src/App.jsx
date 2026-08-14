@@ -8,6 +8,7 @@ import {
 
 import Login from "./pages/Login.jsx";
 import Expense from "./pages/Expense.jsx";
+import Users from "./pages/Users.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -60,6 +61,13 @@ export default function App() {
               element={<Expense />}
             />
 
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["Admin"]} />}>
+            <Route
+              path="/users"
+              element={<Users />}
+            />
           </Route>
 
           {/* Unknown */}
