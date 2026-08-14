@@ -10,6 +10,7 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
+import hrRoutes from "./routes/hrRoutes.js";
 
 import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
 
@@ -43,32 +44,6 @@ try {
 } catch (error) {
   console.warn(
     "WARNING: userRoutes.js not found. User Management API is disabled."
-  );
-
-  console.warn(
-    error?.message || error
-  );
-}
-
-/* =========================================================
-   OPTIONAL PAYROLL / HR ROUTES
-========================================================= */
-
-let payrollRoutes = null;
-
-try {
-  const payrollModule =
-    await import("./routes/payrollRoutes.js");
-
-  payrollRoutes =
-    payrollModule.default || null;
-
-  console.log(
-    "Payroll / HR routes loaded successfully."
-  );
-} catch (error) {
-  console.warn(
-    "WARNING: payrollRoutes.js not found. Payroll / HR API is disabled."
   );
 
   console.warn(
@@ -263,8 +238,7 @@ app.get(
       userRoutes:
         Boolean(userRoutes),
 
-      payrollRoutes:
-        Boolean(payrollRoutes),
+      hrRoutes: true,
     });
   }
 );
@@ -325,32 +299,13 @@ if (userRoutes) {
 }
 
 /* =========================================================
-   PAYROLL / HR
+   HR / PAYROLL
 ========================================================= */
 
-if (payrollRoutes) {
-
-  app.use(
-    "/api/payroll",
-    payrollRoutes
-  );
-
-} else {
-
-  app.use(
-    "/api/payroll",
-    (req, res) => {
-
-      res.status(503).json({
-        success: false,
-
-        message:
-          "Payroll / HR API is not deployed yet. Please deploy backend/routes/payrollRoutes.js.",
-      });
-
-    }
-  );
-}
+app.use(
+  "/api/payroll",
+  hrRoutes
+);
 
 /* =========================================================
    OCR
@@ -499,11 +454,7 @@ app.listen(
     );
 
     console.log(
-      `Payroll / HR: ${
-        payrollRoutes
-          ? "ENABLED"
-          : "DISABLED"
-      }`
+      "HR / Payroll: ENABLED"
     );
 
   }
