@@ -10,6 +10,7 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
+import payrollRoutes from "./routes/payrollRoutes.js";
 
 import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
 
@@ -201,6 +202,7 @@ app.get(
   (req, res) => {
     res.status(200).json({
       success: true,
+
       message:
         "Office Management API is running",
 
@@ -235,6 +237,9 @@ app.get(
 
       userRoutes:
         Boolean(userRoutes),
+
+      payrollRoutes:
+        true,
     });
   }
 );
@@ -276,18 +281,27 @@ if (userRoutes) {
     userRoutes
   );
 } else {
-  // Prevent "API route not found" confusion
   app.use(
     "/api/users",
     (req, res) => {
       res.status(503).json({
         success: false,
+
         message:
           "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
       });
     }
   );
 }
+
+/* =========================================================
+   PAYROLL
+========================================================= */
+
+app.use(
+  "/api/payroll",
+  payrollRoutes
+);
 
 /* =========================================================
    OCR
@@ -306,10 +320,15 @@ app.use(
   (req, res) => {
     res.status(404).json({
       success: false,
+
       message:
         "API route not found.",
-      path: req.originalUrl,
-      method: req.method,
+
+      path:
+        req.originalUrl,
+
+      method:
+        req.method,
     });
   }
 );
@@ -342,27 +361,32 @@ app.use(
       );
 
     /* File too large */
+
     if (
       err?.code ===
       "LIMIT_FILE_SIZE"
     ) {
       return res.status(413).json({
         success: false,
+
         message:
           "Image is too large. Maximum size is 10 MB.",
       });
     }
 
     /* Invalid upload */
+
     if (isUploadError) {
       return res.status(400).json({
         success: false,
+
         message:
           "Invalid image upload.",
       });
     }
 
     /* CORS error */
+
     if (
       String(
         err?.message || ""
@@ -372,6 +396,7 @@ app.use(
     ) {
       return res.status(403).json({
         success: false,
+
         message:
           "CORS origin not allowed.",
       });
@@ -410,6 +435,10 @@ app.listen(
           ? "ENABLED"
           : "DISABLED"
       }`
+    );
+
+    console.log(
+      "Payroll API: ENABLED"
     );
   }
 );
