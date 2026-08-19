@@ -14,6 +14,7 @@ import {
   sendOtpLimiter,
   verifyOtpLimiter,
   refreshLimiter,
+  sensitiveActionLimiter,
 } from "../middleware/rateLimit.js";
 
 const router = express.Router();
@@ -24,6 +25,11 @@ router.post("/forgot-password/reset", verifyOtpLimiter, resetPassword);
 router.post("/refresh", refreshLimiter, refreshAccessToken);
 router.post("/logout", logout);
 router.get("/me", auth, getMe);
-router.post("/change-password", auth, changeMyPassword);
+router.post(
+  "/change-password",
+  auth,
+  sensitiveActionLimiter,
+  changeMyPassword
+);
 
 export default router;
