@@ -1,6 +1,6 @@
 import express from "express";
 import auth from "../middleware/auth.js";
-import requireRole from "../middleware/role.js";
+import requirePermission from "../middleware/permission.js";
 import {
   listUsers,
   createUser,
@@ -9,11 +9,24 @@ import {
 
 const router = express.Router();
 
-// Admin only
-router.use(auth, requireRole("Admin"));
+router.use(auth);
 
-router.get("/", listUsers);
-router.post("/", createUser);
-router.patch("/:id", updateUser);
+router.get(
+  "/",
+  requirePermission("users.view"),
+  listUsers
+);
+
+router.post(
+  "/",
+  requirePermission("users.create"),
+  createUser
+);
+
+router.patch(
+  "/:id",
+  requirePermission("users.edit", "users.changeRole", "users.changePermission"),
+  updateUser
+);
 
 export default router;
