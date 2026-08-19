@@ -9,6 +9,13 @@ const refreshTokenSchema = new mongoose.Schema(
       index: true,
     },
 
+    sessionId: {
+      type: String,
+      required: true,
+      index: true,
+      maxlength: 100,
+    },
+
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -19,14 +26,18 @@ const refreshTokenSchema = new mongoose.Schema(
     expiresAt: {
       type: Date,
       required: true,
-      index: {
-        expires: 0,
-      },
+      index: { expires: 0 },
     },
 
     revokedAt: {
       type: Date,
       default: null,
+    },
+
+    revokedReason: {
+      type: String,
+      default: "",
+      maxlength: 120,
     },
 
     userAgent: {
@@ -40,10 +51,26 @@ const refreshTokenSchema = new mongoose.Schema(
       default: "",
       maxlength: 100,
     },
+
+    lastUsedAt: {
+      type: Date,
+      default: null,
+    },
+
+    lastUsedIp: {
+      type: String,
+      default: "",
+      maxlength: 100,
+    },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true, strict: true }
 );
 
-export default mongoose.model("RefreshToken", refreshTokenSchema);
+refreshTokenSchema.index({ userId: 1, revokedAt: 1 });
+refreshTokenSchema.index({ sessionId: 1, revokedAt: 1 });
+
+const RefreshToken =
+  mongoose.models.RefreshToken ||
+  mongoose.model("RefreshToken", refreshTokenSchema);
+
+export default RefreshToken;
