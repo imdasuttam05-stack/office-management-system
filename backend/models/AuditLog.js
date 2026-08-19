@@ -12,13 +12,15 @@ const auditLogSchema = new mongoose.Schema(
     action: {
       type: String,
       required: true,
-      maxlength: 80,
+      maxlength: 100,
+      index: true,
     },
 
     entity: {
       type: String,
       default: "",
       maxlength: 80,
+      index: true,
     },
 
     entityId: {
@@ -44,9 +46,14 @@ const auditLogSchema = new mongoose.Schema(
       maxlength: 500,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true, strict: true }
 );
 
-export default mongoose.model("AuditLog", auditLogSchema);
+auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ actorUser: 1, createdAt: -1 });
+
+const AuditLog =
+  mongoose.models.AuditLog ||
+  mongoose.model("AuditLog", auditLogSchema);
+
+export default AuditLog;
