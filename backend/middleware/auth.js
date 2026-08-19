@@ -21,10 +21,7 @@ export default async function auth(req, res, next) {
       });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
-    );
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     if (!decoded?.userId) {
       return res.status(401).json({
@@ -33,8 +30,9 @@ export default async function auth(req, res, next) {
       });
     }
 
-    const user = await User.findById(decoded.userId)
-      .select("_id name email mobile role isVerified isActive lastLogin");
+    const user = await User.findById(decoded.userId).select(
+      "_id name email mobile role isMainAdmin permissions companyId branchId warehouseIds department employeeId isVerified isActive lastLogin passwordChangedAt tokenVersion"
+    );
 
     if (!user) {
       return res.status(401).json({
@@ -50,7 +48,39 @@ export default async function auth(req, res, next) {
       });
     }
 
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      return res.status(423).json({
+        success: false,
+        message: "Your account is temporarily locked.",
+      });
+    }
+
+    if (
+      Number(decoded.tokenVersion ?? 0) !== Number(user.tokenVersion ?? 0)
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Session is no longer valid. Please login again.",
+      });
+    }
+
+    if (
+      user.passwordChangedAt &&
+      decoded.iat &&
+      decoded.iat * 1000 < user.passwordChangedAt.getTime()
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Password was changed. Please login again.",
+      });
+    }
+
     req.user = user;
+    req.auth = {
+      tokenId: decoded.jti || null,
+      sessionId: decoded.sessionId || null,
+      issuedAt: decoded.iat || null,
+    };
 
     next();
   } catch (error) {
