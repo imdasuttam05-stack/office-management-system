@@ -20,6 +20,7 @@ const otpSchema = new mongoose.Schema(
     otpHash: {
       type: String,
       required: true,
+      select: false,
     },
 
     expiresAt: {
@@ -31,16 +32,24 @@ const otpSchema = new mongoose.Schema(
     attempts: {
       type: Number,
       default: 0,
+      min: 0,
+      max: 10,
     },
 
     consumedAt: {
       type: Date,
       default: null,
+      index: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true, strict: true }
 );
 
-const Otp = mongoose.models.Otp || mongoose.model("Otp", otpSchema);
+otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+otpSchema.index({ email: 1, purpose: 1, consumedAt: 1, createdAt: -1 });
+
+const Otp =
+  mongoose.models.Otp ||
+  mongoose.model("Otp", otpSchema);
 
 export default Otp;
