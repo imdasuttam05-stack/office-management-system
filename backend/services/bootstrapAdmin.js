@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import User from "../models/User.js";
+import { writeAuditLog } from "./auditService.js";
 
 const BCRYPT_ROUNDS = Math.max(
   10,
@@ -7,15 +8,11 @@ const BCRYPT_ROUNDS = Math.max(
 );
 
 function normalizeEmail(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
+  return String(value || "").trim().toLowerCase();
 }
 
 function normalizeMobile(value) {
-  return String(value || "")
-    .replace(/[^0-9+]/g, "")
-    .trim();
+  return String(value || "").replace(/[^0-9+]/g, "").trim();
 }
 
 function isValidEmail(email) {
@@ -23,82 +20,54 @@ function isValidEmail(email) {
 }
 
 function isValidMobile(mobile) {
-  const digits = mobile.replace(/^\+/, "");
+  const digits = String(mobile || "").replace(/^\+/, "");
   return /^\d{10,15}$/.test(digits);
 }
 
+function isStrongPassword(password) {
+  return typeof password === "string" && password.length >= 8 && password.length <= 128;
+}
+
 export async function ensureBootstrapAdmin() {
-  const name = String(
-    process.env.BOOTSTRAP_ADMIN_NAME ||
-      "Administrator"
-  ).trim();
+  const name = String(process.env.BOOTSTRAP_ADMIN_NAME || "Main Administrator").trim();
+  const email = normalizeEmail(process.env.BOOTSTRAP_ADMIN_EMAIL);
+  const mobile = normalizeMobile(process.env.BOOTSTRAP_ADMIN_MOBILE);
+  const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || "");
 
-  const email = normalizeEmail(
-    process.env.BOOTSTRAP_ADMIN_EMAIL
-  );
-
-  const mobile = normalizeMobile(
-    process.env.BOOTSTRAP_ADMIN_MOBILE
-  );
-
-  const password = String(
-    process.env.BOOTSTRAP_ADMIN_PASSWORD || ""
-  );
-
-  // Admin env না থাকলেও backend বন্ধ হবে না
   if (!email || !mobile || !password) {
     console.warn(
-      "Bootstrap admin skipped: admin environment variables are not fully configured."
+      "Bootstrap admin skipped: BOOTSTRAP_ADMIN_EMAIL, BOOTSTRAP_ADMIN_MOBILE and BOOTSTRAP_ADMIN_PASSWORD must be configured."
     );
     return null;
   }
 
   if (!isValidEmail(email)) {
-    throw new Error(
-      "BOOTSTRAP_ADMIN_EMAIL is invalid."
-    );
+    throw new Error("BOOTSTRAP_ADMIN_EMAIL is invalid.");
   }
 
   if (!isValidMobile(mobile)) {
-    throw new Error(
-      "BOOTSTRAP_ADMIN_MOBILE is invalid."
-    );
+    throw new Error("BOOTSTRAP_ADMIN_MOBILE is invalid.");
   }
 
-  if (
-    password.length < 8 ||
-    password.length > 128
-  ) {
-    throw new Error(
-      "BOOTSTRAP_ADMIN_PASSWORD must be between 8 and 128 characters."
-    );
+  if (!isStrongPassword(password)) {
+    throw new Error("BOOTSTRAP_ADMIN_PASSWORD must be between 8 and 128 characters.");
   }
 
   let admin = await User.findOne({
-    $or: [
-      { email },
-      { mobile },
-    ],
+    $or: [{ email }, { mobile }],
   }).select("+passwordHash");
 
-  // Existing user
   if (admin) {
+    // IMPORTANT: do not overwrite an existing user's password on every server restart.
+    // Only repair identity fields when they match the bootstrap account.
     let changed = false;
 
-    if (admin.name !== name && name) {
-      admin.name = name;
-      changed = true;
-    }
-
-    if (admin.email !== email) {
+    if (!admin.email) {
       admin.email = email;
       changed = true;
     }
 
-    if (
-      !admin.mobile ||
-      admin.mobile !== mobile
-    ) {
+    if (!admin.mobile) {
       admin.mobile = mobile;
       changed = true;
     }
@@ -108,72 +77,62 @@ export async function ensureBootstrapAdmin() {
       changed = true;
     }
 
+    if (!admin.isMainAdmin) {
+      admin.isMainAdmin = true;
+      changed = true;
+    }
+
     if (!admin.isActive) {
       admin.isActive = true;
       changed = true;
     }
 
-    /*
-     * পুরোনো OTP user-এর passwordHash না থাকলে
-     * এখন bootstrap password দিয়ে password তৈরি করবে।
-     */
-    if (!admin.passwordHash) {
-      admin.passwordHash =
-        await bcrypt.hash(
-          password,
-          BCRYPT_ROUNDS
-        );
-
-      admin.passwordChangedAt =
-        new Date();
-
+    if (!admin.isVerified) {
+      admin.isVerified = true;
       changed = true;
+    }
 
-      console.log(
-        `Password initialized for existing admin: ${email}`
-      );
+    if (!admin.passwordHash) {
+      admin.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      admin.passwordChangedAt = new Date();
+      admin.tokenVersion = Number(admin.tokenVersion || 0) + 1;
+      changed = true;
+      console.log(`Password initialized for bootstrap admin: ${email}`);
     }
 
     if (changed) {
       await admin.save();
     }
 
-    console.log(
-      `Bootstrap admin ready: ${admin.email}`
-    );
-
+    console.log(`Bootstrap Main Admin ready: ${admin.email}`);
     return admin;
   }
 
-  // New admin
-  const passwordHash =
-    await bcrypt.hash(
-      password,
-      BCRYPT_ROUNDS
-    );
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
   admin = await User.create({
-    name:
-      name || "Administrator",
-
+    name: name || "Main Administrator",
     email,
-
     mobile,
-
     passwordHash,
-
     role: "Admin",
-
+    isMainAdmin: true,
+    permissions: ["*"],
     isVerified: true,
-
     isActive: true,
-
     passwordChangedAt: new Date(),
   });
 
-  console.log(
-    `Bootstrap admin created: ${admin.email}`
-  );
+  await writeAuditLog({
+    actorUser: admin,
+    action: "BOOTSTRAP_MAIN_ADMIN_CREATED",
+    entity: "User",
+    entityId: admin._id,
+    metadata: {
+      source: "bootstrap",
+    },
+  });
 
+  console.log(`Bootstrap Main Admin created: ${admin.email}`);
   return admin;
 }
