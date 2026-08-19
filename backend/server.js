@@ -11,6 +11,7 @@ import authRoutes from "./routes/authRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
 import hrRoutes from "./routes/hrRoutes.js";
+import securityRoutes from "./routes/securityRoutes.js";
 
 import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
 
@@ -80,10 +81,7 @@ await ensureBootstrapAdmin();
    APP SETTINGS
 ========================================================= */
 
-app.set(
-  "trust proxy",
-  1
-);
+app.set("trust proxy", 1);
 
 app.disable(
   "x-powered-by"
@@ -207,8 +205,7 @@ app.get(
         "Office Management API is running",
 
       environment:
-        process.env.NODE_ENV ||
-        "development",
+        process.env.NODE_ENV === "production" ? "production" : "development",
 
       timestamp:
         new Date().toISOString(),
@@ -229,15 +226,10 @@ app.get(
       service:
         "office-management-backend",
 
-      database:
-        "MongoDB Atlas",
-
       timestamp:
         new Date().toISOString(),
 
-      userRoutes:
-        Boolean(userRoutes),
-
+      userRoutes: Boolean(userRoutes),
       hrRoutes: true,
     });
   }
@@ -259,6 +251,15 @@ app.use(
 app.use(
   "/api/auth",
   authRoutes
+);
+
+/* =========================================================
+   SECURITY / SESSIONS
+========================================================= */
+
+app.use(
+  "/api/security",
+  securityRoutes
 );
 
 /* =========================================================
