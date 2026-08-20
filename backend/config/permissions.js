@@ -250,3 +250,14 @@ export function getDefaultPermissionsForUser(user) {
 
   return [...(ROLE_DEFAULT_PERMISSIONS[user?.role] || [])];
 }
+
+
+export function permissionParts(key) {
+  const [module = "system", action = "access"] = String(key).split(".");
+  return { module, action };
+}
+
+export function permissionDescription(key) {
+  const { module, action } = permissionParts(key);
+  return `${module} ${action}`.replace(/\b\w/g, (char) => char.toUpperCase());
+}
