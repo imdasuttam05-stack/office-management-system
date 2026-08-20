@@ -18,7 +18,6 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      index: true,
     },
 
     mobile: {
@@ -27,7 +26,6 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
       trim: true,
-      index: true,
     },
 
     passwordHash: {
@@ -165,8 +163,6 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ mobile: 1 }, { unique: true });
 userSchema.index({ role: 1, isActive: 1 });
 
 const User =
