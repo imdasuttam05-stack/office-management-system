@@ -8,7 +8,6 @@ const roleSchema = new mongoose.Schema(
       unique: true,
       trim: true,
       maxlength: 80,
-      index: true,
     },
 
     description: {
