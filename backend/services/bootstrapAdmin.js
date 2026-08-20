@@ -1,6 +1,14 @@
 import bcrypt from "bcrypt";
 import User from "../models/User.js";
+import Role from "../models/Role.js";
+import Permission from "../models/Permission.js";
 import { writeAuditLog } from "./auditService.js";
+import {
+  PERMISSIONS,
+  ROLE_DEFAULT_PERMISSIONS,
+  permissionParts,
+  permissionDescription,
+} from "../config/permissions.js";
 
 const BCRYPT_ROUNDS = Math.max(
   10,
@@ -25,14 +33,79 @@ function isValidMobile(mobile) {
 }
 
 function isStrongPassword(password) {
-  return typeof password === "string" && password.length >= 8 && password.length <= 128;
+  return (
+    typeof password === "string" &&
+    password.length >= 8 &&
+    password.length <= 128
+  );
+}
+
+export async function ensureSecurityCatalog() {
+  const permissionOps = PERMISSIONS.map((key) => {
+    const { module, action } = permissionParts(key);
+
+    return {
+      updateOne: {
+        filter: { key },
+        update: {
+          $set: {
+            module,
+            action,
+            description: permissionDescription(key),
+            isSystemPermission: true,
+          },
+          $setOnInsert: {
+            key,
+          },
+        },
+        upsert: true,
+      },
+    };
+  });
+
+  if (permissionOps.length) {
+    await Permission.bulkWrite(permissionOps, { ordered: false });
+  }
+
+  const roleOps = Object.entries(ROLE_DEFAULT_PERMISSIONS).map(
+    ([name, permissions]) => ({
+      updateOne: {
+        filter: { name },
+        update: {
+          $set: {
+            permissions: [...new Set(permissions)],
+            isSystemRole: true,
+          },
+          $setOnInsert: {
+            name,
+            description: `${name} system role`,
+            level: name === "Admin" ? 900 : 500,
+            createdBy: null,
+          },
+        },
+        upsert: true,
+      },
+    })
+  );
+
+  if (roleOps.length) {
+    await Role.bulkWrite(roleOps, { ordered: false });
+  }
+
+  console.log(
+    `Security catalog ready: ${PERMISSIONS.length} permissions, ${roleOps.length} system roles.`
+  );
 }
 
 export async function ensureBootstrapAdmin() {
-  const name = String(process.env.BOOTSTRAP_ADMIN_NAME || "Main Administrator").trim();
+  const name = String(
+    process.env.BOOTSTRAP_ADMIN_NAME || "Main Administrator"
+  ).trim();
   const email = normalizeEmail(process.env.BOOTSTRAP_ADMIN_EMAIL);
   const mobile = normalizeMobile(process.env.BOOTSTRAP_ADMIN_MOBILE);
-  const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || "");
+  const password = String(
+    process.env.BOOTSTRAP_ADMIN_PASSWORD || ""
+  );
 
   if (!email || !mobile || !password) {
     console.warn(
@@ -50,7 +123,9 @@ export async function ensureBootstrapAdmin() {
   }
 
   if (!isStrongPassword(password)) {
-    throw new Error("BOOTSTRAP_ADMIN_PASSWORD must be between 8 and 128 characters.");
+    throw new Error(
+      "BOOTSTRAP_ADMIN_PASSWORD must be between 8 and 128 characters."
+    );
   }
 
   let admin = await User.findOne({
@@ -58,8 +133,7 @@ export async function ensureBootstrapAdmin() {
   }).select("+passwordHash");
 
   if (admin) {
-    // IMPORTANT: do not overwrite an existing user's password on every server restart.
-    // Only repair identity fields when they match the bootstrap account.
+    // IMPORTANT: never overwrite an existing password on server restart.
     let changed = false;
 
     if (!admin.email) {
@@ -82,6 +156,14 @@ export async function ensureBootstrapAdmin() {
       changed = true;
     }
 
+    if (
+      !Array.isArray(admin.permissions) ||
+      !admin.permissions.includes("*")
+    ) {
+      admin.permissions = ["*"];
+      changed = true;
+    }
+
     if (!admin.isActive) {
       admin.isActive = true;
       changed = true;
@@ -93,22 +175,35 @@ export async function ensureBootstrapAdmin() {
     }
 
     if (!admin.passwordHash) {
-      admin.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      admin.passwordHash = await bcrypt.hash(
+        password,
+        BCRYPT_ROUNDS
+      );
       admin.passwordChangedAt = new Date();
-      admin.tokenVersion = Number(admin.tokenVersion || 0) + 1;
+      admin.tokenVersion =
+        Number(admin.tokenVersion || 0) + 1;
       changed = true;
-      console.log(`Password initialized for bootstrap admin: ${email}`);
+
+      console.log(
+        `Password initialized for bootstrap admin: ${email}`
+      );
     }
 
     if (changed) {
       await admin.save();
     }
 
-    console.log(`Bootstrap Main Admin ready: ${admin.email}`);
+    console.log(
+      `Bootstrap Main Admin ready: ${admin.email}`
+    );
+
     return admin;
   }
 
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const passwordHash = await bcrypt.hash(
+    password,
+    BCRYPT_ROUNDS
+  );
 
   admin = await User.create({
     name: name || "Main Administrator",
@@ -133,6 +228,9 @@ export async function ensureBootstrapAdmin() {
     },
   });
 
-  console.log(`Bootstrap Main Admin created: ${admin.email}`);
+  console.log(
+    `Bootstrap Main Admin created: ${admin.email}`
+  );
+
   return admin;
 }
