@@ -13,7 +13,7 @@ import ocrRoutes from "./routes/ocrRoutes.js";
 import hrRoutes from "./routes/hrRoutes.js";
 import securityRoutes from "./routes/securityRoutes.js";
 
-import { ensureBootstrapAdmin } from "./services/bootstrapAdmin.js";
+import { ensureBootstrapAdmin, ensureSecurityCatalog } from "./services/bootstrapAdmin.js";
 
 import {
   apiLimiter,
@@ -72,9 +72,10 @@ const allowedOrigins = (
 await connectDB();
 
 /* =========================================================
-   BOOTSTRAP ADMIN
+   SECURITY CATALOG + BOOTSTRAP ADMIN
 ========================================================= */
 
+await ensureSecurityCatalog();
 await ensureBootstrapAdmin();
 
 /* =========================================================
