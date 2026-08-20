@@ -13,7 +13,10 @@ import ocrRoutes from "./routes/ocrRoutes.js";
 import hrRoutes from "./routes/hrRoutes.js";
 import securityRoutes from "./routes/securityRoutes.js";
 
-import { ensureBootstrapAdmin, ensureSecurityCatalog } from "./services/bootstrapAdmin.js";
+import {
+  ensureBootstrapAdmin,
+  ensureSecurityCatalog,
+} from "./services/bootstrapAdmin.js";
 
 import {
   apiLimiter,
@@ -56,14 +59,48 @@ try {
    CORS
 ========================================================= */
 
-const allowedOrigins = (
+/*
+  CLIENT_URL can contain multiple comma-separated origins.
+
+  Example Render Environment Variable:
+
+  CLIENT_URL=https://office-management-system-e99rk96n5-imdasuttam05-stacks-projects.vercel.app,https://your-production-domain.vercel.app
+*/
+
+const envOrigins = (
   process.env.CLIENT_URL || ""
 )
   .split(",")
   .map((item) =>
-    item.trim()
+    item.trim().replace(/\/$/, "")
   )
   .filter(Boolean);
+
+/*
+  Current Vercel deployment origin.
+  This is added directly so the current deployment works
+  even if CLIENT_URL was not configured correctly on Render.
+*/
+
+const fallbackOrigins = [
+  "https://office-management-system-e99rk96n5-imdasuttam05-stacks-projects.vercel.app",
+];
+
+/*
+  Combine and remove duplicates.
+*/
+
+const allowedOrigins = [
+  ...new Set([
+    ...envOrigins,
+    ...fallbackOrigins,
+  ]),
+];
+
+console.log(
+  "Allowed CORS origins:",
+  allowedOrigins
+);
 
 /* =========================================================
    DATABASE
@@ -104,58 +141,77 @@ app.use(
    CORS
 ========================================================= */
 
-app.use(
-  cors({
-    origin(origin, callback) {
+const corsOptions = {
+  origin(origin, callback) {
+    /*
+      Allow requests without Origin header
+      such as server-to-server, health checks,
+      Render checks and Postman.
+    */
 
-      // Allow Postman / server-to-server
-      if (!origin) {
-        return callback(
-          null,
-          true
-        );
-      }
-
-      // Allow configured frontend URLs
-      if (
-        allowedOrigins.includes(
-          origin
-        )
-      ) {
-        return callback(
-          null,
-          true
-        );
-      }
-
-      console.warn(
-        "Blocked CORS origin:",
-        origin
-      );
-
+    if (!origin) {
       return callback(
-        new Error(
-          "CORS origin not allowed."
-        )
+        null,
+        true
       );
-    },
+    }
 
-    credentials: true,
+    const normalizedOrigin =
+      origin
+        .trim()
+        .replace(/\/$/, "");
 
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
+    if (
+      allowedOrigins.includes(
+        normalizedOrigin
+      )
+    ) {
+      return callback(
+        null,
+        true
+      );
+    }
 
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-    ],
-  })
+    console.warn(
+      "Blocked CORS origin:",
+      origin
+    );
+
+    return callback(
+      new Error(
+        "CORS origin not allowed."
+      )
+    );
+  },
+
+  credentials: true,
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+  ],
+
+  optionsSuccessStatus: 204,
+};
+
+/*
+  Apply CORS before API routes.
+  This also handles browser OPTIONS preflight requests.
+*/
+
+app.use(
+  cors(corsOptions)
 );
 
 /* =========================================================
@@ -206,7 +262,10 @@ app.get(
         "Office Management API is running",
 
       environment:
-        process.env.NODE_ENV === "production" ? "production" : "development",
+        process.env.NODE_ENV ===
+        "production"
+          ? "production"
+          : "development",
 
       timestamp:
         new Date().toISOString(),
@@ -230,7 +289,9 @@ app.get(
       timestamp:
         new Date().toISOString(),
 
-      userRoutes: Boolean(userRoutes),
+      userRoutes:
+        Boolean(userRoutes),
+
       hrRoutes: true,
     });
   }
@@ -277,25 +338,20 @@ app.use(
 ========================================================= */
 
 if (userRoutes) {
-
   app.use(
     "/api/users",
     userRoutes
   );
-
 } else {
-
   app.use(
     "/api/users",
     (req, res) => {
-
       res.status(503).json({
         success: false,
 
         message:
           "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
       });
-
     }
   );
 }
@@ -324,7 +380,6 @@ app.use(
 
 app.use(
   (req, res) => {
-
     res.status(404).json({
       success: false,
 
@@ -337,7 +392,6 @@ app.use(
       method:
         req.method,
     });
-
   }
 );
 
@@ -352,7 +406,6 @@ app.use(
     res,
     next
   ) => {
-
     console.error(
       "SERVER ERROR:",
       err?.stack ||
@@ -375,27 +428,23 @@ app.use(
       err?.code ===
       "LIMIT_FILE_SIZE"
     ) {
-
       return res.status(413).json({
         success: false,
 
         message:
           "Image is too large. Maximum size is 10 MB.",
       });
-
     }
 
     /* Invalid upload */
 
     if (isUploadError) {
-
       return res.status(400).json({
         success: false,
 
         message:
           "Invalid image upload.",
       });
-
     }
 
     /* CORS error */
@@ -407,20 +456,17 @@ app.use(
         "CORS origin not allowed"
       )
     ) {
-
       return res.status(403).json({
         success: false,
 
         message:
           "CORS origin not allowed.",
       });
-
     }
 
     return res.status(
       err?.statusCode || 500
     ).json({
-
       success: false,
 
       message:
@@ -430,7 +476,6 @@ app.use(
           : err?.message ||
             "Internal server error.",
     });
-
   }
 );
 
@@ -442,7 +487,6 @@ app.listen(
   PORT,
   "0.0.0.0",
   () => {
-
     console.log(
       `Office Management Backend running on port ${PORT}`
     );
@@ -458,6 +502,5 @@ app.listen(
     console.log(
       "HR / Payroll: ENABLED"
     );
-
   }
 );
