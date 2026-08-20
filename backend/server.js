@@ -18,16 +18,13 @@ import {
   ensureSecurityCatalog,
 } from "./services/bootstrapAdmin.js";
 
-import {
-  apiLimiter,
-} from "./middleware/rateLimit.js";
+import { apiLimiter } from "./middleware/rateLimit.js";
 
 import connectDB from "./config/db.js";
 
 const app = express();
 
-const PORT =
-  Number(process.env.PORT) || 10000;
+const PORT = Number(process.env.PORT) || 10000;
 
 /* =========================================================
    OPTIONAL USER ROUTES
@@ -36,50 +33,62 @@ const PORT =
 let userRoutes = null;
 
 try {
-  const userModule =
-    await import("./routes/userRoutes.js");
+  const userModule = await import("./routes/userRoutes.js");
 
-  userRoutes =
-    userModule.default || null;
+  userRoutes = userModule.default || null;
 
-  console.log(
-    "User routes loaded successfully."
-  );
+  console.log("User routes loaded successfully.");
 } catch (error) {
   console.warn(
     "WARNING: userRoutes.js not found. User Management API is disabled."
   );
 
-  console.warn(
-    error?.message || error
-  );
+  console.warn(error?.message || error);
 }
 
 /* =========================================================
-   CORS
+   CORS CONFIGURATION
 ========================================================= */
 
-/*
-  CLIENT_URL can contain multiple comma-separated origins.
-
-  Example Render Environment Variable:
-
-  CLIENT_URL=https://office-management-system-e99rk96n5-imdasuttam05-stacks-projects.vercel.app,https://your-production-domain.vercel.app
-*/
-
-const envOrigins = (
-  process.env.CLIENT_URL || ""
-)
+const envOrigins = (process.env.CLIENT_URL || "")
   .split(",")
-  .map((item) =>
-    item.trim().replace(/\/$/, "")
-  )
-  .filter(Boolean);
+  .map((item) => {
+    let value = item.trim();
+
+    /*
+      Support accidental Markdown link format:
+
+      [https://example.com](https://example.com)
+    */
+
+    const markdownMatch = value.match(
+      /^\[([^\]]+)\]\(([^)]+)\)$/
+    );
+
+    if (markdownMatch) {
+      value = markdownMatch[2];
+    }
+
+    /*
+      Remove wrapping quotes and trailing slash
+    */
+
+    value = value
+      .trim()
+      .replace(/^["']|["']$/g, "")
+      .replace(/\/$/, "");
+
+    return value;
+  })
+  .filter(
+    (value) =>
+      value.startsWith("http://") ||
+      value.startsWith("https://")
+  );
 
 /*
-  Current Vercel deployment origin.
-  This is added directly so the current deployment works
-  even if CLIENT_URL was not configured correctly on Render.
+  Current Vercel deployment.
+  This guarantees the current frontend can access the backend.
 */
 
 const fallbackOrigins = [
@@ -87,7 +96,7 @@ const fallbackOrigins = [
 ];
 
 /*
-  Combine and remove duplicates.
+  Merge and remove duplicates.
 */
 
 const allowedOrigins = [
@@ -97,10 +106,7 @@ const allowedOrigins = [
   ]),
 ];
 
-console.log(
-  "Allowed CORS origins:",
-  allowedOrigins
-);
+console.log("Allowed CORS origins:", allowedOrigins);
 
 /* =========================================================
    DATABASE
@@ -121,9 +127,7 @@ await ensureBootstrapAdmin();
 
 app.set("trust proxy", 1);
 
-app.disable(
-  "x-powered-by"
-);
+app.disable("x-powered-by");
 
 /* =========================================================
    SECURITY
@@ -144,43 +148,28 @@ app.use(
 const corsOptions = {
   origin(origin, callback) {
     /*
-      Allow requests without Origin header
-      such as server-to-server, health checks,
-      Render checks and Postman.
+      Allow requests without an Origin header:
+      - Render health checks
+      - Postman
+      - server-to-server requests
     */
 
     if (!origin) {
-      return callback(
-        null,
-        true
-      );
+      return callback(null, true);
     }
 
-    const normalizedOrigin =
-      origin
-        .trim()
-        .replace(/\/$/, "");
+    const normalizedOrigin = origin
+      .trim()
+      .replace(/\/$/, "");
 
-    if (
-      allowedOrigins.includes(
-        normalizedOrigin
-      )
-    ) {
-      return callback(
-        null,
-        true
-      );
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
     }
 
-    console.warn(
-      "Blocked CORS origin:",
-      origin
-    );
+    console.warn("Blocked CORS origin:", origin);
 
     return callback(
-      new Error(
-        "CORS origin not allowed."
-      )
+      new Error("CORS origin not allowed.")
     );
   },
 
@@ -206,13 +195,16 @@ const corsOptions = {
 };
 
 /*
-  Apply CORS before API routes.
-  This also handles browser OPTIONS preflight requests.
+  CORS middleware must be registered before API routes.
 */
 
-app.use(
-  cors(corsOptions)
-);
+app.use(cors(corsOptions));
+
+/*
+  Explicitly handle preflight requests.
+*/
+
+app.options("*", cors(corsOptions));
 
 /* =========================================================
    BODY PARSERS
@@ -231,276 +223,200 @@ app.use(
   })
 );
 
-app.use(
-  cookieParser()
-);
+app.use(cookieParser());
 
 /* =========================================================
    LOGGER
 ========================================================= */
 
-if (
-  process.env.NODE_ENV !==
-  "test"
-) {
-  app.use(
-    morgan("combined")
-  );
+if (process.env.NODE_ENV !== "test") {
+  app.use(morgan("combined"));
 }
 
 /* =========================================================
    ROOT
 ========================================================= */
 
-app.get(
-  "/",
-  (req, res) => {
-    res.status(200).json({
-      success: true,
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
 
-      message:
-        "Office Management API is running",
+    message: "Office Management API is running",
 
-      environment:
-        process.env.NODE_ENV ===
-        "production"
-          ? "production"
-          : "development",
+    environment:
+      process.env.NODE_ENV === "production"
+        ? "production"
+        : "development",
 
-      timestamp:
-        new Date().toISOString(),
-    });
-  }
-);
+    timestamp: new Date().toISOString(),
+  });
+});
 
 /* =========================================================
    HEALTH
 ========================================================= */
 
-app.get(
-  "/api/health",
-  (req, res) => {
-    res.status(200).json({
-      success: true,
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    success: true,
 
-      service:
-        "office-management-backend",
+    service: "office-management-backend",
 
-      timestamp:
-        new Date().toISOString(),
+    timestamp: new Date().toISOString(),
 
-      userRoutes:
-        Boolean(userRoutes),
+    userRoutes: Boolean(userRoutes),
 
-      hrRoutes: true,
-    });
-  }
-);
+    hrRoutes: true,
+  });
+});
 
 /* =========================================================
    API RATE LIMIT
 ========================================================= */
 
-app.use(
-  "/api",
-  apiLimiter
-);
+app.use("/api", apiLimiter);
 
 /* =========================================================
    AUTH
 ========================================================= */
 
-app.use(
-  "/api/auth",
-  authRoutes
-);
+app.use("/api/auth", authRoutes);
 
 /* =========================================================
    SECURITY / SESSIONS
 ========================================================= */
 
-app.use(
-  "/api/security",
-  securityRoutes
-);
+app.use("/api/security", securityRoutes);
 
 /* =========================================================
    EXPENSE
 ========================================================= */
 
-app.use(
-  "/api/expenses",
-  expenseRoutes
-);
+app.use("/api/expenses", expenseRoutes);
 
 /* =========================================================
    USERS
 ========================================================= */
 
 if (userRoutes) {
-  app.use(
-    "/api/users",
-    userRoutes
-  );
+  app.use("/api/users", userRoutes);
 } else {
-  app.use(
-    "/api/users",
-    (req, res) => {
-      res.status(503).json({
-        success: false,
+  app.use("/api/users", (req, res) => {
+    res.status(503).json({
+      success: false,
 
-        message:
-          "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
-      });
-    }
-  );
+      message:
+        "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
+    });
+  });
 }
 
 /* =========================================================
    HR / PAYROLL
 ========================================================= */
 
-app.use(
-  "/api/payroll",
-  hrRoutes
-);
+app.use("/api/payroll", hrRoutes);
 
 /* =========================================================
    OCR
 ========================================================= */
 
-app.use(
-  "/api/ocr",
-  ocrRoutes
-);
+app.use("/api/ocr", ocrRoutes);
 
 /* =========================================================
    404
 ========================================================= */
 
-app.use(
-  (req, res) => {
-    res.status(404).json({
-      success: false,
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
 
-      message:
-        "API route not found.",
+    message: "API route not found.",
 
-      path:
-        req.originalUrl,
+    path: req.originalUrl,
 
-      method:
-        req.method,
-    });
-  }
-);
+    method: req.method,
+  });
+});
 
 /* =========================================================
    GLOBAL ERROR HANDLER
 ========================================================= */
 
-app.use(
-  (
-    err,
-    req,
-    res,
-    next
-  ) => {
-    console.error(
-      "SERVER ERROR:",
-      err?.stack ||
-        err?.message ||
-        err
-    );
+app.use((err, req, res, next) => {
+  console.error(
+    "SERVER ERROR:",
+    err?.stack ||
+      err?.message ||
+      err
+  );
 
-    const isUploadError =
-      err?.name ===
-        "MulterError" ||
-      String(
-        err?.message || ""
-      ).includes(
-        "Only JPG"
-      );
+  const isUploadError =
+    err?.name === "MulterError" ||
+    String(err?.message || "").includes("Only JPG");
 
-    /* File too large */
+  /* File too large */
 
-    if (
-      err?.code ===
-      "LIMIT_FILE_SIZE"
-    ) {
-      return res.status(413).json({
-        success: false,
-
-        message:
-          "Image is too large. Maximum size is 10 MB.",
-      });
-    }
-
-    /* Invalid upload */
-
-    if (isUploadError) {
-      return res.status(400).json({
-        success: false,
-
-        message:
-          "Invalid image upload.",
-      });
-    }
-
-    /* CORS error */
-
-    if (
-      String(
-        err?.message || ""
-      ).includes(
-        "CORS origin not allowed"
-      )
-    ) {
-      return res.status(403).json({
-        success: false,
-
-        message:
-          "CORS origin not allowed.",
-      });
-    }
-
-    return res.status(
-      err?.statusCode || 500
-    ).json({
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({
       success: false,
 
       message:
-        process.env.NODE_ENV ===
-        "production"
-          ? "Internal server error."
-          : err?.message ||
-            "Internal server error.",
+        "Image is too large. Maximum size is 10 MB.",
     });
   }
-);
+
+  /* Invalid upload */
+
+  if (isUploadError) {
+    return res.status(400).json({
+      success: false,
+
+      message: "Invalid image upload.",
+    });
+  }
+
+  /* CORS error */
+
+  if (
+    String(err?.message || "").includes(
+      "CORS origin not allowed"
+    )
+  ) {
+    return res.status(403).json({
+      success: false,
+
+      message: "CORS origin not allowed.",
+    });
+  }
+
+  return res.status(err?.statusCode || 500).json({
+    success: false,
+
+    message:
+      process.env.NODE_ENV === "production"
+        ? "Internal server error."
+        : err?.message ||
+          "Internal server error.",
+  });
+});
 
 /* =========================================================
    START SERVER
 ========================================================= */
 
-app.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(
-      `Office Management Backend running on port ${PORT}`
-    );
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(
+    `Office Management Backend running on port ${PORT}`
+  );
 
-    console.log(
-      `User Management: ${
-        userRoutes
-          ? "ENABLED"
-          : "DISABLED"
-      }`
-    );
+  console.log(
+    `User Management: ${
+      userRoutes
+        ? "ENABLED"
+        : "DISABLED"
+    }`
+  );
 
-    console.log(
-      "HR / Payroll: ENABLED"
-    );
-  }
-);
+  console.log("HR / Payroll: ENABLED");
+});
