@@ -8,7 +8,6 @@ const permissionSchema = new mongoose.Schema(
       unique: true,
       trim: true,
       maxlength: 150,
-      index: true,
     },
 
     module: {
