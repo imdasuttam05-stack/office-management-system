@@ -30,101 +30,75 @@ export async function payrollOptions(req, res) {
     success: true,
     companies: companyNames,
     settings: {
-      basicPercent: Number(settings.basicPercent ?? 50),
-      hraPercent: Number(settings.hraPercent ?? 20),
-      daPercent: Number(settings.daPercent ?? 10),
-      conveyancePercent: Number(settings.conveyancePercent ?? 5),
-      pfPercent: Number(settings.pfPercent ?? 12),
-      esiPercent: Number(settings.esiPercent ?? 0.75),
+      basicPercent: Number(settings.basicPercent ?? 60), hraPercent: Number(settings.hraPercent ?? 20),
+      daPercent: Number(settings.daPercent ?? 10), conveyancePercent: Number(settings.conveyancePercent ?? 5),
+      otherAllowancePercent: Number(settings.otherAllowancePercent ?? 0), gratuityPercent: Number(settings.gratuityPercent ?? 4.81),
+      pfPercent: Number(settings.pfPercent ?? 12), esiPercent: Number(settings.esiPercent ?? 0.75),
+      employerPfPercent: Number(settings.employerPfPercent ?? 12), employerEsiPercent: Number(settings.employerEsiPercent ?? 3.25),
     },
-    departmentOptions: ["HR", "Accounts", "Sales", "Purchase", "Operations", "Warehouse", "Admin", "IT"],
-    designationOptions: ["Manager", "Executive", "Officer", "Supervisor", "Assistant", "Accountant", "Sales Executive", "Worker"],
-    employeeTypeOptions: ["Permanent", "Temporary", "Contract", "Part Time", "Trainee"]
+    states: ["Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal","Delhi","Jammu and Kashmir","Ladakh","Puducherry","Chandigarh"],
+    departmentOptions: ["HR","Accounts","Sales","Purchase","Operations","Warehouse","Admin","IT"],
+    designationOptions: ["Manager","Executive","Officer","Supervisor","Assistant","Accountant","Sales Executive","Worker"],
+    employeeTypeOptions: ["Permanent","Temporary","Contract","Part Time","Trainee"]
   });
 }
 
 export async function savePayrollOptions(req, res) {
+  const keys = ["basicPercent","hraPercent","daPercent","conveyancePercent","otherAllowancePercent","gratuityPercent","pfPercent","esiPercent","employerPfPercent","employerEsiPercent"];
   const data = {};
-  for (const key of ["basicPercent", "hraPercent", "daPercent", "conveyancePercent", "pfPercent", "esiPercent"]) {
-    if (req.body?.[key] !== undefined) data[key] = n(req.body[key]);
-  }
-  const totalStructure = [data.basicPercent, data.hraPercent, data.daPercent, data.conveyancePercent].reduce((a,b) => a + (Number.isFinite(b) ? b : 0), 0);
-  if (totalStructure > 100) return res.status(400).json({ success: false, message: "Basic + HRA + DA + Conveyance percentages cannot exceed 100%." });
-  const settings = await PayrollSetting.findOneAndUpdate({ key: "default" }, { $set: data, $setOnInsert: { key: "default" } }, { upsert: true, new: true, runValidators: true });
-  res.json({ success: true, settings });
+  for (const key of keys) if (req.body?.[key] !== undefined) data[key] = n(req.body[key]);
+  const structure = [data.basicPercent,data.hraPercent,data.daPercent,data.conveyancePercent,data.otherAllowancePercent].reduce((a,b)=>a+(Number.isFinite(b)?b:0),0);
+  if (structure > 100) return res.status(400).json({success:false,message:"Basic + HRA + DA + Conveyance + Other Allowance percentages cannot exceed 100%."});
+  const settings = await PayrollSetting.findOneAndUpdate({key:"default"},{$set:data,$setOnInsert:{key:"default"}},{upsert:true,new:true,runValidators:true});
+  res.json({success:true,settings});
 }
 
 export async function createCompany(req, res) {
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ success: false, message: "Company name is required." });
-  try {
-    const company = await Company.create({ name });
-    res.status(201).json({ success: true, company });
-  } catch (error) {
-    if (error?.code === 11000) return res.status(409).json({ success: false, message: "Company already exists." });
-    throw error;
-  }
+  try { const company = await Company.create({ name }); res.status(201).json({ success: true, company }); }
+  catch (error) { if (error?.code === 11000) return res.status(409).json({ success: false, message: "Company already exists." }); throw error; }
+}
+
+function salaryBreakup(body, settings) {
+  const gross = n(body.grossSalary);
+  const basic = +(gross * n(settings.basicPercent) / 100).toFixed(2);
+  const hra = +(gross * n(settings.hraPercent) / 100).toFixed(2);
+  const da = +(gross * n(settings.daPercent) / 100).toFixed(2);
+  const conveyance = +(gross * n(settings.conveyancePercent) / 100).toFixed(2);
+  const otherAllowance = +(gross * n(settings.otherAllowancePercent) / 100).toFixed(2);
+  const pf = body.pfApplicable ? +(gross * n(settings.pfPercent) / 100).toFixed(2) : 0;
+  const esi = body.esiApplicable ? +(gross * n(settings.esiPercent) / 100).toFixed(2) : 0;
+  const employerPf = body.pfApplicable ? +(gross * n(settings.employerPfPercent) / 100).toFixed(2) : 0;
+  const employerEsi = body.esiApplicable ? +(gross * n(settings.employerEsiPercent) / 100).toFixed(2) : 0;
+  const gratuity = +(basic * n(settings.gratuityPercent) / 100).toFixed(2);
+  const ctc = +(gross + employerPf + employerEsi + gratuity).toFixed(2);
+  return { grossSalary:gross,basicSalary:basic,hra,da,conveyance,otherAllowance,pfAmount:pf,esiAmount:esi,pfRate:n(settings.pfPercent),esiRate:n(settings.esiPercent),employerPfAmount:employerPf,employerPfRate:n(settings.employerPfPercent),employerEsiAmount:employerEsi,employerEsiRate:n(settings.employerEsiPercent),gratuityAmount:gratuity,gratuityPercent:n(settings.gratuityPercent),ctc };
 }
 
 export async function createEmployee(req, res) {
   const body = { ...req.body };
-
-  if (!body.name || !String(body.name).trim()) {
-    return res.status(400).json({ success: false, message: "Employee name is required." });
-  }
-
-  if (!body.joiningDate) {
-    return res.status(400).json({ success: false, message: "Joining date is required." });
-  }
-
+  if (!String(body.name || "").trim()) return res.status(400).json({ success:false,message:"Employee name is required." });
+  if (!body.joiningDate) return res.status(400).json({ success:false,message:"Joining date is required." });
   if (!body.employeeCode || !String(body.employeeCode).trim()) {
-    const year = new Date().getFullYear();
-    const prefix = `EMP-${year}-`;
-    const latest = await Employee.findOne({ employeeCode: new RegExp(`^${prefix}\\d+$`) })
-      .sort({ employeeCode: -1 })
-      .select("employeeCode")
-      .lean();
-    const lastNumber = latest?.employeeCode?.match(/(\d+)$/)?.[1];
-    const nextNumber = String((Number(lastNumber || 0) + 1)).padStart(5, "0");
-    body.employeeCode = `${prefix}${nextNumber}`;
+    const year = new Date().getFullYear(), prefix=`EMP-${year}-`;
+    const latest=await Employee.findOne({employeeCode:new RegExp(`^${prefix}\\d+$`)}).sort({employeeCode:-1}).select("employeeCode").lean();
+    const last=latest?.employeeCode?.match(/(\d+)$/)?.[1]; body.employeeCode=`${prefix}${String(Number(last||0)+1).padStart(5,"0")}`;
   }
-
-  const dateFields = ["dateOfBirth", "joiningDate"];
-  for (const field of dateFields) {
-    if (body[field]) body[field] = new Date(body[field]);
-  }
-
-  const numberFields = [
-    "grossSalary", "basicSalary", "hra", "da", "conveyance", "otherAllowance",
-    "professionalTax", "otherDeduction", "pfRate", "pfAmount", "esiRate", "esiAmount"
-  ];
-  for (const field of numberFields) body[field] = n(body[field]);
-
-  let settings = await PayrollSetting.findOne({ key: "default" }).lean();
-  if (!settings) settings = await PayrollSetting.create({ key: "default" });
-  const gross = body.grossSalary;
-  if (gross > 0 && body.payrollManual !== true) {
-    body.basicSalary = +(gross * Number(settings.basicPercent || 0) / 100).toFixed(2);
-    body.hra = +(gross * Number(settings.hraPercent || 0) / 100).toFixed(2);
-    body.da = +(gross * Number(settings.daPercent || 0) / 100).toFixed(2);
-    body.conveyance = +(gross * Number(settings.conveyancePercent || 0) / 100).toFixed(2);
-  }
-  body.pfRate = n(body.pfRate || settings.pfPercent);
-  body.esiRate = n(body.esiRate || settings.esiPercent);
-  body.pfAmount = body.pfApplicable ? +(gross * body.pfRate / 100).toFixed(2) : 0;
-  body.esiAmount = body.esiApplicable ? +(gross * body.esiRate / 100).toFixed(2) : 0;
-  delete body.payrollManual;
-
-  const employee = await Employee.create(body);
-  res.status(201).json({ success: true, employee });
+  for (const f of ["dateOfBirth","joiningDate"]) if(body[f]) body[f]=new Date(body[f]);
+  for (const f of ["grossSalary","basicSalary","hra","da","conveyance","otherAllowance","professionalTax","otherDeduction","pfRate","pfAmount","esiRate","esiAmount","employerPfRate","employerPfAmount","employerEsiRate","employerEsiAmount","gratuityPercent","gratuityAmount","ctc"]) body[f]=n(body[f]);
+  let settings=await PayrollSetting.findOne({key:"default"}).lean(); if(!settings) settings=await PayrollSetting.create({key:"default"});
+  Object.assign(body,salaryBreakup(body,settings));
+  const employee=await Employee.create(body); res.status(201).json({success:true,employee});
 }
 
 export async function updateEmployee(req, res) {
-  const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, {
-    new: true, runValidators: true
-  });
-  if (!employee) return res.status(404).json({ success: false, message: "Employee not found." });
-  res.json({ success: true, employee });
+  const current=await Employee.findById(req.params.id); if(!current) return res.status(404).json({success:false,message:"Employee not found."});
+  const body={...req.body};
+  let settings=await PayrollSetting.findOne({key:"default"}).lean(); if(!settings) settings=await PayrollSetting.create({key:"default"});
+  if(body.grossSalary!==undefined) Object.assign(body,salaryBreakup(body,settings));
+  for (const f of ["dateOfBirth","joiningDate"]) if(body[f]) body[f]=new Date(body[f]);
+  const employee=await Employee.findByIdAndUpdate(req.params.id,body,{new:true,runValidators:true}); res.json({success:true,employee});
 }
 
 export async function attendance(req, res) {
