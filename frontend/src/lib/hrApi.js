@@ -50,6 +50,9 @@ async function request(path, options = {}) {
 
 export const hrApi = {
   employees: () => request("/employees"),
+  options: () => request("/options"),
+  saveOptions: (body) => request("/options", { method: "PUT", body: JSON.stringify(body) }),
+  createCompany: (name) => request("/companies", { method: "POST", body: JSON.stringify({ name }) }),
   createEmployee: (body) => request("/employees", { method: "POST", body: JSON.stringify(body) }),
   updateEmployee: (id, body) => request(`/employees/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   attendance: (q = "") => request(`/attendance${q}`),
