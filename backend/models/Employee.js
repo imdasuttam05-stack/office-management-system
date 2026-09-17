@@ -4,6 +4,7 @@ const employeeSchema = new mongoose.Schema(
   {
     employeeCode: { type: String, required: true, unique: true, trim: true },
     name: { type: String, required: true, trim: true },
+    companyName: { type: String, trim: true, default: "" },
     fatherName: { type: String, trim: true, default: "" },
     email: { type: String, trim: true, lowercase: true, default: "" },
     mobile: { type: String, trim: true, default: "" },
@@ -17,6 +18,7 @@ const employeeSchema = new mongoose.Schema(
     joiningDate: { type: Date, required: true },
 
     // Payroll / salary structure
+    grossSalary: { type: Number, default: 0, min: 0 },
     basicSalary: { type: Number, default: 0, min: 0 },
     hra: { type: Number, default: 0, min: 0 },
     da: { type: Number, default: 0, min: 0 },
@@ -25,8 +27,12 @@ const employeeSchema = new mongoose.Schema(
     professionalTax: { type: Number, default: 0, min: 0 },
     otherDeduction: { type: Number, default: 0, min: 0 },
     pfApplicable: { type: Boolean, default: false },
+    pfRate: { type: Number, default: 12, min: 0 },
+    pfAmount: { type: Number, default: 0, min: 0 },
     pfNumber: { type: String, trim: true, default: "" },
     esiApplicable: { type: Boolean, default: false },
+    esiRate: { type: Number, default: 0.75, min: 0 },
+    esiAmount: { type: Number, default: 0, min: 0 },
     esiNumber: { type: String, trim: true, default: "" },
     allowances: { type: Map, of: Number, default: {} },
 
