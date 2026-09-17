@@ -1,3 +1,5 @@
+import axios from "axios";
+
 const API_URL = (
   import.meta.env.VITE_API_URL ||
   "https://office-management-system-ikx8.onrender.com"
@@ -13,88 +15,51 @@ function getToken() {
 async function request(path, options = {}) {
   const token = getToken();
 
-  const res = await fetch(
-    `${API_URL}/api/payroll${path}`,
-    {
-      ...options,
+  try {
+    const response = await axios({
+      url: `${API_URL}/api/payroll${path}`,
+      method: options.method || "GET",
+      data: options.body ? JSON.parse(options.body) : undefined,
       headers: {
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        Authorization: token ? `Bearer ${token}` : "",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },
-      credentials: "include",
+      withCredentials: true,
+    });
+
+    return response.data;
+  } catch (error) {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+
+    if (status === 401) {
+      throw new Error(data?.message || "Session expired. Please login again.");
     }
-  );
 
-  const data = await res.json().catch(() => ({}));
+    if (status === 403) {
+      throw new Error(data?.message || "You do not have permission for this action.");
+    }
 
-  if (!res.ok) {
-    const message =
+    throw new Error(
       data?.message ||
-      `HR request failed (${res.status}).`;
-    throw new Error(message);
+        error?.message ||
+        `HR request failed (${status || "network error"}).`
+    );
   }
-
-  return data;
 }
 
 export const hrApi = {
   employees: () => request("/employees"),
-
-  createEmployee: (body) =>
-    request("/employees", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  updateEmployee: (id, body) =>
-    request(`/employees/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-
-  attendance: (q = "") =>
-    request(`/attendance${q}`),
-
-  saveAttendance: (body) =>
-    request("/attendance", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  leaves: (q = "") =>
-    request(`/leaves${q}`),
-
-  createLeave: (body) =>
-    request("/leaves", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  updateLeaveStatus: (id, status) =>
-    request(`/leaves/${id}/status`, {
-      method: "PATCH",
-      body: JSON.stringify({ status }),
-    }),
-
-  holidays: () =>
-    request("/holidays"),
-
-  createHoliday: (body) =>
-    request("/holidays", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  salaries: (q = "") =>
-    request(`/salaries${q}`),
-
-  generateSalary: (body) =>
-    request("/salaries/generate", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  salarySlip: (id) =>
-    request(`/salaries/${id}/slip`),
+  createEmployee: (body) => request("/employees", { method: "POST", body: JSON.stringify(body) }),
+  updateEmployee: (id, body) => request(`/employees/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  attendance: (q = "") => request(`/attendance${q}`),
+  saveAttendance: (body) => request("/attendance", { method: "POST", body: JSON.stringify(body) }),
+  leaves: (q = "") => request(`/leaves${q}`),
+  createLeave: (body) => request("/leaves", { method: "POST", body: JSON.stringify(body) }),
+  updateLeaveStatus: (id, status) => request(`/leaves/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  holidays: () => request("/holidays"),
+  createHoliday: (body) => request("/holidays", { method: "POST", body: JSON.stringify(body) }),
+  salaries: (q = "") => request(`/salaries${q}`),
+  generateSalary: (body) => request("/salaries/generate", { method: "POST", body: JSON.stringify(body) }),
+  salarySlip: (id) => request(`/salaries/${id}/slip`),
 };
