@@ -3,6 +3,8 @@ import Attendance from "../models/Attendance.js";
 import Leave from "../models/Leave.js";
 import Holiday from "../models/Holiday.js";
 import Salary from "../models/Salary.js";
+import PayrollSetting from "../models/PayrollSetting.js";
+import Company from "../models/Company.js";
 
 const n = v => Number.isFinite(Number(v)) ? Number(v) : 0;
 
@@ -15,6 +17,53 @@ function range(month, year) {
 
 export async function employees(req, res) {
   res.json({ success: true, employees: await Employee.find().sort({ name: 1 }) });
+}
+
+export async function payrollOptions(req, res) {
+  let settings = await PayrollSetting.findOne({ key: "default" }).lean();
+  if (!settings) settings = await PayrollSetting.create({ key: "default" });
+  const companies = await Company.find({ status: "Active" }).sort({ name: 1 }).lean();
+  const existingCompanyNames = await Employee.distinct("companyName", { companyName: { $nin: ["", null] } });
+  const envCompanies = String(process.env.COMPANY_NAMES || "").split(",").map(x => x.trim()).filter(Boolean);
+  const companyNames = [...new Set([...companies.map(x => x.name), ...existingCompanyNames, ...envCompanies])].sort((a,b) => a.localeCompare(b));
+  res.json({
+    success: true,
+    companies: companyNames,
+    settings: {
+      basicPercent: Number(settings.basicPercent ?? 50),
+      hraPercent: Number(settings.hraPercent ?? 20),
+      daPercent: Number(settings.daPercent ?? 10),
+      conveyancePercent: Number(settings.conveyancePercent ?? 5),
+      pfPercent: Number(settings.pfPercent ?? 12),
+      esiPercent: Number(settings.esiPercent ?? 0.75),
+    },
+    departmentOptions: ["HR", "Accounts", "Sales", "Purchase", "Operations", "Warehouse", "Admin", "IT"],
+    designationOptions: ["Manager", "Executive", "Officer", "Supervisor", "Assistant", "Accountant", "Sales Executive", "Worker"],
+    employeeTypeOptions: ["Permanent", "Temporary", "Contract", "Part Time", "Trainee"]
+  });
+}
+
+export async function savePayrollOptions(req, res) {
+  const data = {};
+  for (const key of ["basicPercent", "hraPercent", "daPercent", "conveyancePercent", "pfPercent", "esiPercent"]) {
+    if (req.body?.[key] !== undefined) data[key] = n(req.body[key]);
+  }
+  const totalStructure = [data.basicPercent, data.hraPercent, data.daPercent, data.conveyancePercent].reduce((a,b) => a + (Number.isFinite(b) ? b : 0), 0);
+  if (totalStructure > 100) return res.status(400).json({ success: false, message: "Basic + HRA + DA + Conveyance percentages cannot exceed 100%." });
+  const settings = await PayrollSetting.findOneAndUpdate({ key: "default" }, { $set: data, $setOnInsert: { key: "default" } }, { upsert: true, new: true, runValidators: true });
+  res.json({ success: true, settings });
+}
+
+export async function createCompany(req, res) {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ success: false, message: "Company name is required." });
+  try {
+    const company = await Company.create({ name });
+    res.status(201).json({ success: true, company });
+  } catch (error) {
+    if (error?.code === 11000) return res.status(409).json({ success: false, message: "Company already exists." });
+    throw error;
+  }
 }
 
 export async function createEmployee(req, res) {
@@ -46,12 +95,25 @@ export async function createEmployee(req, res) {
   }
 
   const numberFields = [
-    "basicSalary", "hra", "da", "conveyance", "otherAllowance",
-    "professionalTax", "otherDeduction"
+    "grossSalary", "basicSalary", "hra", "da", "conveyance", "otherAllowance",
+    "professionalTax", "otherDeduction", "pfRate", "pfAmount", "esiRate", "esiAmount"
   ];
-  for (const field of numberFields) {
-    body[field] = n(body[field]);
+  for (const field of numberFields) body[field] = n(body[field]);
+
+  let settings = await PayrollSetting.findOne({ key: "default" }).lean();
+  if (!settings) settings = await PayrollSetting.create({ key: "default" });
+  const gross = body.grossSalary;
+  if (gross > 0 && body.payrollManual !== true) {
+    body.basicSalary = +(gross * Number(settings.basicPercent || 0) / 100).toFixed(2);
+    body.hra = +(gross * Number(settings.hraPercent || 0) / 100).toFixed(2);
+    body.da = +(gross * Number(settings.daPercent || 0) / 100).toFixed(2);
+    body.conveyance = +(gross * Number(settings.conveyancePercent || 0) / 100).toFixed(2);
   }
+  body.pfRate = n(body.pfRate || settings.pfPercent);
+  body.esiRate = n(body.esiRate || settings.esiPercent);
+  body.pfAmount = body.pfApplicable ? +(gross * body.pfRate / 100).toFixed(2) : 0;
+  body.esiAmount = body.esiApplicable ? +(gross * body.esiRate / 100).toFixed(2) : 0;
+  delete body.payrollManual;
 
   const employee = await Employee.create(body);
   res.status(201).json({ success: true, employee });
