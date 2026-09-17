@@ -1,6 +1,6 @@
 import express from "express";
 import {
-  employees, createEmployee, updateEmployee,
+  employees, createEmployee, updateEmployee, payrollOptions, savePayrollOptions, createCompany,
   attendance, saveAttendance,
   leaves, createLeave, leaveStatus,
   holidays, createHoliday,
@@ -17,6 +17,9 @@ router.get("/", salaries);
 
 
 router.get("/employees", employees);
+router.get("/options", payrollOptions);
+router.put("/options", hrAdmin, savePayrollOptions);
+router.post("/companies", hrAdmin, createCompany);
 router.post("/employees", hrAdmin, createEmployee);
 router.put("/employees/:id", hrAdmin, updateEmployee);
 
