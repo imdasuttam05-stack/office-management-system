@@ -160,6 +160,20 @@ export async function updateEmployee(req, res) {
   const employee=await Employee.findByIdAndUpdate(req.params.id,body,{new:true,runValidators:true}); res.json({success:true,employee});
 }
 
+function isoDays(from, to) {
+  const out = [];
+  const d = new Date(`${from}T00:00:00.000Z`);
+  const end = new Date(`${to}T00:00:00.000Z`);
+  while (d < end) { out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+  return out;
+}
+
+function dayRuleForDate(settings, iso) {
+  const weekday = new Date(`${iso}T00:00:00.000Z`).getUTCDay();
+  const key = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"][weekday];
+  return key === "saturday" ? settings?.saturday : settings?.days?.[key];
+}
+
 export async function attendance(req, res) {
   const query = {};
   if (req.query.employeeId) query.employeeId = req.query.employeeId;
@@ -172,8 +186,45 @@ export async function attendance(req, res) {
   const rows = await Attendance.find(query)
     .populate("employeeId", "employeeCode name workLocation state shiftId")
     .populate("shiftId", "name startTime endTime breakMinutes graceMinutes")
-    .sort({ date: 1, "employeeId.name": 1 });
-  res.json({ success: true, attendance: rows });
+    .sort({ date: 1 });
+
+  // Always show every active employee, even when there is no punch record yet.
+  // This gives the Attendance Summary a real absent/pending view instead of hiding staff.
+  const includeStaff = req.query.includeStaff !== "0";
+  if (!includeStaff || !req.query.from || !req.query.to) {
+    return res.json({ success: true, attendance: rows });
+  }
+
+  const settings = await AttendanceSetting.findOne({ key: "default" }).lean();
+  const employees = await Employee.find({ status: "Active" })
+    .populate("shiftId", "name startTime endTime breakMinutes graceMinutes")
+    .lean();
+  const rowMap = new Map(rows.map(r => [`${String(r.employeeId?._id || r.employeeId)}|${new Date(r.date).toISOString().slice(0,10)}`, r]));
+  const dates = isoDays(req.query.from, req.query.to);
+  const merged = [];
+
+  for (const employee of employees) {
+    if (req.query.location && (employee.workLocation || employee.location || "") !== req.query.location) continue;
+    for (const iso of dates) {
+      const key = `${employee._id}|${iso}`;
+      const existing = rowMap.get(key);
+      if (existing) { merged.push(existing); continue; }
+      const rule = dayRuleForDate(settings, iso) || { type: "Working", shiftId: null, overtimeAllowed: true };
+      const shiftId = employee.shiftId?._id || rule.shiftId || settings?.defaultShiftId || null;
+      let shift = employee.shiftId || null;
+      if (!shift && shiftId) shift = await Shift.findById(shiftId).lean();
+      const status = rule.type === "Week Off" ? "Week Off" : rule.type === "Half Day" ? "Half Day" : "Absent";
+      merged.push({
+        _id: `virtual-${employee._id}-${iso}`,
+        employeeId: { ...employee, shiftId: employee.shiftId?._id || null },
+        date: new Date(`${iso}T00:00:00.000Z`),
+        status, checkIn: "", checkOut: "", workLocation: employee.workLocation || employee.location || "",
+        shiftId: shift?._id || null, shiftName: shift?.name || "", shift, overtimeHours: 0, fineHours: 0, virtual: true
+      });
+    }
+  }
+  merged.sort((a,b) => new Date(a.date) - new Date(b.date) || String(a.employeeId?.name||"").localeCompare(String(b.employeeId?.name||"")));
+  res.json({ success: true, attendance: merged });
 }
 
 function excelDateToISO(value) {
@@ -246,8 +297,16 @@ export async function saveAttendance(req, res) {
   data.workLocation = employee.workLocation || employee.location || req.body.workLocation || req.body.location || "";
   if (req.body.shiftId) {
     const shift = await Shift.findById(req.body.shiftId).lean();
-    if (shift) { data.shiftName = shift.name; }
+    if (shift) { data.shiftName = shift.name; data.shiftId = shift._id; }
+  } else if (employee.shiftId) {
+    const shift = await Shift.findById(employee.shiftId).lean();
+    if (shift) { data.shiftId = shift._id; data.shiftName = shift.name; }
   }
+  if (data.checkIn && !data.checkOut && String(req.body.status || "Present") === "Present") {
+    return res.status(400).json({success:false,message:"Out time is mandatory to mark present."});
+  }
+  if (data.checkIn && data.checkOut) data.status = "Present";
+  else if (!data.checkIn && !data.checkOut && !data.status) data.status = "Absent";
   const row = await Attendance.findOneAndUpdate({employeeId:req.body.employeeId,date:data.date},data,{upsert:true,new:true,runValidators:true});
   res.json({success:true,attendance:row});
 }
