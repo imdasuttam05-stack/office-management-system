@@ -170,31 +170,47 @@ export default function Dashboard() {
       }
 
       try {
-        const response = await fetch(
-          `${API_URL}/api/expenses`,
-          {
+        const [response, employeeResponse] = await Promise.all([
+          fetch(`${API_URL}/api/expenses`, {
             method: "GET",
             headers: {
-              Authorization:
-                `Bearer ${token}`,
-              "Content-Type":
-                "application/json",
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
             },
-          }
-        );
+          }),
+          fetch(`${API_URL}/api/hr/employees`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          }),
+        ]);
 
-        if (response.status === 401) {
+        if (employeeResponse.ok) {
+          const employeeData = await employeeResponse.json();
+          const employees = Array.isArray(employeeData)
+            ? employeeData
+            : Array.isArray(employeeData?.employees)
+            ? employeeData.employees
+            : Array.isArray(employeeData?.data)
+            ? employeeData.data
+            : [];
+          if (!cancelled) setEmployeeCount(employees.length);
+        }
+
+        /* Expenses */
+        const expenseResponse = response;
+
+        if (expenseResponse.status === 401) {
           return;
         }
 
-        if (!response.ok) {
-          throw new Error(
-            "Failed to load expenses"
-          );
+        if (!expenseResponse.ok) {
+          throw new Error("Failed to load expenses");
         }
 
-        const data =
-          await response.json();
+        const data = await expenseResponse.json();
 
         if (cancelled) return;
 
@@ -1080,6 +1096,24 @@ export default function Dashboard() {
               </span>
             </div>
 
+            {/* Shift Management */}
+
+            <div
+              className="module-card clickable"
+              onClick={() => goTo("/shifts")}
+            >
+              <div className="module-icon shift">
+                ◷
+              </div>
+
+              <div>
+                <h3>Shift Management</h3>
+                <p>Create and manage staff shifts</p>
+              </div>
+
+              <span className="card-arrow">→</span>
+            </div>
+
             {/* Leave */}
 
             <div
@@ -1238,9 +1272,13 @@ export default function Dashboard() {
 
             </div>
 
-            <span className="preview-badge">
-              Coming Soon
-            </span>
+            <button
+              type="button"
+              className="preview-badge preview-link"
+              onClick={() => goTo("/attendance")}
+            >
+              Open Attendance
+            </button>
 
           </div>
 
@@ -1298,6 +1336,17 @@ export default function Dashboard() {
                 </span>
               </div>
 
+            </div>
+
+            <div
+              className="preview-box preview-clickable"
+              onClick={() => goTo("/shifts")}
+            >
+              <div className="preview-icon shift">◷</div>
+              <div>
+                <strong>Shift Management</strong>
+                <span>Staff shift setup</span>
+              </div>
             </div>
 
             <div className="preview-box">
@@ -2413,6 +2462,29 @@ export default function Dashboard() {
 
           color:
             #5148a8;
+        }
+
+        .preview-link {
+          border: none;
+          cursor: pointer;
+          background: #eef4fb;
+          color: #245a96;
+        }
+
+        .preview-clickable {
+          cursor: pointer;
+          transition: transform .18s ease, box-shadow .18s ease;
+        }
+
+        .preview-clickable:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 16px rgba(36,90,150,.08);
+        }
+
+        .preview-icon.shift,
+        .module-icon.shift {
+          background: #eef4fb;
+          color: #245a96;
         }
 
         .preview-box strong {
