@@ -16,6 +16,8 @@ const employeeSchema = new mongoose.Schema(
     department: { type: String, trim: true, default: "" },
     designation: { type: String, trim: true, default: "" },
     location: { type: String, trim: true, default: "" },
+    workLocation: { type: String, trim: true, default: "" },
+    shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift", default: null },
     employeeType: { type: String, trim: true, default: "Permanent" },
     joiningDate: { type: Date, required: true },
 
