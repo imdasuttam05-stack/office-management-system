@@ -35,6 +35,10 @@ export async function payrollOptions(req, res) {
       otherAllowancePercent: Number(settings.otherAllowancePercent ?? 0), gratuityPercent: Number(settings.gratuityPercent ?? 4.81),
       pfPercent: Number(settings.pfPercent ?? 12), esiPercent: Number(settings.esiPercent ?? 0.75),
       employerPfPercent: Number(settings.employerPfPercent ?? 12), employerEsiPercent: Number(settings.employerEsiPercent ?? 3.25),
+      hraBase: settings.hraBase ?? "gross", daBase: settings.daBase ?? "gross", conveyanceBase: settings.conveyanceBase ?? "gross",
+      otherAllowanceBase: settings.otherAllowanceBase ?? "gross", gratuityBase: settings.gratuityBase ?? "basic",
+      pfBase: settings.pfBase ?? "gross", pfCeilingEnabled: settings.pfCeilingEnabled !== false, pfWageCeiling: Number(settings.pfWageCeiling ?? 15000),
+      esiBase: settings.esiBase ?? "gross", esiCeilingEnabled: settings.esiCeilingEnabled !== false, esiWageCeiling: Number(settings.esiWageCeiling ?? 21000),
     },
     states: ["Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal","Delhi","Jammu and Kashmir","Ladakh","Puducherry","Chandigarh"],
     departmentOptions: ["HR","Accounts","Sales","Purchase","Operations","Warehouse","Admin","IT"],
@@ -44,9 +48,13 @@ export async function payrollOptions(req, res) {
 }
 
 export async function savePayrollOptions(req, res) {
-  const keys = ["basicPercent","hraPercent","daPercent","conveyancePercent","otherAllowancePercent","gratuityPercent","pfPercent","esiPercent","employerPfPercent","employerEsiPercent"];
+  const keys = ["basicPercent","hraPercent","daPercent","conveyancePercent","otherAllowancePercent","gratuityPercent","pfPercent","esiPercent","employerPfPercent","employerEsiPercent","pfWageCeiling","esiWageCeiling"];
   const data = {};
   for (const key of keys) if (req.body?.[key] !== undefined) data[key] = n(req.body[key]);
+  for (const key of ["hraBase","daBase","conveyanceBase","otherAllowanceBase","gratuityBase","pfBase","esiBase"])
+    if (req.body?.[key] !== undefined) data[key] = String(req.body[key]);
+  for (const key of ["pfCeilingEnabled","esiCeilingEnabled"])
+    if (req.body?.[key] !== undefined) data[key] = Boolean(req.body[key]);
   const structure = [data.basicPercent,data.hraPercent,data.daPercent,data.conveyancePercent,data.otherAllowancePercent].reduce((a,b)=>a+(Number.isFinite(b)?b:0),0);
   if (structure > 100) return res.status(400).json({success:false,message:"Basic + HRA + DA + Conveyance + Other Allowance percentages cannot exceed 100%."});
   const settings = await PayrollSetting.findOneAndUpdate({key:"default"},{$set:data,$setOnInsert:{key:"default"}},{upsert:true,new:true,runValidators:true});
@@ -60,20 +68,32 @@ export async function createCompany(req, res) {
   catch (error) { if (error?.code === 11000) return res.status(409).json({ success: false, message: "Company already exists." }); throw error; }
 }
 
+function baseAmount(base, gross, basic, da) {
+  if (base === "basic") return basic;
+  if (base === "basicDa") return basic + da;
+  return gross;
+}
+
 function salaryBreakup(body, settings) {
   const gross = n(body.grossSalary);
   const basic = +(gross * n(settings.basicPercent) / 100).toFixed(2);
-  const hra = +(gross * n(settings.hraPercent) / 100).toFixed(2);
-  const da = +(gross * n(settings.daPercent) / 100).toFixed(2);
-  const conveyance = +(gross * n(settings.conveyancePercent) / 100).toFixed(2);
-  const otherAllowance = +(gross * n(settings.otherAllowancePercent) / 100).toFixed(2);
-  const pf = body.pfApplicable ? +(gross * n(settings.pfPercent) / 100).toFixed(2) : 0;
-  const esi = body.esiApplicable ? +(gross * n(settings.esiPercent) / 100).toFixed(2) : 0;
-  const employerPf = body.pfApplicable ? +(gross * n(settings.employerPfPercent) / 100).toFixed(2) : 0;
-  const employerEsi = body.esiApplicable ? +(gross * n(settings.employerEsiPercent) / 100).toFixed(2) : 0;
-  const gratuity = +(basic * n(settings.gratuityPercent) / 100).toFixed(2);
+  const daBaseAmount = baseAmount(settings.daBase, gross, basic, 0);
+  const da = +(daBaseAmount * n(settings.daPercent) / 100).toFixed(2);
+  const hra = +(baseAmount(settings.hraBase, gross, basic, da) * n(settings.hraPercent) / 100).toFixed(2);
+  const conveyance = +(baseAmount(settings.conveyanceBase, gross, basic, da) * n(settings.conveyancePercent) / 100).toFixed(2);
+  const otherAllowance = +(baseAmount(settings.otherAllowanceBase, gross, basic, da) * n(settings.otherAllowancePercent) / 100).toFixed(2);
+  const pfWage = baseAmount(settings.pfBase, gross, basic, da);
+  const pfBaseAmount = settings.pfCeilingEnabled ? Math.min(pfWage, n(settings.pfWageCeiling)) : pfWage;
+  const pf = body.pfApplicable ? +(pfBaseAmount * n(settings.pfPercent) / 100).toFixed(2) : 0;
+  const esiWage = baseAmount(settings.esiBase, gross, basic, da);
+  const esiEligible = !settings.esiCeilingEnabled || esiWage <= n(settings.esiWageCeiling);
+  const esi = body.esiApplicable && esiEligible ? +(esiWage * n(settings.esiPercent) / 100).toFixed(2) : 0;
+  const employerPf = body.pfApplicable ? +(pfBaseAmount * n(settings.employerPfPercent) / 100).toFixed(2) : 0;
+  const employerEsi = body.esiApplicable && esiEligible ? +(esiWage * n(settings.employerEsiPercent) / 100).toFixed(2) : 0;
+  const gratuityBaseAmount = settings.gratuityBase === "gross" ? gross : settings.gratuityBase === "basicDa" ? basic + da : basic;
+  const gratuity = +(gratuityBaseAmount * n(settings.gratuityPercent) / 100).toFixed(2);
   const ctc = +(gross + employerPf + employerEsi + gratuity).toFixed(2);
-  return { grossSalary:gross,basicSalary:basic,hra,da,conveyance,otherAllowance,pfAmount:pf,esiAmount:esi,pfRate:n(settings.pfPercent),esiRate:n(settings.esiPercent),employerPfAmount:employerPf,employerPfRate:n(settings.employerPfPercent),employerEsiAmount:employerEsi,employerEsiRate:n(settings.employerEsiPercent),gratuityAmount:gratuity,gratuityPercent:n(settings.gratuityPercent),ctc };
+  return { grossSalary:gross,basicSalary:basic,hra,da,conveyance,otherAllowance,pfAmount:pf,esiAmount:esi,pfRate:n(settings.pfPercent),esiRate:n(settings.esiPercent),employerPfAmount:employerPf,employerPfRate:n(settings.employerPfPercent),employerEsiAmount:employerEsi,employerEsiRate:n(settings.employerEsiPercent),gratuityAmount:gratuity,gratuityPercent:n(settings.gratuityPercent),ctc,pfWageBase:pfWage,pfBaseAmount,esiWageBase:esiWage,esiEligible };
 }
 
 export async function createEmployee(req, res) {
