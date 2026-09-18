@@ -10,6 +10,9 @@ const schema = new mongoose.Schema({
   },
   checkIn: String,
   checkOut: String,
+  workLocation: { type: String, trim: true },
+  shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift", default: null },
+  shiftName: { type: String, trim: true },
   overtimeHours: { type: Number, default: 0, min: 0 },
   note: String
 }, { timestamps: true });
