@@ -17,6 +17,7 @@ import Attendance from "./pages/Attendance.jsx";
 import LeaveManagement from "./pages/LeaveManagement.jsx";
 import HolidayCalendar from "./pages/HolidayCalendar.jsx";
 import Salary from "./pages/Salary.jsx";
+import ShiftManagement from "./pages/ShiftManagement.jsx";
 
 startSessionManager();
 
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/leave" element={<LeaveManagement />} />
             <Route path="/holidays" element={<HolidayCalendar />} />
+            <Route path="/shifts" element={<ShiftManagement />} />
 
             {/* Salary / Payroll: all dashboard salary links open the same working page */}
             <Route path="/salary" element={<Salary />} />
@@ -71,7 +73,7 @@ export default function App() {
           <Route path="/reports/attendance" element={<Navigate to="/attendance" replace />} />
           <Route path="/reports/leave" element={<Navigate to="/leave" replace />} />
           <Route path="/reports/salary" element={<Navigate to="/salary" replace />} />
-          <Route path="/shifts" element={<Navigate to="/attendance" replace />} />
+          
           <Route path="/security" element={<Navigate to="/dashboard" replace />} />
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
