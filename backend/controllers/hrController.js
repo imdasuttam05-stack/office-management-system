@@ -20,19 +20,36 @@ function clean(v) {
   return String(v).trim();
 }
 
+/* =========================================================
+   TIME HELPERS
+========================================================= */
+
 function timeToMinutes(value) {
   if (value === undefined || value === null || value === "") {
     return null;
   }
 
-  // Excel can sometimes provide a numeric fraction of a day.
-  if (typeof value === "number" && value >= 0 && value < 1) {
+  /*
+    Excel time-only value.
+
+    Example:
+    0.5  = 12:00 PM
+    0.25 = 06:00 AM
+    0.75 = 06:00 PM
+
+    This is valid for TIME fields,
+    but NOT for attendance DATE.
+  */
+  if (
+    typeof value === "number" &&
+    value >= 0 &&
+    value < 1
+  ) {
     return Math.round(value * 24 * 60);
   }
 
   const raw = String(value).trim();
 
-  // 10.12 / 10:12 / 10:12 AM / 18:50
   const m = raw.match(
     /^(\d{1,2})[:.](\d{2})\s*(AM|PM)?$/i
   );
@@ -42,14 +59,23 @@ function timeToMinutes(value) {
   let h = Number(m[1]);
   const mm = Number(m[2]);
 
-  if (mm < 0 || mm > 59) return null;
+  if (mm < 0 || mm > 59) {
+    return null;
+  }
 
   const ap = (m[3] || "").toUpperCase();
 
-  if (ap === "PM" && h < 12) h += 12;
-  if (ap === "AM" && h === 12) h = 0;
+  if (ap === "PM" && h < 12) {
+    h += 12;
+  }
 
-  if (h < 0 || h > 23) return null;
+  if (ap === "AM" && h === 12) {
+    h = 0;
+  }
+
+  if (h < 0 || h > 23) {
+    return null;
+  }
 
   return h * 60 + mm;
 }
@@ -57,7 +83,9 @@ function timeToMinutes(value) {
 function normalizeTime(value) {
   const mins = timeToMinutes(value);
 
-  if (mins === null) return "";
+  if (mins === null) {
+    return "";
+  }
 
   const h24 = Math.floor(mins / 60);
   const mm = mins % 60;
@@ -71,18 +99,50 @@ function normalizeTime(value) {
   )} ${ap}`;
 }
 
+/* =========================================================
+   DATE HELPERS
+========================================================= */
+
 /*
-  Date parser supports:
+  Supported:
 
   18-09-2026
   18/09/2026
   18.09.2026
+
   2026-09-18
+  2026/09/18
+  2026.09.18
+
   Excel serial date
-  JS Date
+  JavaScript Date
+
+  IMPORTANT:
+  Excel time-only values such as 0.5 are rejected
+  as attendance dates.
+
+  Old Excel 1900-system dates are rejected.
 */
+
 function parseAttendanceDate(value) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+  /* -----------------------------------------
+     1. JavaScript Date
+  ----------------------------------------- */
+
+  if (
+    value instanceof Date &&
+    !Number.isNaN(value.getTime())
+  ) {
+    const year = value.getFullYear();
+
+    /*
+      Prevent 1900 / 1901 / old Excel date
+      from becoming attendance date.
+    */
+    if (year < 2000) {
+      return null;
+    }
+
     return new Date(
       Date.UTC(
         value.getFullYear(),
@@ -92,26 +152,76 @@ function parseAttendanceDate(value) {
     );
   }
 
-  if (typeof value === "number") {
-    // Excel serial date
-    const parsed = xlsx.SSF.parse_date_code(value);
+  /* -----------------------------------------
+     2. Excel numeric serial date
+  ----------------------------------------- */
 
-    if (parsed) {
-      return new Date(
+  if (typeof value === "number") {
+    /*
+      Excel time-only value.
+
+      Example:
+      0.5
+      0.25
+      0.75
+
+      These are time fractions, not dates.
+    */
+    if (value > 0 && value < 1) {
+      return null;
+    }
+
+    /*
+      Excel serial date.
+    */
+    if (value >= 1) {
+      const parsed =
+        xlsx.SSF.parse_date_code(value);
+
+      if (!parsed) {
+        return null;
+      }
+
+      /*
+        Reject old/invalid Excel dates.
+      */
+      if (
+        !parsed.y ||
+        parsed.y < 2000 ||
+        !parsed.m ||
+        !parsed.d
+      ) {
+        return null;
+      }
+
+      const date = new Date(
         Date.UTC(
           parsed.y,
           parsed.m - 1,
           parsed.d
         )
       );
+
+      if (Number.isNaN(date.getTime())) {
+        return null;
+      }
+
+      return date;
     }
+
+    return null;
   }
 
   const raw = clean(value);
 
-  if (!raw) return null;
+  if (!raw) {
+    return null;
+  }
 
-  // YYYY-MM-DD
+  /* -----------------------------------------
+     3. YYYY-MM-DD
+  ----------------------------------------- */
+
   let m = raw.match(
     /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/
   );
@@ -121,12 +231,41 @@ function parseAttendanceDate(value) {
     const mo = Number(m[2]);
     const d = Number(m[3]);
 
-    const date = new Date(Date.UTC(y, mo - 1, d));
+    if (
+      y < 2000 ||
+      mo < 1 ||
+      mo > 12 ||
+      d < 1 ||
+      d > 31
+    ) {
+      return null;
+    }
 
-    return Number.isNaN(date.getTime()) ? null : date;
+    const date = new Date(
+      Date.UTC(y, mo - 1, d)
+    );
+
+    /*
+      Prevent invalid dates such as:
+      31-02-2026
+    */
+    if (
+      date.getUTCFullYear() !== y ||
+      date.getUTCMonth() !== mo - 1 ||
+      date.getUTCDate() !== d
+    ) {
+      return null;
+    }
+
+    return date;
   }
 
-  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY
+  /* -----------------------------------------
+     4. DD-MM-YYYY
+        DD/MM/YYYY
+        DD.MM.YYYY
+  ----------------------------------------- */
+
   m = raw.match(
     /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/
   );
@@ -136,14 +275,47 @@ function parseAttendanceDate(value) {
     const mo = Number(m[2]);
     const y = Number(m[3]);
 
-    const date = new Date(Date.UTC(y, mo - 1, d));
+    if (
+      y < 2000 ||
+      mo < 1 ||
+      mo > 12 ||
+      d < 1 ||
+      d > 31
+    ) {
+      return null;
+    }
 
-    return Number.isNaN(date.getTime()) ? null : date;
+    const date = new Date(
+      Date.UTC(y, mo - 1, d)
+    );
+
+    if (
+      date.getUTCFullYear() !== y ||
+      date.getUTCMonth() !== mo - 1 ||
+      date.getUTCDate() !== d
+    ) {
+      return null;
+    }
+
+    return date;
   }
+
+  /* -----------------------------------------
+     5. Other valid date strings
+  ----------------------------------------- */
 
   const parsed = new Date(raw);
 
-  if (Number.isNaN(parsed.getTime())) return null;
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  /*
+    Reject 1900 / old dates.
+  */
+  if (parsed.getFullYear() < 2000) {
+    return null;
+  }
 
   return new Date(
     Date.UTC(
@@ -155,26 +327,21 @@ function parseAttendanceDate(value) {
 }
 
 function dateKey(date) {
-  return new Date(date)
-    .toISOString()
-    .slice(0, 10);
+  if (!date) return "";
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+
+  return d.toISOString().slice(0, 10);
 }
 
-/*
-  Calculate OT and cutting.
+/* =========================================================
+   TIME ADJUSTMENT
+========================================================= */
 
-  IMPORTANT:
-  The calculation uses the shift's breakMinutes.
-  Example:
-
-  Shift = 10:00 AM - 6:30 PM
-  Break = 0
-  Actual = 10:12 AM - 6:50 PM
-
-  Scheduled = 8h30m
-  Actual = 8h38m
-  OT = 8 minutes
-*/
 function calculateTimeAdjustments(
   checkIn,
   checkOut,
@@ -194,13 +361,11 @@ function calculateTimeAdjustments(
     };
   }
 
-  const scheduledStart = timeToMinutes(
-    shift.startTime
-  );
+  const scheduledStart =
+    timeToMinutes(shift.startTime);
 
-  const scheduledEnd = timeToMinutes(
-    shift.endTime
-  );
+  const scheduledEnd =
+    timeToMinutes(shift.endTime);
 
   if (
     scheduledStart === null ||
@@ -219,11 +384,6 @@ function calculateTimeAdjustments(
     scheduled += 1440;
   }
 
-  /*
-    Break is deducted only when configured.
-    If your shift should count the full
-    10:00-18:30 period, keep breakMinutes = 0.
-  */
   scheduled = Math.max(
     0,
     scheduled - n(shift.breakMinutes)
@@ -275,7 +435,8 @@ export async function getEmployees(req, res) {
 
 export async function createEmployee(req, res) {
   try {
-    const employee = await Employee.create(req.body);
+    const employee =
+      await Employee.create(req.body);
 
     res.status(201).json({
       success: true,
@@ -332,8 +493,15 @@ export async function getOptions(req, res) {
   try {
     const [employees, shifts] =
       await Promise.all([
-        Employee.find({}).sort({ name: 1 }),
-        Shift.find({ status: { $ne: "Inactive" } }).sort({
+        Employee.find({}).sort({
+          name: 1,
+        }),
+
+        Shift.find({
+          status: {
+            $ne: "Inactive",
+          },
+        }).sort({
           name: 1,
         }),
       ]);
@@ -396,40 +564,46 @@ export async function getAttendance(req, res) {
       }
     }
 
-    let attendance = await Attendance.find(query)
-      .populate(
-        "employeeId",
-        "employeeCode name department designation workLocation location"
-      )
-      .populate(
-        "shiftId",
-        "name startTime endTime breakMinutes graceMinutes overtimeAfterMinutes"
-      )
-      .sort({
-        date: 1,
-      });
+    let attendance =
+      await Attendance.find(query)
+        .populate(
+          "employeeId",
+          "employeeCode name department designation workLocation location"
+        )
+        .populate(
+          "shiftId",
+          "name startTime endTime breakMinutes graceMinutes overtimeAfterMinutes"
+        )
+        .sort({
+          date: 1,
+        });
 
-    /*
-      includeStaff=1 means employees without an
-      attendance record must also appear.
-    */
     if (includeStaff === "1") {
       const existing = new Set(
         attendance.map(
           (a) =>
-            `${a.employeeId?._id}_${dateKey(a.date)}`
+            `${a.employeeId?._id}_${dateKey(
+              a.date
+            )}`
         )
       );
 
-      const employees = await Employee.find({})
-        .sort({ name: 1 });
+      const employees =
+        await Employee.find({})
+          .sort({
+            name: 1,
+          });
 
       const fromDate = from
-        ? new Date(`${from}T00:00:00.000Z`)
+        ? new Date(
+            `${from}T00:00:00.000Z`
+          )
         : null;
 
       const toDate = to
-        ? new Date(`${to}T00:00:00.000Z`)
+        ? new Date(
+            `${to}T00:00:00.000Z`
+          )
         : null;
 
       if (
@@ -441,30 +615,45 @@ export async function getAttendance(req, res) {
         for (
           let d = new Date(fromDate);
           d < toDate;
-          d.setUTCDate(d.getUTCDate() + 1)
+          d.setUTCDate(
+            d.getUTCDate() + 1
+          )
         ) {
           for (const emp of employees) {
             const key =
               `${emp._id}_${dateKey(d)}`;
 
-            if (existing.has(key)) continue;
+            if (existing.has(key)) {
+              continue;
+            }
 
             attendance.push({
-              _id: `virtual-${emp._id}-${dateKey(d)}`,
+              _id: `virtual-${emp._id}-${dateKey(
+                d
+              )}`,
+
               employeeId: emp,
+
               date: new Date(d),
+
               status: "Absent",
+
               checkIn: "",
               checkOut: "",
+
               workLocation:
                 emp.workLocation ||
                 emp.location ||
                 "",
+
               shiftId: null,
               shiftName: "",
+
               overtimeHours: 0,
               cuttingMinutes: 0,
+
               note: "",
+
               virtual: true,
             });
           }
@@ -483,7 +672,10 @@ export async function getAttendance(req, res) {
       attendance,
     });
   } catch (error) {
-    console.error("getAttendance:", error);
+    console.error(
+      "getAttendance:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -491,6 +683,10 @@ export async function getAttendance(req, res) {
     });
   }
 }
+
+/* =========================================================
+   SAVE ATTENDANCE
+========================================================= */
 
 export async function saveAttendance(req, res) {
   try {
@@ -526,6 +722,20 @@ export async function saveAttendance(req, res) {
       });
     }
 
+    /*
+      IMPORTANT DATE FIX
+    */
+    const parsedAttendanceDate =
+      parseAttendanceDate(date);
+
+    if (!parsedAttendanceDate) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid attendance date.",
+      });
+    }
+
     if (
       status === "Present" &&
       (!checkIn || !checkOut)
@@ -538,7 +748,9 @@ export async function saveAttendance(req, res) {
     }
 
     const employee =
-      await Employee.findById(employeeId);
+      await Employee.findById(
+        employeeId
+      );
 
     if (!employee) {
       return res.status(404).json({
@@ -550,14 +762,21 @@ export async function saveAttendance(req, res) {
     let shift = null;
 
     if (shiftId) {
-      shift = await Shift.findById(shiftId);
+      shift =
+        await Shift.findById(shiftId);
     }
+
+    const normalizedCheckIn =
+      normalizeTime(checkIn);
+
+    const normalizedCheckOut =
+      normalizeTime(checkOut);
 
     const adjustment =
       status === "Present"
         ? calculateTimeAdjustments(
-            checkIn,
-            checkOut,
+            normalizedCheckIn,
+            normalizedCheckOut,
             shift
           )
         : {
@@ -569,31 +788,44 @@ export async function saveAttendance(req, res) {
       await Attendance.findOneAndUpdate(
         {
           employeeId,
-          date: new Date(date),
+          date: parsedAttendanceDate,
         },
         {
           $set: {
             employeeId,
-            date: new Date(date),
+
+            /*
+              Use normalized date.
+              This prevents 1900/invalid date issues.
+            */
+            date: parsedAttendanceDate,
+
             status,
-            checkIn: normalizeTime(checkIn),
-            checkOut: normalizeTime(checkOut),
+
+            checkIn:
+              normalizedCheckIn,
+
+            checkOut:
+              normalizedCheckOut,
+
             workLocation:
               workLocation ||
               employee.workLocation ||
               employee.location ||
               "",
-            shiftId: shift?._id || null,
-            shiftName: shift?.name || "",
+
+            shiftId:
+              shift?._id || null,
+
+            shiftName:
+              shift?.name || "",
+
             overtimeHours:
               adjustment.overtimeHours,
+
             cuttingMinutes:
               adjustment.cuttingMinutes,
 
-            /*
-              New attendance save requires
-              fresh approval.
-            */
             overtimeApproved: false,
             overtimeApprovedBy: null,
             overtimeApprovedAt: null,
@@ -614,11 +846,15 @@ export async function saveAttendance(req, res) {
 
     res.json({
       success: true,
-      message: "Attendance saved successfully.",
+      message:
+        "Attendance saved successfully.",
       attendance,
     });
   } catch (error) {
-    console.error("saveAttendance:", error);
+    console.error(
+      "saveAttendance:",
+      error
+    );
 
     res.status(400).json({
       success: false,
@@ -656,7 +892,8 @@ export async function importAttendanceExcel(
     if (!sheetName) {
       return res.status(400).json({
         success: false,
-        message: "Excel file has no worksheet.",
+        message:
+          "Excel file has no worksheet.",
       });
     }
 
@@ -677,9 +914,6 @@ export async function importAttendanceExcel(
       });
     }
 
-    /*
-      Accept common variations of column names.
-    */
     function getValue(row, names) {
       for (const name of names) {
         if (
@@ -692,9 +926,6 @@ export async function importAttendanceExcel(
         }
       }
 
-      /*
-        Case-insensitive fallback.
-      */
       const keys = Object.keys(row);
 
       for (const name of names) {
@@ -704,7 +935,9 @@ export async function importAttendanceExcel(
             name.trim().toLowerCase()
         );
 
-        if (found) return row[found];
+        if (found) {
+          return row[found];
+        }
       }
 
       return "";
@@ -718,7 +951,9 @@ export async function importAttendanceExcel(
     for (const employee of employees) {
       if (employee.employeeCode) {
         employeeMap.set(
-          clean(employee.employeeCode).toLowerCase(),
+          clean(
+            employee.employeeCode
+          ).toLowerCase(),
           employee
         );
       }
@@ -843,18 +1078,23 @@ export async function importAttendanceExcel(
           );
         }
 
+        /*
+          IMPORTANT:
+          Parse Excel date safely.
+        */
         const parsedDate =
           parseAttendanceDate(rawDate);
 
         if (!parsedDate) {
           throw new Error(
-            "Invalid or missing Date."
+            "Invalid or missing Date. Excel time-only/1900 dates are not accepted."
           );
         }
 
-        /*
-          Normalize status.
-        */
+        /* -----------------------------------------
+           STATUS
+        ----------------------------------------- */
+
         let status = rawStatus;
 
         const statusMap = {
@@ -901,9 +1141,10 @@ export async function importAttendanceExcel(
           );
         }
 
-        /*
-          Find shift by name.
-        */
+        /* -----------------------------------------
+           SHIFT
+        ----------------------------------------- */
+
         let shift = null;
 
         if (shiftName) {
@@ -919,19 +1160,16 @@ export async function importAttendanceExcel(
           }
         }
 
-        /*
-          Normalize times.
-        */
+        /* -----------------------------------------
+           TIME
+        ----------------------------------------- */
+
         const checkIn =
           normalizeTime(rawCheckIn);
 
         const checkOut =
           normalizeTime(rawCheckOut);
 
-        /*
-          Present attendance requires both
-          In and Out.
-        */
         if (
           status === "Present" &&
           (!checkIn || !checkOut)
@@ -953,9 +1191,6 @@ export async function importAttendanceExcel(
                 cuttingMinutes: 0,
               };
 
-        /*
-          Employee location is the fallback.
-        */
         const finalLocation =
           workLocation ||
           employee.workLocation ||
@@ -963,23 +1198,30 @@ export async function importAttendanceExcel(
           "";
 
         /*
-          UPSERT:
-          Same Employee + Date will update
-          the existing attendance record.
+          UPSERT
         */
+
         await Attendance.findOneAndUpdate(
           {
-            employeeId: employee._id,
+            employeeId:
+              employee._id,
+
             date: parsedDate,
           },
           {
             $set: {
-              employeeId: employee._id,
+              employeeId:
+                employee._id,
+
               date: parsedDate,
+
               status,
+
               checkIn,
               checkOut,
-              workLocation: finalLocation,
+
+              workLocation:
+                finalLocation,
 
               shiftId:
                 shift?._id || null,
@@ -995,10 +1237,6 @@ export async function importAttendanceExcel(
               cuttingMinutes:
                 adjustment.cuttingMinutes,
 
-              /*
-                New imported attendance needs
-                fresh payroll approval.
-              */
               overtimeApproved: false,
               overtimeApprovedBy: null,
               overtimeApprovedAt: null,
@@ -1030,11 +1268,15 @@ export async function importAttendanceExcel(
 
     res.json({
       success: true,
+
       message:
         "Attendance Excel import completed.",
+
       imported,
       skipped,
+
       total: data.length,
+
       errors,
     });
   } catch (error) {
@@ -1045,6 +1287,7 @@ export async function importAttendanceExcel(
 
     res.status(500).json({
       success: false,
+
       message:
         error.message ||
         "Attendance Excel import failed.",
@@ -1079,31 +1322,37 @@ export async function getAttendanceSettings(
               shiftId: null,
               overtimeAllowed: true,
             },
+
             tuesday: {
               type: "Working",
               shiftId: null,
               overtimeAllowed: true,
             },
+
             wednesday: {
               type: "Working",
               shiftId: null,
               overtimeAllowed: true,
             },
+
             thursday: {
               type: "Working",
               shiftId: null,
               overtimeAllowed: true,
             },
+
             friday: {
               type: "Working",
               shiftId: null,
               overtimeAllowed: true,
             },
+
             saturday: {
               type: "Working",
               shiftId: null,
               overtimeAllowed: true,
             },
+
             sunday: {
               type: "Week Off",
               shiftId: null,
@@ -1114,9 +1363,10 @@ export async function getAttendanceSettings(
     }
 
     const shifts =
-      await Shift.find({}).sort({
-        name: 1,
-      });
+      await Shift.find({})
+        .sort({
+          name: 1,
+        });
 
     res.json({
       success: true,
@@ -1184,16 +1434,20 @@ export async function saveAttendanceSettings(
 export async function getShifts(req, res) {
   try {
     const shifts =
-      await Shift.find({}).sort({
-        name: 1,
-      });
+      await Shift.find({})
+        .sort({
+          name: 1,
+        });
 
     res.json({
       success: true,
       shifts,
     });
   } catch (error) {
-    console.error("getShifts:", error);
+    console.error(
+      "getShifts:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -1207,10 +1461,13 @@ export async function createShift(req, res) {
     const shift =
       await Shift.create({
         ...req.body,
+
         breakMinutes:
           n(req.body.breakMinutes),
+
         graceMinutes:
           n(req.body.graceMinutes),
+
         overtimeAfterMinutes:
           n(
             req.body.overtimeAfterMinutes
@@ -1223,7 +1480,10 @@ export async function createShift(req, res) {
       shift,
     });
   } catch (error) {
-    console.error("createShift:", error);
+    console.error(
+      "createShift:",
+      error
+    );
 
     res.status(400).json({
       success: false,
@@ -1237,17 +1497,23 @@ export async function updateShift(req, res) {
     const shift =
       await Shift.findByIdAndUpdate(
         req.params.id,
+
         {
           ...req.body,
+
           breakMinutes:
             n(req.body.breakMinutes),
+
           graceMinutes:
             n(req.body.graceMinutes),
+
           overtimeAfterMinutes:
             n(
-              req.body.overtimeAfterMinutes
+              req.body
+                .overtimeAfterMinutes
             ),
         },
+
         {
           new: true,
           runValidators: true,
@@ -1300,7 +1566,10 @@ export async function getLeaves(req, res) {
       leaves,
     });
   } catch (error) {
-    console.error("getLeaves:", error);
+    console.error(
+      "getLeaves:",
+      error
+    );
 
     res.status(500).json({
       success: false,
@@ -1319,7 +1588,10 @@ export async function createLeave(req, res) {
       leave,
     });
   } catch (error) {
-    console.error("createLeave:", error);
+    console.error(
+      "createLeave:",
+      error
+    );
 
     res.status(400).json({
       success: false,
@@ -1336,9 +1608,11 @@ export async function updateLeaveStatus(
     const leave =
       await Leave.findByIdAndUpdate(
         req.params.id,
+
         {
           status: req.body.status,
         },
+
         {
           new: true,
         }
@@ -1375,9 +1649,10 @@ export async function updateLeaveStatus(
 export async function getHolidays(req, res) {
   try {
     const holidays =
-      await Holiday.find({}).sort({
-        date: 1,
-      });
+      await Holiday.find({})
+        .sort({
+          date: 1,
+        });
 
     res.json({
       success: true,
@@ -1402,7 +1677,9 @@ export async function createHoliday(
 ) {
   try {
     const holiday =
-      await Holiday.create(req.body);
+      await Holiday.create(
+        req.body
+      );
 
     res.status(201).json({
       success: true,
@@ -1549,7 +1826,9 @@ export async function generateSalary(
       let overtimeHours = 0;
       let cuttingMinutes = 0;
 
-      for (const a of employeeAttendance) {
+      for (
+        const a of employeeAttendance
+      ) {
         if (a.overtimeApproved) {
           overtimeHours +=
             n(a.overtimeHours);
@@ -1604,9 +1883,11 @@ export async function generateSalary(
           {
             employeeId:
               employee._id,
+
             month,
             year,
           },
+
           {
             $set: {
               employeeId:
@@ -1631,6 +1912,7 @@ export async function generateSalary(
               netSalary,
             },
           },
+
           {
             upsert: true,
             new: true,
@@ -1739,10 +2021,11 @@ export async function payrollApprovals(
     const {
       start,
       end,
-    } = payrollRange(
-      month,
-      year
-    );
+    } =
+      payrollRange(
+        month,
+        year
+      );
 
     const rows =
       await Attendance.find({
@@ -1757,6 +2040,7 @@ export async function payrollApprovals(
               $gt: 0,
             },
           },
+
           {
             cuttingMinutes: {
               $gt: 0,
@@ -1798,11 +2082,10 @@ export async function approvePayrollAdjustments(
   res
 ) {
   try {
-    const ids = Array.isArray(
-      req.body.ids
-    )
-      ? req.body.ids
-      : [];
+    const ids =
+      Array.isArray(req.body.ids)
+        ? req.body.ids
+        : [];
 
     if (!ids.length) {
       return res.status(400).json({
@@ -1868,6 +2151,7 @@ export async function approvePayrollAdjustments(
             $in: ids,
           },
         },
+
         {
           $set: update,
         }
@@ -1875,8 +2159,10 @@ export async function approvePayrollAdjustments(
 
     res.json({
       success: true,
+
       message:
         `${result.modifiedCount} attendance adjustment(s) updated.`,
+
       modifiedCount:
         result.modifiedCount,
     });
