@@ -39,6 +39,7 @@ export async function payrollOptions(req, res) {
       otherAllowanceBase: settings.otherAllowanceBase ?? "gross", gratuityBase: settings.gratuityBase ?? "basic",
       pfBase: settings.pfBase ?? "gross", pfCeilingEnabled: settings.pfCeilingEnabled !== false, pfWageCeiling: Number(settings.pfWageCeiling ?? 15000),
       esiBase: settings.esiBase ?? "gross", esiCeilingEnabled: settings.esiCeilingEnabled !== false, esiWageCeiling: Number(settings.esiWageCeiling ?? 21000),
+      stateRules: settings.stateRules || {},
     },
     states: ["Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland","Odisha","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura","Uttar Pradesh","Uttarakhand","West Bengal","Delhi","Jammu and Kashmir","Ladakh","Puducherry","Chandigarh"],
     departmentOptions: ["HR","Accounts","Sales","Purchase","Operations","Warehouse","Admin","IT"],
@@ -55,6 +56,22 @@ export async function savePayrollOptions(req, res) {
     if (req.body?.[key] !== undefined) data[key] = String(req.body[key]);
   for (const key of ["pfCeilingEnabled","esiCeilingEnabled"])
     if (req.body?.[key] !== undefined) data[key] = Boolean(req.body[key]);
+  if (req.body?.stateRules && typeof req.body.stateRules === "object") {
+    const cleaned = {};
+    for (const [state, rule] of Object.entries(req.body.stateRules)) {
+      if (!rule || typeof rule !== "object") continue;
+      cleaned[state] = {};
+      for (const key of STATE_RULE_KEYS) {
+        if (rule[key] === undefined) continue;
+        if (key.endsWith("Percent") || key.endsWith("Ceiling")) cleaned[state][key] = n(rule[key]);
+        else if (key.endsWith("Enabled")) cleaned[state][key] = Boolean(rule[key]);
+        else cleaned[state][key] = String(rule[key]);
+      }
+      if (rule.pfWageCeiling !== undefined) cleaned[state].pfWageCeiling = n(rule.pfWageCeiling);
+      if (rule.esiWageCeiling !== undefined) cleaned[state].esiWageCeiling = n(rule.esiWageCeiling);
+    }
+    data.stateRules = cleaned;
+  }
   const structure = [data.basicPercent,data.hraPercent,data.daPercent,data.conveyancePercent,data.otherAllowancePercent].reduce((a,b)=>a+(Number.isFinite(b)?b:0),0);
   if (structure > 100) return res.status(400).json({success:false,message:"Basic + HRA + DA + Conveyance + Other Allowance percentages cannot exceed 100%."});
   const settings = await PayrollSetting.findOneAndUpdate({key:"default"},{$set:data,$setOnInsert:{key:"default"}},{upsert:true,new:true,runValidators:true});
@@ -72,6 +89,23 @@ function baseAmount(base, gross, basic, da) {
   if (base === "basic") return basic;
   if (base === "basicDa") return basic + da;
   return gross;
+}
+
+const STATE_RULE_KEYS = [
+  "basicPercent","hraPercent","daPercent","conveyancePercent","otherAllowancePercent",
+  "gratuityPercent","pfPercent","esiPercent","employerPfPercent","employerEsiPercent",
+  "hraBase","daBase","conveyanceBase","otherAllowanceBase","gratuityBase","pfBase",
+  "pfCeilingEnabled","pfWageCeiling","esiBase","esiCeilingEnabled","esiWageCeiling"
+];
+
+function effectivePayrollSettings(settings, state) {
+  const common = { ...settings };
+  const rules = settings?.stateRules && typeof settings.stateRules === "object" ? settings.stateRules : {};
+  const override = state ? rules[state] : null;
+  if (!override || typeof override !== "object") return common;
+  const merged = { ...common };
+  for (const key of STATE_RULE_KEYS) if (override[key] !== undefined) merged[key] = override[key];
+  return merged;
 }
 
 function salaryBreakup(body, settings) {
@@ -108,6 +142,7 @@ export async function createEmployee(req, res) {
   for (const f of ["dateOfBirth","joiningDate"]) if(body[f]) body[f]=new Date(body[f]);
   for (const f of ["grossSalary","basicSalary","hra","da","conveyance","otherAllowance","professionalTax","otherDeduction","pfRate","pfAmount","esiRate","esiAmount","employerPfRate","employerPfAmount","employerEsiRate","employerEsiAmount","gratuityPercent","gratuityAmount","ctc"]) body[f]=n(body[f]);
   let settings=await PayrollSetting.findOne({key:"default"}).lean(); if(!settings) settings=await PayrollSetting.create({key:"default"});
+  settings = effectivePayrollSettings(settings, body.state);
   Object.assign(body,salaryBreakup(body,settings));
   const employee=await Employee.create(body); res.status(201).json({success:true,employee});
 }
@@ -116,6 +151,7 @@ export async function updateEmployee(req, res) {
   const current=await Employee.findById(req.params.id); if(!current) return res.status(404).json({success:false,message:"Employee not found."});
   const body={...req.body};
   let settings=await PayrollSetting.findOne({key:"default"}).lean(); if(!settings) settings=await PayrollSetting.create({key:"default"});
+  settings = effectivePayrollSettings(settings, body.state);
   if(body.grossSalary!==undefined) Object.assign(body,salaryBreakup(body,settings));
   for (const f of ["dateOfBirth","joiningDate"]) if(body[f]) body[f]=new Date(body[f]);
   const employee=await Employee.findByIdAndUpdate(req.params.id,body,{new:true,runValidators:true}); res.json({success:true,employee});
