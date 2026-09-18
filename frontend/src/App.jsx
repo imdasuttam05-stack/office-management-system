@@ -18,6 +18,8 @@ import LeaveManagement from "./pages/LeaveManagement.jsx";
 import HolidayCalendar from "./pages/HolidayCalendar.jsx";
 import Salary from "./pages/Salary.jsx";
 import ShiftManagement from "./pages/ShiftManagement.jsx";
+import PayrollApprovals from "./pages/PayrollApprovals.jsx";
+import PayrollReport from "./pages/PayrollReport.jsx";
 
 startSessionManager();
 
@@ -58,6 +60,8 @@ export default function App() {
 
             {/* Salary / Payroll: all dashboard salary links open the same working page */}
             <Route path="/salary" element={<Salary />} />
+            <Route path="/payroll/approvals" element={<PayrollApprovals />} />
+            <Route path="/reports/payroll" element={<PayrollReport />} />
             <Route path="/salary/slips" element={<Salary />} />
             <Route path="/payroll" element={<Salary />} />
           </Route>
@@ -68,7 +72,7 @@ export default function App() {
           </Route>
 
           {/* These pages are not implemented yet; keep the user inside the app */}
-          <Route path="/approvals" element={<Navigate to="/expenses" replace />} />
+          <Route path="/approvals" element={<Navigate to="/payroll/approvals" replace />} />
           <Route path="/reports" element={<Navigate to="/dashboard" replace />} />
           <Route path="/reports/attendance" element={<Navigate to="/attendance" replace />} />
           <Route path="/reports/leave" element={<Navigate to="/leave" replace />} />
