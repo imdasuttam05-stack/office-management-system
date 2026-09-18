@@ -11,6 +11,32 @@ import XLSX from "xlsx";
 
 const n = v => Number.isFinite(Number(v)) ? Number(v) : 0;
 
+function timeToMinutes(value) {
+  if (!value) return null;
+  const m = String(value).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!m) return null;
+  let h = Number(m[1]), min = Number(m[2]);
+  const ap = (m[3] || "").toUpperCase();
+  if (ap === "PM" && h < 12) h += 12;
+  if (ap === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function calculateTimeAdjustments(checkIn, checkOut, shift) {
+  const cin = timeToMinutes(checkIn), cout = timeToMinutes(checkOut);
+  if (cin == null || cout == null || !shift) return { overtimeHours: 0, cuttingMinutes: 0 };
+  const scheduledStart = timeToMinutes(shift.startTime);
+  const scheduledEnd = timeToMinutes(shift.endTime);
+  if (scheduledStart == null || scheduledEnd == null) return { overtimeHours: 0, cuttingMinutes: 0 };
+  let scheduled = scheduledEnd - scheduledStart;
+  if (scheduled < 0) scheduled += 1440;
+  scheduled = Math.max(0, scheduled - n(shift.breakMinutes));
+  let actual = cout - cin;
+  if (actual < 0) actual += 1440;
+  const delta = actual - scheduled;
+  return { overtimeHours: delta > 0 ? Math.round((delta / 60) * 100) / 100 : 0, cuttingMinutes: delta < 0 ? Math.abs(delta) : 0 };
+}
+
 function range(month, year) {
   return {
     start: new Date(Date.UTC(year, month - 1, 1)),
@@ -291,22 +317,39 @@ export async function attendanceImport(req, res) {
 }
 
 export async function saveAttendance(req, res) {
-  const data = { ...req.body, date: new Date(`${req.body.date}T00:00:00.000Z`), overtimeHours:n(req.body.overtimeHours) };
   const employee = await Employee.findById(req.body.employeeId).lean();
   if (!employee) return res.status(404).json({success:false,message:"Employee not found."});
-  data.workLocation = employee.workLocation || employee.location || req.body.workLocation || req.body.location || "";
-  if (req.body.shiftId) {
-    const shift = await Shift.findById(req.body.shiftId).lean();
-    if (shift) { data.shiftName = shift.name; data.shiftId = shift._id; }
-  } else if (employee.shiftId) {
-    const shift = await Shift.findById(employee.shiftId).lean();
-    if (shift) { data.shiftId = shift._id; data.shiftName = shift.name; }
-  }
+  const data = { ...req.body, date: new Date(req.body.date) };
+  data.workLocation = employee.workLocation || employee.location || req.body.workLocation || "";
+
+  let shift = null;
+  if (req.body.shiftId) shift = await Shift.findById(req.body.shiftId).lean();
+  else if (employee.shiftId) shift = await Shift.findById(employee.shiftId).lean();
+  if (shift) { data.shiftName = shift.name; data.shiftId = shift._id; }
+
   if (data.checkIn && !data.checkOut && String(req.body.status || "Present") === "Present") {
     return res.status(400).json({success:false,message:"Out time is mandatory to mark present."});
   }
   if (data.checkIn && data.checkOut) data.status = "Present";
   else if (!data.checkIn && !data.checkOut && !data.status) data.status = "Absent";
+
+  if (data.checkIn && data.checkOut && shift) {
+    const calc = calculateTimeAdjustments(data.checkIn, data.checkOut, shift);
+    data.overtimeHours = req.body.overtimeHours !== undefined ? n(req.body.overtimeHours) : calc.overtimeHours;
+    data.cuttingMinutes = req.body.cuttingMinutes !== undefined ? n(req.body.cuttingMinutes) : calc.cuttingMinutes;
+  } else {
+    data.overtimeHours = n(req.body.overtimeHours);
+    data.cuttingMinutes = n(req.body.cuttingMinutes);
+  }
+
+  // Any changed OT/cutting value must go through approval again.
+  data.overtimeApproved = false;
+  data.cuttingApproved = false;
+  data.overtimeApprovedBy = null;
+  data.overtimeApprovedAt = null;
+  data.cuttingApprovedBy = null;
+  data.cuttingApprovedAt = null;
+
   const row = await Attendance.findOneAndUpdate({employeeId:req.body.employeeId,date:data.date},data,{upsert:true,new:true,runValidators:true});
   res.json({success:true,attendance:row});
 }
@@ -378,72 +421,53 @@ export async function generateSalary(req, res) {
 
   const { start, end } = range(month, year);
   const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-
   const [att, holidays] = await Promise.all([
     Attendance.find({ employeeId: employee._id, date: { $gte: start, $lt: end } }),
     Holiday.find({ date: { $gte: start, $lt: end } })
   ]);
-
   const holidaySet = new Set(holidays.map(x => new Date(x.date).toISOString().slice(0, 10)));
   const byDate = new Map(att.map(x => [new Date(x.date).toISOString().slice(0, 10), x]));
 
-  let workingDays=0,presentDays=0,halfDays=0,paidLeaveDays=0,absentDays=0,holidayDays=0,weekOffDays=0,overtimeHours=0;
-
+  let workingDays=0,presentDays=0,halfDays=0,paidLeaveDays=0,absentDays=0,holidayDays=0,weekOffDays=0,overtimeHours=0,cuttingMinutes=0;
   for (let d=1; d<=days; d++) {
     const date = new Date(Date.UTC(year, month-1, d));
     const key = date.toISOString().slice(0,10);
     if (holidaySet.has(key)) { holidayDays++; continue; }
     if (date.getUTCDay() === 0) { weekOffDays++; continue; }
-
     workingDays++;
     const a = byDate.get(key);
     if (!a) { absentDays++; continue; }
-
     if (a.status === "Present") presentDays++;
     else if (a.status === "Half Day") halfDays++;
     else if (a.status === "Leave") paidLeaveDays++;
     else if (a.status === "Absent") absentDays++;
     else if (a.status === "Holiday") holidayDays++;
     else if (a.status === "Week Off") weekOffDays++;
-    overtimeHours += n(a.overtimeHours);
+    if (a.overtimeApproved) overtimeHours += n(a.overtimeHours);
+    if (a.cuttingApproved) cuttingMinutes += n(a.cuttingMinutes);
   }
 
-  const mapAllowanceTotal = employee.allowances
-    ? [...employee.allowances.values()].reduce((s,v) => s+n(v), 0)
-    : 0;
-  const fixedAllowanceTotal =
-    n(employee.hra) +
-    n(employee.da) +
-    n(employee.conveyance) +
-    n(employee.otherAllowance);
+  const mapAllowanceTotal = employee.allowances ? [...employee.allowances.values()].reduce((s,v) => s+n(v), 0) : 0;
+  const fixedAllowanceTotal = n(employee.hra) + n(employee.da) + n(employee.conveyance) + n(employee.otherAllowance);
   const allowanceTotal = mapAllowanceTotal + fixedAllowanceTotal;
-
   const basic = n(employee.basicSalary);
   const perDay = workingDays ? basic / workingDays : 0;
   const attendancePay = (presentDays + paidLeaveDays + halfDays * 0.5) * perDay;
   const unpaidDeduction = absentDays * perDay;
   const overtimeRate = n(req.body.overtimeRate) || (basic / 26 / 8 * 1.5);
   const overtimeAmount = overtimeHours * overtimeRate;
+  const cuttingRate = basic / 26 / 8;
+  const cuttingAmount = (cuttingMinutes / 60) * cuttingRate;
   const bonus = n(req.body.bonus);
-  const deductions =
-    unpaidDeduction +
-    n(req.body.deductions) +
-    n(employee.professionalTax) +
-    n(employee.otherDeduction);
+  const deductions = unpaidDeduction + cuttingAmount + n(req.body.deductions) + n(employee.professionalTax) + n(employee.otherDeduction);
   const grossSalary = attendancePay + allowanceTotal + overtimeAmount + bonus;
   const netSalary = Math.max(0, grossSalary - deductions);
 
   const salary = await Salary.findOneAndUpdate(
     { employeeId: employee._id, month, year },
-    {
-      employeeId: employee._id, month, year, workingDays, presentDays, halfDays,
-      paidLeaveDays, unpaidLeaveDays: 0, absentDays, holidayDays, weekOffDays,
-      basicSalary: basic, attendancePay, allowances: allowanceTotal,
-      overtimeAmount, bonus, deductions, grossSalary, netSalary, status: "Processed"
-    },
+    { employeeId: employee._id, month, year, workingDays, presentDays, halfDays, paidLeaveDays, unpaidLeaveDays: 0, absentDays, holidayDays, weekOffDays, basicSalary: basic, attendancePay, allowances: allowanceTotal, overtimeHours, overtimeAmount, overtimeApprovedAmount: overtimeAmount, cuttingMinutes, cuttingAmount, bonus, deductions, grossSalary, netSalary, status: "Processed" },
     { upsert: true, new: true, runValidators: true }
   );
-
   res.json({ success: true, salary });
 }
 
