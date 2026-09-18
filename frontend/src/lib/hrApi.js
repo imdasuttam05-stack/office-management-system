@@ -57,6 +57,22 @@ export const hrApi = {
   updateEmployee: (id, body) => request(`/employees/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   attendance: (q = "") => request(`/attendance${q}`),
   saveAttendance: (body) => request("/attendance", { method: "POST", body: JSON.stringify(body) }),
+  uploadAttendance: async (file) => {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const response = await axios.post(`${API_URL}/api/payroll/attendance/import`, form, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      withCredentials: true,
+    });
+    return response.data;
+  },
+  attendanceSettings: () => request("/attendance/settings"),
+  saveAttendanceSettings: (body) => request("/attendance/settings", { method: "PUT", body: JSON.stringify(body) }),
+  shifts: () => request("/attendance/shifts"),
+  createShift: (body) => request("/attendance/shifts", { method: "POST", body: JSON.stringify(body) }),
+  updateShift: (id, body) => request(`/attendance/shifts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+
   leaves: (q = "") => request(`/leaves${q}`),
   createLeave: (body) => request("/leaves", { method: "POST", body: JSON.stringify(body) }),
   updateLeaveStatus: (id, status) => request(`/leaves/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
