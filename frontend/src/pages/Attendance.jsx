@@ -68,8 +68,56 @@ function formatCutting(value) {
   ).padStart(2, "0")}m`;
 }
 
+function normalizeAttendanceDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+
+  // Excel serial dates / accidental time-only decimals
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 1) return null;
+
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    const d = new Date(excelEpoch + Math.round(value * 86400000));
+    if (Number.isNaN(d.getTime()) || d.getUTCFullYear() < 2000) return null;
+    return d;
+  }
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime()) || value.getFullYear() < 2000) return null;
+    return value;
+  }
+
+  const raw = String(value).trim();
+
+  // YYYY-MM-DD
+  let m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    return d.getUTCFullYear() >= 2000 ? d : null;
+  }
+
+  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY
+  m = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (m) {
+    const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+    return d.getUTCFullYear() >= 2000 ? d : null;
+  }
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime()) || d.getFullYear() < 2000) return null;
+  return d;
+}
+
+function dateKey(value) {
+  const d = normalizeAttendanceDate(value);
+  if (!d) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function fmtDate(d) {
-  return new Date(d).toLocaleDateString("en-IN", {
+  const normalized = normalizeAttendanceDate(d);
+  if (!normalized) return "-";
+
+  return normalized.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric"
@@ -246,7 +294,7 @@ export default function Attendance() {
   const summary = useMemo(() => {
     const dayRows = rows.filter(
       (r) =>
-        new Date(r.date).toISOString().slice(0, 10) ===
+        dateKey(r.date) ===
         selectedDate
     );
 
@@ -376,9 +424,7 @@ export default function Attendance() {
       row,
       kind,
       name: emp.name || "",
-      date: new Date(row.date)
-        .toISOString()
-        .slice(0, 10),
+      date: dateKey(row.date),
 
       shiftId:
         row.shiftId?._id ||
