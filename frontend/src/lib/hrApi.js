@@ -19,9 +19,15 @@ async function request(path, options = {}) {
     const response = await axios({
       url: `${API_URL}/api/payroll${path}`,
       method: options.method || "GET",
-      data: options.body ? JSON.parse(options.body) : undefined,
+      data: options.body
+        ? JSON.parse(options.body)
+        : undefined,
       headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : {}),
         ...(options.headers || {}),
       },
       withCredentials: true,
@@ -33,52 +39,222 @@ async function request(path, options = {}) {
     const data = error?.response?.data;
 
     if (status === 401) {
-      throw new Error(data?.message || "Session expired. Please login again.");
+      throw new Error(
+        data?.message ||
+          "Session expired. Please login again."
+      );
     }
 
     if (status === 403) {
-      throw new Error(data?.message || "You do not have permission for this action.");
+      throw new Error(
+        data?.message ||
+          "You do not have permission for this action."
+      );
     }
 
     throw new Error(
       data?.message ||
         error?.message ||
-        `HR request failed (${status || "network error"}).`
+        `HR request failed (${
+          status || "network error"
+        }).`
     );
   }
 }
 
 export const hrApi = {
-  employees: () => request("/employees"),
-  options: () => request("/options"),
-  saveOptions: (body) => request("/options", { method: "PUT", body: JSON.stringify(body) }),
-  createCompany: (name) => request("/companies", { method: "POST", body: JSON.stringify({ name }) }),
-  createEmployee: (body) => request("/employees", { method: "POST", body: JSON.stringify(body) }),
-  updateEmployee: (id, body) => request(`/employees/${id}`, { method: "PUT", body: JSON.stringify(body) }),
-  attendance: (q = "") => request(`/attendance${q}`),
-  saveAttendance: (body) => request("/attendance", { method: "POST", body: JSON.stringify(body) }),
+  // =========================
+  // EMPLOYEES
+  // =========================
+
+  employees: () =>
+    request("/employees"),
+
+  options: () =>
+    request("/options"),
+
+  saveOptions: (body) =>
+    request("/options", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  createCompany: (name) =>
+    request("/companies", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+      }),
+    }),
+
+  createEmployee: (body) =>
+    request("/employees", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateEmployee: (id, body) =>
+    request(`/employees/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  // =========================
+  // ATTENDANCE
+  // =========================
+
+  attendance: (q = "") =>
+    request(`/attendance${q}`),
+
+  saveAttendance: (body) =>
+    request("/attendance", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   uploadAttendance: async (file) => {
     const token = getToken();
-    const form = new FormData();
-    form.append("file", file);
-    const response = await axios.post(`${API_URL}/api/payroll/attendance/import`, form, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      withCredentials: true,
-    });
-    return response.data;
-  },
-  attendanceSettings: () => request("/attendance/settings"),
-  saveAttendanceSettings: (body) => request("/attendance/settings", { method: "PUT", body: JSON.stringify(body) }),
-  shifts: () => request("/attendance/shifts"),
-  createShift: (body) => request("/attendance/shifts", { method: "POST", body: JSON.stringify(body) }),
-  updateShift: (id, body) => request(`/attendance/shifts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
 
-  leaves: (q = "") => request(`/leaves${q}`),
-  createLeave: (body) => request("/leaves", { method: "POST", body: JSON.stringify(body) }),
-  updateLeaveStatus: (id, status) => request(`/leaves/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
-  holidays: () => request("/holidays"),
-  createHoliday: (body) => request("/holidays", { method: "POST", body: JSON.stringify(body) }),
-  salaries: (q = "") => request(`/salaries${q}`),
-  generateSalary: (body) => request("/salaries/generate", { method: "POST", body: JSON.stringify(body) }),
-  salarySlip: (id) => request(`/salaries/${id}/slip`),
+    const form = new FormData();
+
+    form.append("file", file);
+
+    try {
+      const response = await axios.post(
+        `${API_URL}/api/payroll/attendance/import`,
+        form,
+        {
+          headers: {
+            ...(token
+              ? {
+                  Authorization: `Bearer ${token}`,
+                }
+              : {}),
+          },
+          withCredentials: true,
+        }
+      );
+
+      return response.data;
+    } catch (error) {
+      const status =
+        error?.response?.status;
+
+      const data =
+        error?.response?.data;
+
+      if (status === 401) {
+        throw new Error(
+          data?.message ||
+            "Session expired. Please login again."
+        );
+      }
+
+      if (status === 403) {
+        throw new Error(
+          data?.message ||
+            "You do not have permission for this action."
+        );
+      }
+
+      throw new Error(
+        data?.message ||
+          error?.message ||
+          `Attendance upload failed (${
+            status || "network error"
+          }).`
+      );
+    }
+  },
+
+  attendanceSettings: () =>
+    request("/attendance/settings"),
+
+  saveAttendanceSettings: (body) =>
+    request("/attendance/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  // =========================
+  // SHIFTS
+  // =========================
+
+  shifts: () =>
+    request("/attendance/shifts"),
+
+  createShift: (body) =>
+    request("/attendance/shifts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateShift: (id, body) =>
+    request(`/attendance/shifts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  // =========================
+  // PAYROLL APPROVALS
+  // =========================
+
+  payrollApprovals: (q = "") =>
+    request(`/payroll/approvals${q}`),
+
+  approvePayrollAdjustments: (body) =>
+    request("/payroll/approvals/bulk", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // =========================
+  // LEAVE
+  // =========================
+
+  leaves: (q = "") =>
+    request(`/leaves${q}`),
+
+  createLeave: (body) =>
+    request("/leaves", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateLeaveStatus: (id, status) =>
+    request(`/leaves/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status,
+      }),
+    }),
+
+  // =========================
+  // HOLIDAYS
+  // =========================
+
+  holidays: () =>
+    request("/holidays"),
+
+  createHoliday: (body) =>
+    request("/holidays", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // =========================
+  // SALARY
+  // =========================
+
+  salaries: (q = "") =>
+    request(`/salaries${q}`),
+
+  generateSalary: (body) =>
+    request("/salaries/generate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  salarySlip: (id) =>
+    request(`/salaries/${id}/slip`),
 };
