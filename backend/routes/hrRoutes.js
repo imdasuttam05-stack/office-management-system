@@ -37,52 +37,68 @@ import {
 
 const router = express.Router();
 
+
 /* =========================================================
    EMPLOYEES
 ========================================================= */
 
-// GET /api/hr/employees
+// /api/hr/employees
 router.get("/employees", getEmployees);
-
-// POST /api/hr/employees
 router.post("/employees", createEmployee);
-
-// PUT /api/hr/employees/:id
 router.put("/employees/:id", updateEmployee);
+
+
+// Payroll compatibility
+// /api/payroll/employees
+router.get("/payroll/employees", getEmployees);
+router.post("/payroll/employees", createEmployee);
+router.put("/payroll/employees/:id", updateEmployee);
 
 
 /* =========================================================
    OPTIONS
 ========================================================= */
 
-// GET /api/hr/options
+// /api/hr/options
 router.get("/options", getOptions);
-
-// POST /api/hr/options
 router.post("/options", saveOptions);
+
+
+// Payroll compatibility
+// /api/payroll/options
+router.get("/payroll/options", getOptions);
+router.post("/payroll/options", saveOptions);
 
 
 /* =========================================================
    COMPANY
 ========================================================= */
 
-// POST /api/hr/company
 router.post("/company", createCompany);
+
+// Payroll compatibility
+router.post("/payroll/company", createCompany);
 
 
 /* =========================================================
    ATTENDANCE
 ========================================================= */
 
-// GET /api/hr/attendance
+// /api/hr/attendance
 router.get("/attendance", getAttendance);
-
-// POST /api/hr/attendance
 router.post("/attendance", saveAttendance);
-
-// POST /api/hr/attendance/import
 router.post(
   "/attendance/import",
+  importAttendanceExcel
+);
+
+
+// Payroll compatibility
+// /api/payroll/attendance
+router.get("/payroll/attendance", getAttendance);
+router.post("/payroll/attendance", saveAttendance);
+router.post(
+  "/payroll/attendance/import",
   importAttendanceExcel
 );
 
@@ -91,30 +107,24 @@ router.post(
    ATTENDANCE SETTINGS
 ========================================================= */
 
-// Original route
-// GET /api/hr/attendance-settings
+// /api/hr/attendance-settings
 router.get(
   "/attendance-settings",
   getAttendanceSettings
 );
 
-// Original route
-// POST /api/hr/attendance-settings
 router.post(
   "/attendance-settings",
   saveAttendanceSettings
 );
 
 
-// Compatibility route
-// GET /api/payroll/attendance/settings
+// /api/payroll/attendance/settings
 router.get(
   "/attendance/settings",
   getAttendanceSettings
 );
 
-// Compatibility route
-// POST /api/payroll/attendance/settings
 router.post(
   "/attendance/settings",
   saveAttendanceSettings
@@ -125,29 +135,39 @@ router.post(
    SHIFTS
 ========================================================= */
 
-// GET /api/hr/shifts
+// /api/hr/shifts
 router.get("/shifts", getShifts);
-
-// POST /api/hr/shifts
 router.post("/shifts", createShift);
-
-// PUT /api/hr/shifts/:id
 router.put("/shifts/:id", updateShift);
+
+
+// /api/payroll/shifts
+router.get("/payroll/shifts", getShifts);
+router.post("/payroll/shifts", createShift);
+router.put(
+  "/payroll/shifts/:id",
+  updateShift
+);
 
 
 /* =========================================================
    LEAVES
 ========================================================= */
 
-// GET /api/hr/leaves
+// /api/hr/leaves
 router.get("/leaves", getLeaves);
-
-// POST /api/hr/leaves
 router.post("/leaves", createLeave);
-
-// PUT /api/hr/leaves/:id/status
 router.put(
   "/leaves/:id/status",
+  updateLeaveStatus
+);
+
+
+// /api/payroll/leaves
+router.get("/payroll/leaves", getLeaves);
+router.post("/payroll/leaves", createLeave);
+router.put(
+  "/payroll/leaves/:id/status",
   updateLeaveStatus
 );
 
@@ -156,29 +176,47 @@ router.put(
    HOLIDAYS
 ========================================================= */
 
-// GET /api/hr/holidays
+// /api/hr/holidays
 router.get("/holidays", getHolidays);
-
-// POST /api/hr/holidays
 router.post("/holidays", createHoliday);
 
 
+// /api/payroll/holidays
+router.get("/payroll/holidays", getHolidays);
+router.post("/payroll/holidays", createHoliday);
+
+
 /* =========================================================
-   SALARY
+   SALARIES
 ========================================================= */
 
-// GET /api/hr/salaries
+// /api/hr/salaries
 router.get("/salaries", getSalaries);
 
-// POST /api/hr/salary/generate
 router.post(
   "/salary/generate",
   generateSalary
 );
 
-// GET /api/hr/salary-slip/:id
 router.get(
   "/salary-slip/:id",
+  getSalarySlip
+);
+
+
+// /api/payroll/salaries
+router.get(
+  "/payroll/salaries",
+  getSalaries
+);
+
+router.post(
+  "/payroll/salary/generate",
+  generateSalary
+);
+
+router.get(
+  "/payroll/salary-slip/:id",
   getSalarySlip
 );
 
@@ -187,29 +225,24 @@ router.get(
    PAYROLL APPROVALS
 ========================================================= */
 
-// Original route
-// GET /api/hr/payroll-approvals
+// /api/hr/payroll-approvals
 router.get(
   "/payroll-approvals",
   payrollApprovals
 );
 
-// POST /api/hr/payroll-approvals/adjustments
 router.post(
   "/payroll-approvals/adjustments",
   approvePayrollAdjustments
 );
 
 
-// Compatibility route
-// GET /api/payroll/payroll/approvals
+// /api/payroll/payroll/approvals
 router.get(
   "/payroll/approvals",
   payrollApprovals
 );
 
-// Compatibility route
-// POST /api/payroll/payroll/approvals/adjustments
 router.post(
   "/payroll/approvals/adjustments",
   approvePayrollAdjustments
