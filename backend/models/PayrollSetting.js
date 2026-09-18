@@ -13,6 +13,17 @@ const payrollSettingSchema = new mongoose.Schema(
     esiPercent: { type: Number, default: 0.75, min: 0, max: 100 },
     employerPfPercent: { type: Number, default: 12, min: 0, max: 100 },
     employerEsiPercent: { type: Number, default: 3.25, min: 0, max: 100 },
+    hraBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
+    daBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
+    conveyanceBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
+    otherAllowanceBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
+    gratuityBase: { type: String, enum: ["basic", "basicDa", "gross"], default: "basic" },
+    pfBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
+    pfCeilingEnabled: { type: Boolean, default: true },
+    pfWageCeiling: { type: Number, default: 15000, min: 0 },
+    esiBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
+    esiCeilingEnabled: { type: Boolean, default: true },
+    esiWageCeiling: { type: Number, default: 21000, min: 0 },
   },
   { timestamps: true }
 );
