@@ -1,51 +1,130 @@
 import express from "express";
-import multer from "multer";
+
 import {
-  employees, createEmployee, updateEmployee, payrollOptions, savePayrollOptions, createCompany,
-  attendance, saveAttendance,
-  leaves, createLeave, leaveStatus,
-  holidays, createHoliday,
-  generateSalary, salaries, salarySlip, attendanceImport, attendanceSettings, saveAttendanceSettings, shifts, createShift, updateShift
+  getEmployees,
+  createEmployee,
+  updateEmployee,
+
+  getOptions,
+  saveOptions,
+  createCompany,
+
+  getAttendance,
+  saveAttendance,
+  importAttendanceExcel,
+
+  getAttendanceSettings,
+  saveAttendanceSettings,
+
+  getShifts,
+  createShift,
+  updateShift,
+
+  getLeaves,
+  createLeave,
+  updateLeaveStatus,
+
+  getHolidays,
+  createHoliday,
+
+  getSalaries,
+  generateSalary,
+  getSalarySlip,
+
+  payrollApprovals,
+  approvePayrollAdjustments,
 } from "../controllers/hrController.js";
-import { hrAuth, hrAdmin } from "../middleware/hrAuth.js";
-import { payrollApprovals, approvePayrollAdjustments } from "../controllers/payrollApprovalController.js";
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-router.use(hrAuth);
 
-// Payroll landing endpoint used by older frontend versions.
-// Returns the latest salary records instead of "route not found".
-router.get("/", salaries);
+/* =========================================================
+   EMPLOYEES
+========================================================= */
+
+router.get("/employees", getEmployees);
+router.post("/employees", createEmployee);
+router.put("/employees/:id", updateEmployee);
 
 
-router.get("/employees", employees);
-router.get("/options", payrollOptions);
-router.put("/options", hrAdmin, savePayrollOptions);
-router.post("/companies", hrAdmin, createCompany);
-router.post("/employees", hrAdmin, createEmployee);
-router.put("/employees/:id", hrAdmin, updateEmployee);
+/* =========================================================
+   HR OPTIONS / COMPANY
+========================================================= */
 
-router.get("/attendance", attendance);
+router.get("/options", getOptions);
+router.post("/options", saveOptions);
+
+router.post("/company", createCompany);
+
+
+/* =========================================================
+   ATTENDANCE
+========================================================= */
+
+// Get attendance
+router.get("/attendance", getAttendance);
+
+// Save / update attendance
 router.post("/attendance", saveAttendance);
-router.post("/attendance/import", upload.single("file"), attendanceImport);
-router.get("/attendance/settings", attendanceSettings);
-router.put("/attendance/settings", hrAdmin, saveAttendanceSettings);
-router.get("/attendance/shifts", shifts);
-router.post("/attendance/shifts", hrAdmin, createShift);
-router.put("/attendance/shifts/:id", hrAdmin, updateShift);
 
-router.get("/leaves", leaves);
+// Import attendance from Excel
+router.post("/attendance/import", importAttendanceExcel);
+
+
+/* =========================================================
+   ATTENDANCE SETTINGS
+========================================================= */
+
+router.get("/attendance-settings", getAttendanceSettings);
+router.post("/attendance-settings", saveAttendanceSettings);
+
+
+/* =========================================================
+   SHIFTS
+========================================================= */
+
+router.get("/shifts", getShifts);
+router.post("/shifts", createShift);
+router.put("/shifts/:id", updateShift);
+
+
+/* =========================================================
+   LEAVES
+========================================================= */
+
+router.get("/leaves", getLeaves);
 router.post("/leaves", createLeave);
-router.patch("/leaves/:id/status", hrAdmin, leaveStatus);
+router.put("/leaves/:id/status", updateLeaveStatus);
 
-router.get("/holidays", holidays);
-router.post("/holidays", hrAdmin, createHoliday);
 
-router.get("/salaries", salaries);
-router.get("/payroll/approvals", payrollApprovals);
-router.post("/payroll/approvals/bulk", hrAdmin, approvePayrollAdjustments);
-router.post("/salaries/generate", hrAdmin, generateSalary);
-router.get("/salaries/:id/slip", salarySlip);
+/* =========================================================
+   HOLIDAYS
+========================================================= */
+
+router.get("/holidays", getHolidays);
+router.post("/holidays", createHoliday);
+
+
+/* =========================================================
+   SALARY / PAYROLL
+========================================================= */
+
+router.get("/salaries", getSalaries);
+
+router.post("/salary/generate", generateSalary);
+
+router.get("/salary-slip/:id", getSalarySlip);
+
+
+/* =========================================================
+   PAYROLL APPROVAL
+========================================================= */
+
+router.get("/payroll-approvals", payrollApprovals);
+
+router.post(
+  "/payroll-approvals/adjustments",
+  approvePayrollAdjustments
+);
+
 
 export default router;
