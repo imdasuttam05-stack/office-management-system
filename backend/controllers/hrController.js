@@ -5,6 +5,9 @@ import Holiday from "../models/Holiday.js";
 import Salary from "../models/Salary.js";
 import PayrollSetting from "../models/PayrollSetting.js";
 import Company from "../models/Company.js";
+import Shift from "../models/Shift.js";
+import AttendanceSetting from "../models/AttendanceSetting.js";
+import XLSX from "xlsx";
 
 const n = v => Number.isFinite(Number(v)) ? Number(v) : 0;
 
@@ -160,31 +163,119 @@ export async function updateEmployee(req, res) {
 export async function attendance(req, res) {
   const query = {};
   if (req.query.employeeId) query.employeeId = req.query.employeeId;
+  if (req.query.location) query.workLocation = req.query.location;
   if (req.query.from || req.query.to) {
     query.date = {};
-    if (req.query.from) query.date.$gte = new Date(req.query.from);
-    if (req.query.to) query.date.$lt = new Date(req.query.to);
+    if (req.query.from) query.date.$gte = new Date(`${req.query.from}T00:00:00.000Z`);
+    if (req.query.to) query.date.$lt = new Date(`${req.query.to}T00:00:00.000Z`);
   }
-  res.json({
-    success: true,
-    attendance: await Attendance.find(query)
-      .populate("employeeId", "employeeCode name")
-      .sort({ date: 1 })
-  });
+  const rows = await Attendance.find(query)
+    .populate("employeeId", "employeeCode name workLocation state shiftId")
+    .populate("shiftId", "name startTime endTime breakMinutes graceMinutes")
+    .sort({ date: 1, "employeeId.name": 1 });
+  res.json({ success: true, attendance: rows });
+}
+
+function excelDateToISO(value) {
+  if (value instanceof Date) return value.toISOString().slice(0,10);
+  if (typeof value === "number") {
+    const d = XLSX.SSF.parse_date_code(value);
+    if (d) return `${d.y}-${String(d.m).padStart(2,"0")}-${String(d.d).padStart(2,"0")}`;
+  }
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const m = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (m) return `${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0,10);
+}
+
+function normalizeKey(k) {
+  return String(k || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function rowValue(row, aliases) {
+  const map = Object.fromEntries(Object.entries(row).map(([k,v]) => [normalizeKey(k), v]));
+  for (const a of aliases) if (map[normalizeKey(a)] !== undefined) return map[normalizeKey(a)];
+  return "";
+}
+
+export async function attendanceImport(req, res) {
+  if (!req.file) return res.status(400).json({ success:false, message:"Excel file is required." });
+  try {
+    const workbook = XLSX.read(req.file.buffer, { type:"buffer", cellDates:true });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval:"" });
+    const employees = await Employee.find().lean();
+    const byCode = new Map(employees.map(e => [String(e.employeeCode || "").toLowerCase(), e]));
+    const byName = new Map(employees.map(e => [String(e.name || "").toLowerCase(), e]));
+    let imported = 0, skipped = 0;
+    const errors = [];
+    for (let i=0; i<rows.length; i++) {
+      const r = rows[i];
+      const code = String(rowValue(r,["Employee Code","EmployeeCode","Code","Emp Code","EmpCode"])).trim().toLowerCase();
+      const name = String(rowValue(r,["Employee Name","Name","Staff Name"])).trim().toLowerCase();
+      const employee = (code && byCode.get(code)) || (name && byName.get(name));
+      const date = excelDateToISO(rowValue(r,["Date","Attendance Date","Work Date"]));
+      if (!employee || !date) { skipped++; errors.push(`Row ${i+2}: employee code/name or date not found.`); continue; }
+      const statusRaw = String(rowValue(r,["Status","Attendance","Present/Absent"])).trim().toLowerCase();
+      const status = statusRaw.includes("absent") || statusRaw === "a" ? "Absent" : statusRaw.includes("half") || statusRaw === "hd" ? "Half Day" : statusRaw.includes("leave") || statusRaw === "l" ? "Leave" : statusRaw.includes("holiday") ? "Holiday" : statusRaw.includes("week") ? "Week Off" : "Present";
+      const workLocation = String(rowValue(r,["Work Location","Location"]) || employee.workLocation || employee.location || "").trim();
+      const shiftName = String(rowValue(r,["Shift","Shift Name"]) || "").trim();
+      let shift = shiftName ? await Shift.findOne({name:shiftName}) : null;
+      if (!shift && employee.shiftId) shift = await Shift.findById(employee.shiftId);
+      const data = {
+        employeeId: employee._id, date: new Date(`${date}T00:00:00.000Z`), status,
+        checkIn: String(rowValue(r,["Check In","CheckIn","In Time","Punch In"]) || "").trim(),
+        checkOut: String(rowValue(r,["Check Out","CheckOut","Out Time","Punch Out"]) || "").trim(),
+        overtimeHours: n(rowValue(r,["OT","OT Hours","Overtime","Overtime Hours"])),
+        note: String(rowValue(r,["Note","Remarks"]) || "").trim(), workLocation,
+        shiftId: shift?._id || null, shiftName: shift?.name || shiftName
+      };
+      await Attendance.findOneAndUpdate({employeeId:employee._id,date:data.date},data,{upsert:true,new:true,runValidators:true});
+      imported++;
+    }
+    res.json({success:true, imported, skipped, errors:errors.slice(0,50)});
+  } catch (error) { res.status(400).json({success:false,message:error.message || "Excel import failed."}); }
 }
 
 export async function saveAttendance(req, res) {
-  const data = {
-    ...req.body,
-    date: new Date(req.body.date),
-    overtimeHours: n(req.body.overtimeHours)
-  };
-  const row = await Attendance.findOneAndUpdate(
-    { employeeId: req.body.employeeId, date: data.date },
-    data,
-    { upsert: true, new: true, runValidators: true }
-  );
-  res.json({ success: true, attendance: row });
+  const data = { ...req.body, date: new Date(`${req.body.date}T00:00:00.000Z`), overtimeHours:n(req.body.overtimeHours) };
+  const employee = await Employee.findById(req.body.employeeId).lean();
+  if (!employee) return res.status(404).json({success:false,message:"Employee not found."});
+  data.workLocation = employee.workLocation || employee.location || req.body.workLocation || req.body.location || "";
+  if (req.body.shiftId) {
+    const shift = await Shift.findById(req.body.shiftId).lean();
+    if (shift) { data.shiftName = shift.name; }
+  }
+  const row = await Attendance.findOneAndUpdate({employeeId:req.body.employeeId,date:data.date},data,{upsert:true,new:true,runValidators:true});
+  res.json({success:true,attendance:row});
+}
+
+export async function shifts(req,res){
+  res.json({success:true,shifts:await Shift.find({status:"Active"}).sort({name:1})});
+}
+
+export async function createShift(req,res){
+  const shift=await Shift.create(req.body); res.status(201).json({success:true,shift});
+}
+
+export async function updateShift(req,res){
+  const shift=await Shift.findByIdAndUpdate(req.params.id,req.body,{new:true,runValidators:true});
+  if(!shift) return res.status(404).json({success:false,message:"Shift not found."});
+  res.json({success:true,shift});
+}
+
+export async function attendanceSettings(req,res){
+  let settings=await AttendanceSetting.findOne({key:"default"}).lean();
+  if(!settings) settings=await AttendanceSetting.create({key:"default"});
+  res.json({success:true,settings,shifts:await Shift.find({status:"Active"}).sort({name:1})});
+}
+
+export async function saveAttendanceSettings(req,res){
+  const data={...req.body,key:"default"};
+  const settings=await AttendanceSetting.findOneAndUpdate({key:"default"},data,{upsert:true,new:true,runValidators:true});
+  res.json({success:true,settings});
 }
 
 export async function leaves(req, res) {
