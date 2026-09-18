@@ -1,772 +1,118 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { hrApi } from "../lib/hrApi.js";
 
-const staffData = [
-  {
-    id: 1,
-    name: "ABHISEK DAS",
-    code: "HANS017",
-    status: "P",
-    inTime: "9:41 AM",
-    outTime: "NA",
-    hours: "NA",
-    note: "",
-  },
-  {
-    id: 2,
-    name: "Bishnu Sarkar",
-    code: "HANS009",
-    status: "P",
-    inTime: "11:24 AM",
-    outTime: "NA",
-    hours: "NA",
-    note: "",
-  },
-  {
-    id: 3,
-    name: "Bishwajit Kumar Shaw",
-    code: "HANS015",
-    status: "P",
-    inTime: "10:01 AM",
-    outTime: "NA",
-    hours: "NA",
-    note: "",
-  },
-  {
-    id: 4,
-    name: "Rahul Das",
-    code: "HANS021",
-    status: "A",
-    inTime: "",
-    outTime: "",
-    hours: "0h 0m",
-    note: "",
-  },
-  {
-    id: 5,
-    name: "Suman Roy",
-    code: "HANS024",
-    status: "HD",
-    inTime: "9:30 AM",
-    outTime: "1:30 PM",
-    hours: "4h 0m",
-    note: "",
-  },
-];
+const dayNames = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
 
-const statusInfo = {
-  P: {
-    label: "Present",
-    className: "present",
-  },
-  A: {
-    label: "Absent",
-    className: "absent",
-  },
-  HD: {
-    label: "Half Day",
-    className: "halfday",
-  },
-  L: {
-    label: "Leave",
-    className: "leave",
-  },
-};
+function monthRange(value) {
+  const [y,m] = value.split("-").map(Number);
+  return { from:`${value}-01`, to:`${y}-${String(m+1).padStart(2,"0")}-01` };
+}
 
-export default function Attendance() {
-  const [selectedDate, setSelectedDate] = useState("2026-09-18");
-  const [search, setSearch] = useState("");
-  const [location, setLocation] = useState("All Locations");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [notes, setNotes] = useState({});
-  const [showNoteFor, setShowNoteFor] = useState(null);
+function minutes(t){
+  if(!t) return null;
+  const m=String(t).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i); if(!m) return null;
+  let h=Number(m[1]), min=Number(m[2]); const ap=m[3]?.toUpperCase();
+  if(ap==="PM"&&h<12)h+=12; if(ap==="AM"&&h===12)h=0; return h*60+min;
+}
+function hoursWorked(a){
+  const i=minutes(a.checkIn),o=minutes(a.checkOut); if(i===null||o===null||o<i)return "--";
+  const total=o-i, h=Math.floor(total/60), m=total%60; return `${h}h ${m}m`;
+}
+function fmtDate(d){ return new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}); }
 
-  const summary = useMemo(() => {
+export default function Attendance(){
+  const today=new Date().toISOString().slice(0,10), month=today.slice(0,7);
+  const [selectedDate,setSelectedDate]=useState(today),[selectedMonth,setSelectedMonth]=useState(month);
+  const [employees,setEmployees]=useState([]),[rows,setRows]=useState([]),[shifts,setShifts]=useState([]);
+  const [settings,setSettings]=useState(null),[search,setSearch]=useState(""),[location,setLocation]=useState("All Locations"),[status,setStatus]=useState("All"),[error,setError]=useState(""),[message,setMessage]=useState("");
+  const [view,setView]=useState("month"),[showSettings,setShowSettings]=useState(false),[showShift,setShowShift]=useState(false);
+  const [shiftForm,setShiftForm]=useState({name:"",startTime:"09:00",endTime:"18:00",breakMinutes:60,graceMinutes:10,overtimeAfterMinutes:0});
+  const fileRef=useRef(null);
+
+  async function load(){
+    try{
+      setError("");
+      const range=view==="day"?{from:selectedDate,to:new Date(new Date(selectedDate).getTime()+86400000).toISOString().slice(0,10)}:monthRange(selectedMonth);
+      const [e,a,s]=await Promise.all([hrApi.employees(),hrApi.attendance(`?from=${range.from}&to=${range.to}`),hrApi.attendanceSettings()]);
+      setEmployees(e.employees||[]);setRows(a.attendance||[]);setSettings(s.settings);setShifts(s.shifts||[]);
+    }catch(e){setError(e.message)}
+  }
+  useEffect(()=>{load()},[selectedDate,selectedMonth,view]);
+
+  const locations=useMemo(()=>["All Locations",...new Set(employees.map(e=>e.workLocation||e.location).filter(Boolean))],[employees]);
+  const filtered=useMemo(()=>rows.filter(r=>{
+    const emp=r.employeeId||{}; const q=search.toLowerCase();
+    return (!q||`${emp.name} ${emp.employeeCode}`.toLowerCase().includes(q)) && (location==="All Locations"||(r.workLocation||emp.workLocation||emp.location)===location) && (status==="All"||r.status===status);
+  }),[rows,search,location,status]);
+
+  const summary=useMemo(()=>{
+    const dayRows=rows.filter(r=>new Date(r.date).toISOString().slice(0,10)===selectedDate);
     return {
-      totalStaff: 42,
-      present: 1,
-      absent: 6,
-      halfDay: 0,
-      overtime: "0h 16m",
-      fine: "0h 0m",
-      leave: 0,
-      punchedIn: 23,
-      punchedOut: 1,
-      pending: 4,
+      totalStaff: location==="All Locations"?employees.length:employees.filter(e=>(e.workLocation||e.location)===location).length,
+      present:dayRows.filter(x=>x.status==="Present").length,
+      absent:dayRows.filter(x=>x.status==="Absent").length,
+      halfDay:dayRows.filter(x=>x.status==="Half Day").length,
+      leave:dayRows.filter(x=>x.status==="Leave").length,
+      overtime:dayRows.reduce((n,x)=>n+Number(x.overtimeHours||0),0),
+      punchedIn:dayRows.filter(x=>x.checkIn).length,
+      punchedOut:dayRows.filter(x=>x.checkOut).length,
+      fine:dayRows.reduce((n,x)=>n+Number(x.fineHours||0),0),
     };
-  }, []);
-
-  const filteredStaff = staffData.filter((staff) => {
-    const searchMatch =
-      staff.name.toLowerCase().includes(search.toLowerCase()) ||
-      staff.code.toLowerCase().includes(search.toLowerCase());
-
-    const statusMatch =
-      statusFilter === "All" ||
-      (statusFilter === "Present" && staff.status === "P") ||
-      (statusFilter === "Absent" && staff.status === "A") ||
-      (statusFilter === "Half Day" && staff.status === "HD") ||
-      (statusFilter === "Leave" && staff.status === "L");
-
-    return searchMatch && statusMatch;
-  });
-
-  const saveNote = (id) => {
-    setShowNoteFor(null);
-  };
-
-  return (
-    <div className="attendance-page">
-      <style>{`
-        * {
-          box-sizing: border-box;
-        }
-
-        .attendance-page {
-          min-height: 100vh;
-          background: #f5f7fb;
-          padding: 24px;
-          font-family: Arial, Helvetica, sans-serif;
-          color: #172033;
-        }
-
-        .attendance-container {
-          max-width: 1400px;
-          margin: 0 auto;
-        }
-
-        .top-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 20px;
-          margin-bottom: 22px;
-          flex-wrap: wrap;
-        }
-
-        .page-title {
-          margin: 0;
-          font-size: 26px;
-          font-weight: 700;
-        }
-
-        .page-subtitle {
-          margin-top: 5px;
-          color: #697386;
-          font-size: 14px;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-        }
-
-        .date-box,
-        .select-box,
-        .search-box {
-          height: 42px;
-          border: 1px solid #d8dee9;
-          background: #fff;
-          border-radius: 8px;
-          padding: 0 12px;
-          outline: none;
-        }
-
-        .date-box:focus,
-        .select-box:focus,
-        .search-box:focus {
-          border-color: #2563eb;
-        }
-
-        .summary-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 14px;
-          margin-bottom: 18px;
-        }
-
-        .summary-card {
-          background: #fff;
-          border: 1px solid #e3e7ef;
-          border-radius: 12px;
-          padding: 18px;
-          min-height: 105px;
-        }
-
-        .summary-label {
-          color: #697386;
-          font-size: 13px;
-          margin-bottom: 9px;
-        }
-
-        .summary-value {
-          font-size: 27px;
-          font-weight: 700;
-        }
-
-        .summary-small {
-          font-size: 13px;
-          color: #7a8496;
-          margin-top: 5px;
-        }
-
-        .pending-box {
-          background: #fff7ed;
-          border: 1px solid #fed7aa;
-          border-radius: 12px;
-          padding: 16px 18px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-
-        .pending-title {
-          font-weight: 700;
-          color: #9a3412;
-        }
-
-        .pending-text {
-          font-size: 14px;
-          color: #7c2d12;
-        }
-
-        .primary-btn,
-        .secondary-btn,
-        .danger-btn {
-          border: none;
-          border-radius: 8px;
-          padding: 10px 15px;
-          cursor: pointer;
-          font-weight: 600;
-        }
-
-        .primary-btn {
-          background: #2563eb;
-          color: white;
-        }
-
-        .secondary-btn {
-          background: white;
-          border: 1px solid #d8dee9;
-          color: #344054;
-        }
-
-        .danger-btn {
-          background: #dc2626;
-          color: white;
-        }
-
-        .quick-actions {
-          display: grid;
-          grid-template-columns: repeat(6, 1fr);
-          gap: 12px;
-          margin-bottom: 22px;
-        }
-
-        .action-card {
-          background: #fff;
-          border: 1px solid #e3e7ef;
-          border-radius: 10px;
-          padding: 15px;
-          text-align: center;
-          cursor: pointer;
-          font-weight: 600;
-          color: #344054;
-          transition: 0.15s;
-        }
-
-        .action-card:hover {
-          border-color: #2563eb;
-          color: #2563eb;
-        }
-
-        .action-icon {
-          font-size: 21px;
-          margin-bottom: 7px;
-        }
-
-        .attendance-panel {
-          background: #fff;
-          border: 1px solid #e3e7ef;
-          border-radius: 12px;
-          overflow: hidden;
-        }
-
-        .panel-header {
-          padding: 18px;
-          border-bottom: 1px solid #e7ebf1;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 15px;
-          flex-wrap: wrap;
-        }
-
-        .panel-title {
-          font-size: 19px;
-          font-weight: 700;
-        }
-
-        .panel-controls {
-          display: flex;
-          gap: 9px;
-          flex-wrap: wrap;
-        }
-
-        .search-box {
-          width: 230px;
-        }
-
-        .staff-list {
-          width: 100%;
-        }
-
-        .staff-row {
-          padding: 18px;
-          border-bottom: 1px solid #edf0f4;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 18px;
-        }
-
-        .staff-row:last-child {
-          border-bottom: none;
-        }
-
-        .staff-info {
-          min-width: 230px;
-        }
-
-        .staff-name {
-          font-size: 15px;
-          font-weight: 700;
-          margin-bottom: 5px;
-        }
-
-        .staff-code {
-          font-size: 12px;
-          color: #7a8496;
-        }
-
-        .attendance-details {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          flex: 1;
-        }
-
-        .hours {
-          font-size: 13px;
-          color: #697386;
-          min-width: 55px;
-        }
-
-        .time-info {
-          font-size: 13px;
-          color: #475467;
-        }
-
-        .status {
-          min-width: 105px;
-          padding: 7px 10px;
-          border-radius: 7px;
-          text-align: center;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .status.present {
-          background: #dcfce7;
-          color: #166534;
-        }
-
-        .status.absent {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-
-        .status.halfday {
-          background: #fef3c7;
-          color: #92400e;
-        }
-
-        .status.leave {
-          background: #e0e7ff;
-          color: #3730a3;
-        }
-
-        .note-area {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          min-width: 190px;
-        }
-
-        .note-input {
-          width: 170px;
-          height: 36px;
-          border: 1px solid #d8dee9;
-          border-radius: 7px;
-          padding: 0 9px;
-        }
-
-        .legend {
-          padding: 15px 18px;
-          background: #fafbfc;
-          border-top: 1px solid #e7ebf1;
-          display: flex;
-          gap: 18px;
-          flex-wrap: wrap;
-          font-size: 12px;
-          color: #667085;
-        }
-
-        .legend-item strong {
-          color: #344054;
-        }
-
-        @media (max-width: 1100px) {
-          .summary-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-
-          .quick-actions {
-            grid-template-columns: repeat(3, 1fr);
-          }
-
-          .staff-row {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-
-          .attendance-details {
-            width: 100%;
-            flex-wrap: wrap;
-          }
-        }
-
-        @media (max-width: 650px) {
-          .attendance-page {
-            padding: 12px;
-          }
-
-          .summary-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .quick-actions {
-            grid-template-columns: repeat(2, 1fr);
-          }
-
-          .search-box {
-            width: 100%;
-          }
-
-          .panel-controls {
-            width: 100%;
-          }
-        }
-      `}</style>
-
-      <div className="attendance-container">
-
-        <div className="top-header">
-          <div>
-            <h1 className="page-title">Attendance Summary</h1>
-            <div className="page-subtitle">
-              Daily staff attendance management
-            </div>
-          </div>
-
-          <div className="header-actions">
-            <select
-              className="select-box"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            >
-              <option>All Locations</option>
-              <option>Kolkata Office</option>
-              <option>Howrah Office</option>
-              <option>Warehouse</option>
-            </select>
-
-            <input
-              className="date-box"
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
-
-            <button className="secondary-btn">
-              ⚙ Settings
-            </button>
-          </div>
-        </div>
-
-        <div className="pending-box">
-          <div>
-            <div className="pending-title">
-              Total Pending for Approval : {summary.pending}
-            </div>
-            <div className="pending-text">
-              Attendance records waiting for review
-            </div>
-          </div>
-
-          <button className="primary-btn">
-            Review
-          </button>
-        </div>
-
-        <div className="summary-grid">
-
-          <SummaryCard
-            title="Total Staff"
-            value={summary.totalStaff}
-          />
-
-          <SummaryCard
-            title="Present"
-            value={summary.present}
-          />
-
-          <SummaryCard
-            title="Absent"
-            value={summary.absent}
-          />
-
-          <SummaryCard
-            title="Half Day"
-            value={summary.halfDay}
-          />
-
-          <SummaryCard
-            title="Overtime Hours"
-            value={summary.overtime}
-          />
-
-          <SummaryCard
-            title="Fine Hours"
-            value={summary.fine}
-          />
-
-          <SummaryCard
-            title="Leave"
-            value={summary.leave}
-          />
-
-          <SummaryCard
-            title="Punched In"
-            value={summary.punchedIn}
-          />
-
-          <SummaryCard
-            title="Punched Out"
-            value={summary.punchedOut}
-          />
-
-        </div>
-
-        <div className="quick-actions">
-
-          <div className="action-card">
-            <div className="action-icon">➕</div>
-            Bulk Add Attendance
-          </div>
-
-          <div className="action-card">
-            <div className="action-icon">📅</div>
-            Leaves
-          </div>
-
-          <div className="action-card">
-            <div className="action-icon">🚗</div>
-            On Duty
-          </div>
-
-          <div className="action-card">
-            <div className="action-icon">📝</div>
-            Bulk Add Work
-          </div>
-
-          <div className="action-card">
-            <div className="action-icon">⚠️</div>
-            Fine
-          </div>
-
-          <div className="action-card">
-            <div className="action-icon">⏱️</div>
-            Overtime
-          </div>
-
-        </div>
-
-        <div className="attendance-panel">
-
-          <div className="panel-header">
-
-            <div className="panel-title">
-              Staff Attendance
-            </div>
-
-            <div className="panel-controls">
-
-              <input
-                className="search-box"
-                placeholder="Search employee..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-
-              <select
-                className="select-box"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option>All</option>
-                <option>Present</option>
-                <option>Absent</option>
-                <option>Half Day</option>
-                <option>Leave</option>
-              </select>
-
-            </div>
-
-          </div>
-
-          <div className="staff-list">
-
-            {filteredStaff.map((staff) => {
-
-              const status = statusInfo[staff.status] || {
-                label: staff.status,
-                className: "",
-              };
-
-              return (
-                <div className="staff-row" key={staff.id}>
-
-                  <div className="staff-info">
-                    <div className="staff-name">
-                      {staff.name}
-                    </div>
-
-                    <div className="staff-code">
-                      {staff.code}
-                    </div>
-                  </div>
-
-                  <div className="attendance-details">
-
-                    <div className="hours">
-                      Hrs
-                      <br />
-                      <strong>{staff.hours}</strong>
-                    </div>
-
-                    <div className={`status ${status.className}`}>
-                      {staff.status} | {status.label}
-                    </div>
-
-                    <div className="time-info">
-                      {staff.inTime ? (
-                        <>
-                          {staff.inTime} - {staff.outTime}
-                        </>
-                      ) : (
-                        "No Punch"
-                      )}
-                    </div>
-
-                    <div className="note-area">
-
-                      {showNoteFor === staff.id ? (
-                        <>
-                          <input
-                            className="note-input"
-                            placeholder="Add Note"
-                            value={notes[staff.id] || ""}
-                            onChange={(e) =>
-                              setNotes({
-                                ...notes,
-                                [staff.id]: e.target.value,
-                              })
-                            }
-                          />
-
-                          <button
-                            className="primary-btn"
-                            onClick={() => saveNote(staff.id)}
-                          >
-                            Save
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="secondary-btn"
-                          onClick={() => setShowNoteFor(staff.id)}
-                        >
-                          Add Note
-                        </button>
-                      )}
-
-                    </div>
-
-                  </div>
-
-                </div>
-              );
-            })}
-
-          </div>
-
-          <div className="legend">
-            <div className="legend-item">
-              <strong>P</strong> = Present
-            </div>
-
-            <div className="legend-item">
-              <strong>HD</strong> = Half Day
-            </div>
-
-            <div className="legend-item">
-              <strong>A</strong> = Absent
-            </div>
-
-            <div className="legend-item">
-              <strong>F</strong> = Fine
-            </div>
-
-            <div className="legend-item">
-              <strong>OT</strong> = Overtime
-            </div>
-
-            <div className="legend-item">
-              <strong>L</strong> = Leave
-            </div>
-          </div>
-
-        </div>
-
-      </div>
-    </div>
-  );
+  },[rows,employees,selectedDate,location]);
+
+  async function upload(e){
+    const file=e.target.files?.[0]; if(!file)return;
+    try{setError("");setMessage("Uploading Excel...");const r=await hrApi.uploadAttendance(file);setMessage(`Imported ${r.imported} records. Skipped ${r.skipped}.`);setView("month");await load();}catch(err){setError(err.message)}finally{e.target.value="";}
+  }
+  async function saveRules(){
+    try{await hrApi.saveAttendanceSettings(settings);setMessage("Attendance rules saved.");setShowSettings(false);await load();}catch(e){setError(e.message)}
+  }
+  async function createShift(){
+    try{await hrApi.createShift({...shiftForm,breakMinutes:Number(shiftForm.breakMinutes),graceMinutes:Number(shiftForm.graceMinutes),overtimeAfterMinutes:Number(shiftForm.overtimeAfterMinutes)});setShowShift(false);setMessage("Shift created.");await load();}catch(e){setError(e.message)}
+  }
+
+  const ruleFor=(key)=>settings?.days?.[key]||{type:"Working",shiftId:null,overtimeAllowed:true};
+  const setDayRule=(key,field,value)=>setSettings(s=>({...s,days:{...s.days,[key]:{...ruleFor(key),[field]:value}}}));
+  const saturday=settings?.saturday||{type:"Working",shiftId:null,overtimeAllowed:true};
+
+  return <main style={S.page}><div style={S.container}>
+    <header style={S.header}><div><h1 style={S.h1}>Attendance Summary</h1><p style={S.sub}>Actual attendance, punch time, shifts and monthly Excel records</p></div><div style={S.headerActions}>
+      <select style={S.input} value={location} onChange={e=>setLocation(e.target.value)}>{locations.map(x=><option key={x}>{x}</option>)}</select>
+      <input type="date" style={S.input} value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}/>
+      <button style={S.btn2} onClick={()=>setShowSettings(v=>!v)}>⚙ Settings</button>
+    </div></header>
+
+    {error&&<div style={S.error}>{error}</div>}{message&&<div style={S.success}>{message}</div>}
+
+    <section style={S.cards}>{[
+      ["Total Staff",summary.totalStaff], ["Present",summary.present], ["Absent",summary.absent], ["Half Day",summary.halfDay],
+      ["Overtime Hours",`${summary.overtime}h`],["Fine Hours",`${summary.fine}h`],["Leave",summary.leave],["Punched In",summary.punchedIn],["Punched Out",summary.punchedOut]
+    ].map(([a,b])=><div style={S.card} key={a}><div style={S.label}>{a}</div><div style={S.value}>{b}</div></div>)}</section>
+
+    <section style={S.pending}><div><b>Total Pending for Approval : 0</b><div style={S.small}>Calculated from actual attendance records</div></div><button style={S.btn} onClick={()=>alert("Approval workflow can be connected to HR approval API.")}>Review</button></section>
+
+    <section style={S.actions}>{[
+      ["📥","Bulk Add Attendance",()=>fileRef.current?.click()], ["📅","Leaves",()=>window.location.hash="/leaves"], ["🚗","On Duty",()=>alert("On Duty module")], ["📝","Bulk Add Work",()=>fileRef.current?.click()], ["⚠️","Fine",()=>alert("Fine review")], ["⏱️","Overtime",()=>alert("Overtime review")]
+    ].map(([i,t,fn])=><button key={t} style={S.action} onClick={fn}><span>{i}</span>{t}</button>)}</section>
+    <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={upload} style={{display:"none"}}/>
+
+    <section style={S.panel}><div style={S.panelHead}><div><b style={{fontSize:19}}>Staff Attendance</b><div style={S.small}>{view==="month"?`Monthly data: ${selectedMonth}`:`Daily data: ${fmtDate(selectedDate)}`}</div></div><div style={S.controls}>
+      <button style={view==="day"?S.btn:S.btn2} onClick={()=>setView("day")}>Daily</button><button style={view==="month"?S.btn:S.btn2} onClick={()=>setView("month")}>Monthly</button>
+      {view==="month"&&<input type="month" style={S.input} value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)}/>}<input style={S.search} placeholder="Search employee..." value={search} onChange={e=>setSearch(e.target.value)}/>
+      <select style={S.input} value={status} onChange={e=>setStatus(e.target.value)}>{["All","Present","Absent","Half Day","Leave","Holiday","Week Off"].map(x=><option key={x}>{x}</option>)}</select>
+    </div></div>
+
+    <div style={S.tableHead}><span>Employee</span><span>Work Location</span><span>Date</span><span>Shift</span><span>Status</span><span>In</span><span>Out</span><span>Hours</span><span>OT</span></div>
+    {filtered.length===0?<div style={S.empty}>No attendance data found. Upload the Excel or add attendance.</div>:filtered.map(a=>{const emp=a.employeeId||{};return <div style={S.row} key={a._id}><div><b>{emp.name||"Unknown"}</b><div style={S.small}>{emp.employeeCode}</div></div><span>{a.workLocation||emp.workLocation||emp.location||"-"}</span><span>{fmtDate(a.date)}</span><span>{a.shiftName||"-"}</span><span style={{...S.badge,...statusStyle(a.status)}}>{shortStatus(a.status)}</span><span>{a.checkIn||"-"}</span><span>{a.checkOut||"-"}</span><span>{hoursWorked(a)}</span><span>{a.overtimeHours||0}h</span></div>})}
+    <div style={S.legend}><b>P</b> Present <b>HD</b> Half Day <b>A</b> Absent <b>L</b> Leave <b>F</b> Fine <b>OT</b> Overtime</div></section>
+
+    {showSettings&&<section style={S.panel}><div style={S.panelHead}><b style={{fontSize:19}}>Attendance Rules</b><div><button style={S.btn2} onClick={()=>setShowShift(v=>!v)}>+ Add Shift</button> <button style={S.btn} onClick={saveRules}>Save Rules</button></div></div>
+      <div style={S.ruleGrid}>{["monday","tuesday","wednesday","thursday","friday","saturday","sunday"].map(day=>{const r=day==="saturday"?saturday:ruleFor(day);return <div style={S.ruleCard} key={day}><b>{day.toUpperCase()}</b><select style={S.input} value={r.type} onChange={e=>day==="saturday"?setSettings(s=>({...s,saturday:{...saturday,type:e.target.value}})):setDayRule(day,"type",e.target.value)}><option>Working</option><option>Half Day</option><option>Week Off</option></select><select style={S.input} value={r.shiftId||""} onChange={e=>day==="saturday"?setSettings(s=>({...s,saturday:{...saturday,shiftId:e.target.value||null}})):setDayRule(day,"shiftId",e.target.value||null)}><option value="">Default Shift</option>{shifts.map(x=><option value={x._id} key={x._id}>{x.name} ({x.startTime}-{x.endTime})</option>)}</select><label><input type="checkbox" checked={r.overtimeAllowed!==false} onChange={e=>day==="saturday"?setSettings(s=>({...s,saturday:{...saturday,overtimeAllowed:e.target.checked}})):setDayRule(day,"overtimeAllowed",e.target.checked)}/> Overtime allowed</label></div>})}</div>
+      {showShift&&<div style={S.shiftBox}>{["name","startTime","endTime","breakMinutes","graceMinutes","overtimeAfterMinutes"].map(k=><input key={k} style={S.input} placeholder={k} value={shiftForm[k]} onChange={e=>setShiftForm({...shiftForm,[k]:e.target.value})}/>)}<button style={S.btn} onClick={createShift}>Save Shift</button></div>}
+    </section>}
+  </div></main>
 }
 
-function SummaryCard({ title, value }) {
-  return (
-    <div className="summary-card">
-      <div className="summary-label">
-        {title}
-      </div>
-
-      <div className="summary-value">
-        {value}
-      </div>
-    </div>
-  );
-}
+function shortStatus(x){return x==="Present"?"P":x==="Half Day"?"HD":x==="Absent"?"A":x==="Leave"?"L":x==="Holiday"?"H":"WO"}
+function statusStyle(x){if(x==="Present")return{background:"#dcfce7",color:"#166534"};if(x==="Absent")return{background:"#fee2e2",color:"#991b1b"};if(x==="Half Day")return{background:"#fef3c7",color:"#92400e"};if(x==="Leave")return{background:"#e0e7ff",color:"#3730a3"};return{background:"#eef2f7",color:"#475467"}}
+const S={page:{padding:24,background:"#f5f7fb",minHeight:"100vh",fontFamily:"Arial, sans-serif",color:"#172033"},container:{maxWidth:1500,margin:"0 auto"},header:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,flexWrap:"wrap",marginBottom:18},headerActions:{display:"flex",gap:8,flexWrap:"wrap"},h1:{margin:0,fontSize:27},sub:{margin:"5px 0",color:"#667085"},cards:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12},card:{background:"#fff",border:"1px solid #e3e7ef",borderRadius:12,padding:16},label:{fontSize:13,color:"#667085"},value:{fontSize:26,fontWeight:700,marginTop:7},pending:{margin:"16px 0",padding:16,background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12},actions:{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:18},action:{background:"#fff",border:"1px solid #e3e7ef",borderRadius:10,padding:15,cursor:"pointer",fontWeight:700},actionIcon:{fontSize:20},panel:{background:"#fff",border:"1px solid #e3e7ef",borderRadius:12,overflow:"hidden",marginBottom:18},panelHead:{padding:16,borderBottom:"1px solid #e7ebf1",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"},controls:{display:"flex",gap:7,flexWrap:"wrap"},input:{height:40,border:"1px solid #d8dee9",borderRadius:8,padding:"0 10px",background:"#fff"},search:{height:40,width:220,border:"1px solid #d8dee9",borderRadius:8,padding:"0 10px"},btn:{height:40,border:0,borderRadius:8,padding:"0 14px",background:"#2563eb",color:"#fff",fontWeight:700,cursor:"pointer"},btn2:{height:40,border:"1px solid #d8dee9",borderRadius:8,padding:"0 14px",background:"#fff",fontWeight:700,cursor:"pointer"},tableHead:{display:"grid",gridTemplateColumns:"1.5fr 1.2fr .9fr 1fr .7fr .7fr .7fr .7fr .5fr",gap:8,padding:"11px 16px",background:"#f8fafc",fontSize:12,fontWeight:700,color:"#667085"},row:{display:"grid",gridTemplateColumns:"1.5fr 1.2fr .9fr 1fr .7fr .7fr .7fr .7fr .5fr",gap:8,padding:"13px 16px",borderTop:"1px solid #edf0f4",alignItems:"center",fontSize:13},badge:{display:"inline-flex",justifyContent:"center",padding:"5px 8px",borderRadius:7,fontWeight:700,fontSize:12},legend:{padding:13,display:"flex",gap:14,flexWrap:"wrap",borderTop:"1px solid #edf0f4",fontSize:12,color:"#667085"},small:{fontSize:12,color:"#667085",marginTop:3},empty:{padding:40,textAlign:"center",color:"#667085"},error:{padding:12,background:"#fee4e2",color:"#b42318",borderRadius:8,marginBottom:10},success:{padding:12,background:"#dcfce7",color:"#166534",borderRadius:8,marginBottom:10},ruleGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12,padding:16},ruleCard:{border:"1px solid #e3e7ef",borderRadius:10,padding:12,display:"flex",flexDirection:"column",gap:7},shiftBox:{padding:16,borderTop:"1px solid #e7ebf1",display:"flex",gap:8,flexWrap:"wrap"}}
