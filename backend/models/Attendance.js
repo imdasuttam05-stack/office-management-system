@@ -14,6 +14,13 @@ const schema = new mongoose.Schema({
   shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift", default: null },
   shiftName: { type: String, trim: true },
   overtimeHours: { type: Number, default: 0, min: 0 },
+  overtimeApproved: { type: Boolean, default: false },
+  overtimeApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  overtimeApprovedAt: { type: Date, default: null },
+  cuttingMinutes: { type: Number, default: 0, min: 0 },
+  cuttingApproved: { type: Boolean, default: false },
+  cuttingApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  cuttingApprovedAt: { type: Date, default: null },
   note: String
 }, { timestamps: true });
 
