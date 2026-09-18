@@ -3,7 +3,7 @@ import { hrApi } from "../lib/hrApi.js";
 
 const initialForm = {
   employeeCode: "", companyName: "", state: "", pinCode: "", name: "", fatherName: "", email: "", mobile: "",
-  dateOfBirth: "", gender: "", address: "", department: "", designation: "", location: "",
+  dateOfBirth: "", gender: "", address: "", department: "", designation: "", workLocation: "",
   employeeType: "Permanent", joiningDate: new Date().toISOString().slice(0, 10),
   grossSalary: "", basicSalary: "", hra: "", da: "", conveyance: "", otherAllowance: "",
   professionalTax: "", otherDeduction: "", pfApplicable: true, pfNumber: "", pfRate: "",
@@ -37,10 +37,12 @@ function professionalTax(state, gross) {
 }
 
 export default function Employees() {
-  const [rows, setRows] = useState([]), [form, setForm] = useState(initialForm), [options, setOptions] = useState({ companies: [], departmentOptions: [], designationOptions: [], employeeTypeOptions: [], settings: {} });
+  const [rows, setRows] = useState([]), [form, setForm] = useState(initialForm), [options, setOptions] = useState({ companies: [], departmentOptions: [], designationOptions: [], employeeTypeOptions: [], states: [], settings: {} });
   const [rates, setRates] = useState({ basicPercent: 60, hraPercent: 20, daPercent: 10, conveyancePercent: 5, otherAllowancePercent: 0, gratuityPercent: 4.81, pfPercent: 12, esiPercent: 0.75, employerPfPercent: 12, employerEsiPercent: 3.25, hraBase: "gross", daBase: "gross", conveyanceBase: "gross", otherAllowanceBase: "gross", gratuityBase: "basic", pfBase: "gross", pfCeilingEnabled: true, pfWageCeiling: 15000, esiBase: "gross", esiCeilingEnabled: true, esiWageCeiling: 21000 });
   const [newCompany, setNewCompany] = useState(""); const [editingId, setEditingId] = useState(null), [showCompany, setShowCompany] = useState(false);
   const [error, setError] = useState(""), [message, setMessage] = useState(""), [saving, setSaving] = useState(false), [savingRates, setSavingRates] = useState(false);
+  const [stateRuleState, setStateRuleState] = useState("");
+  const [stateRuleDraft, setStateRuleDraft] = useState({});
 
   async function load() {
     try { setError(""); const [e, o] = await Promise.all([hrApi.employees(), hrApi.options()]); setRows(e.employees || []); setOptions(o); setRates(o.settings || rates); }
@@ -49,37 +51,61 @@ export default function Employees() {
   useEffect(() => { load(); }, []);
 
   const gross = Number(form.grossSalary || 0);
+  const calcRates = useMemo(() => {
+    const override = form.state && options.settings?.stateRules?.[form.state];
+    return override ? { ...rates, ...override } : rates;
+  }, [rates, options.settings?.stateRules, form.state]);
   const calculated = useMemo(() => {
-    const basic = +(gross * Number(rates.basicPercent || 0) / 100).toFixed(2);
+    const basic = +(gross * Number(calcRates.basicPercent || 0) / 100).toFixed(2);
+    let da = 0;
     const baseAmount = (base) => base === "basic" ? basic : base === "basicDa" ? basic + da : gross;
-    const daBase = rates.daBase === "basic" ? basic : gross;
-    const da = +(daBase * Number(rates.daPercent || 0) / 100).toFixed(2);
+    const daBase = calcRates.daBase === "basic" ? basic : calcRates.daBase === "basicDa" ? basic : gross;
+    da = +(daBase * Number(calcRates.daPercent || 0) / 100).toFixed(2);
     const calcBase = (base) => base === "basic" ? basic : base === "basicDa" ? basic + da : gross;
-    const hra = +(calcBase(rates.hraBase) * Number(rates.hraPercent || 0) / 100).toFixed(2);
-    const conveyance = +(calcBase(rates.conveyanceBase) * Number(rates.conveyancePercent || 0) / 100).toFixed(2);
-    const otherAllowance = +(calcBase(rates.otherAllowanceBase) * Number(rates.otherAllowancePercent || 0) / 100).toFixed(2);
-    const pfWage = calcBase(rates.pfBase);
-    const pfBase = rates.pfCeilingEnabled ? Math.min(pfWage, Number(rates.pfWageCeiling || 0)) : pfWage;
-    const pf = form.pfApplicable ? +(pfBase * Number(rates.pfPercent || 0) / 100).toFixed(2) : 0;
-    const esiWage = calcBase(rates.esiBase);
-    const esiEligible = !rates.esiCeilingEnabled || esiWage <= Number(rates.esiWageCeiling || 0);
-    const esi = form.esiApplicable && esiEligible ? +(esiWage * Number(rates.esiPercent || 0) / 100).toFixed(2) : 0;
-    const employerPf = form.pfApplicable ? +(pfBase * Number(rates.employerPfPercent || 0) / 100).toFixed(2) : 0;
-    const employerEsi = form.esiApplicable && esiEligible ? +(esiWage * Number(rates.employerEsiPercent || 0) / 100).toFixed(2) : 0;
-    const gratuityBase = rates.gratuityBase === "gross" ? gross : rates.gratuityBase === "basicDa" ? basic + da : basic;
-    const gratuity = +(gratuityBase * Number(rates.gratuityPercent || 0) / 100).toFixed(2);
+    const hra = +(calcBase(calcRates.hraBase) * Number(calcRates.hraPercent || 0) / 100).toFixed(2);
+    const conveyance = +(calcBase(calcRates.conveyanceBase) * Number(calcRates.conveyancePercent || 0) / 100).toFixed(2);
+    const otherAllowance = +(calcBase(calcRates.otherAllowanceBase) * Number(calcRates.otherAllowancePercent || 0) / 100).toFixed(2);
+    const pfWage = calcBase(calcRates.pfBase);
+    const pfBase = calcRates.pfCeilingEnabled ? Math.min(pfWage, Number(calcRates.pfWageCeiling || 0)) : pfWage;
+    const pf = form.pfApplicable ? +(pfBase * Number(calcRates.pfPercent || 0) / 100).toFixed(2) : 0;
+    const esiWage = calcBase(calcRates.esiBase);
+    const esiEligible = !calcRates.esiCeilingEnabled || esiWage <= Number(calcRates.esiWageCeiling || 0);
+    const esi = form.esiApplicable && esiEligible ? +(esiWage * Number(calcRates.esiPercent || 0) / 100).toFixed(2) : 0;
+    const employerPf = form.pfApplicable ? +(pfBase * Number(calcRates.employerPfPercent || 0) / 100).toFixed(2) : 0;
+    const employerEsi = form.esiApplicable && esiEligible ? +(esiWage * Number(calcRates.employerEsiPercent || 0) / 100).toFixed(2) : 0;
+    const gratuityBase = calcRates.gratuityBase === "gross" ? gross : calcRates.gratuityBase === "basicDa" ? basic + da : basic;
+    const gratuity = +(gratuityBase * Number(calcRates.gratuityPercent || 0) / 100).toFixed(2);
     const pt = professionalTax(form.state, gross);
     const ctc = +(gross + employerPf + employerEsi + gratuity).toFixed(2);
     return { basic, hra, da, conveyance, otherAllowance, pf, esi, employerPf, employerEsi, gratuity, pt, ctc, pfWage, pfBase, esiWage, esiEligible };
-  }, [gross, rates, form.pfApplicable, form.esiApplicable, form.state]);
+  }, [gross, calcRates, form.pfApplicable, form.esiApplicable, form.state]);
 
   const update = e => { const { name, value, type, checked } = e.target; setForm(p => ({ ...p, [name]: type === "checkbox" ? checked : value })); setError(""); setMessage(""); };
 
   const updateRate = e => setRates(p => ({ ...p, [e.target.name]: e.target.value }));
+  const updateStateRule = e => { const { name, value, type, checked } = e.target; setStateRuleDraft(p => ({ ...p, [name]: type === "checkbox" ? checked : value })); };
+  function selectStateRule(state) {
+    setStateRuleState(state);
+    const existing = options.settings?.stateRules?.[state];
+    setStateRuleDraft(existing ? { ...rates, ...existing } : { ...rates });
+  }
+  function applyStateRule() {
+    if (!stateRuleState) return;
+    const next = { ...(options.settings?.stateRules || {}), [stateRuleState]: { ...stateRuleDraft } };
+    setOptions(p => ({ ...p, settings: { ...p.settings, stateRules: next } }));
+    setMessage(`${stateRuleState} payroll rule prepared. Click Save Rates to save it.`);
+  }
+  function clearStateRule() {
+    if (!stateRuleState) return;
+    const next = { ...(options.settings?.stateRules || {}) }; delete next[stateRuleState];
+    setOptions(p => ({ ...p, settings: { ...p.settings, stateRules: next } }));
+    setStateRuleDraft({ ...rates });
+    setMessage(`${stateRuleState} override removed; it will use Common Rules.`);
+  }
 
   async function saveRates() {
     setSavingRates(true); setError("");
-    try { const body = { ...rates }; Object.keys(body).forEach(k => { if (k.endsWith("Percent") || k.endsWith("Ceiling")) body[k] = Number(body[k] || 0); }); const result = await hrApi.saveOptions(body); setRates(result.settings); setMessage("Payroll percentages saved for all employees."); }
+    try { const body = { ...rates, stateRules: options.settings?.stateRules || {} }; Object.keys(body).forEach(k => { if (k.endsWith("Percent") || k.endsWith("Ceiling")) body[k] = Number(body[k] || 0); }); Object.entries(body.stateRules || {}).forEach(([state, rule]) => { Object.keys(rule).forEach(k => { if (k.endsWith("Percent") || k.endsWith("Ceiling")) rule[k] = Number(rule[k] || 0); }); }); const result = await hrApi.saveOptions(body); setRates(result.settings); setOptions(p => ({ ...p, settings: result.settings })); setMessage("Common and state-wise payroll rules saved."); }
     catch (e) { setError(e.message); } finally { setSavingRates(false); }
   }
   async function addCompany() {
@@ -90,7 +116,7 @@ export default function Employees() {
   async function save(e) {
     e.preventDefault(); setError(""); setMessage(""); setSaving(true);
     try {
-      const body = { ...form, basicSalary: calculated.basic, hra: calculated.hra, da: calculated.da, conveyance: calculated.conveyance, otherAllowance: calculated.otherAllowance, professionalTax: calculated.pt, pfRate: Number(rates.pfPercent), pfAmount: calculated.pf, esiRate: Number(rates.esiPercent), esiAmount: calculated.esi, employerPfRate: Number(rates.employerPfPercent), employerPfAmount: calculated.employerPf, employerEsiRate: Number(rates.employerEsiPercent), employerEsiAmount: calculated.employerEsi, gratuityPercent: Number(rates.gratuityPercent), gratuityAmount: calculated.gratuity, ctc: calculated.ctc, grossSalary: gross };
+      const body = { ...form, basicSalary: calculated.basic, hra: calculated.hra, da: calculated.da, conveyance: calculated.conveyance, otherAllowance: calculated.otherAllowance, professionalTax: calculated.pt, pfRate: Number(calcRates.pfPercent), pfAmount: calculated.pf, esiRate: Number(calcRates.esiPercent), esiAmount: calculated.esi, employerPfRate: Number(calcRates.employerPfPercent), employerPfAmount: calculated.employerPf, employerEsiRate: Number(calcRates.employerEsiPercent), employerEsiAmount: calculated.employerEsi, gratuityPercent: Number(calcRates.gratuityPercent), gratuityAmount: calculated.gratuity, ctc: calculated.ctc, grossSalary: gross };
       ["grossSalary","basicSalary","hra","da","conveyance","otherAllowance","professionalTax","otherDeduction","pfRate","pfAmount","esiRate","esiAmount","employerPfRate","employerPfAmount","employerEsiRate","employerEsiAmount","gratuityPercent","gratuityAmount","ctc"].forEach(k => body[k] = Number(body[k] || 0));
       if (!body.dateOfBirth) delete body.dateOfBirth; if (!body.employeeCode) delete body.employeeCode;
       if (editingId) { await hrApi.updateEmployee(editingId, body); setMessage("Employee updated successfully."); } else { await hrApi.createEmployee(body); setMessage("Employee added successfully."); } setEditingId(null); setForm(initialForm); await load();
@@ -133,32 +159,47 @@ export default function Employees() {
         </div>
         <p style={S.help}>PF/ESI base and ceiling can be changed centrally. Current defaults use PF ₹15,000 and ESI ₹21,000.</p>
       </div>
+      <div style={{marginTop:18,padding:16,border:"1px solid #dbe5f0",borderRadius:12,background:"#f8fbff"}}>
+        <h3 style={{margin:"0 0 6px",fontSize:16}}>State-wise Payroll Rules</h3>
+        <p style={S.help}>Employee create/edit screen-er State select korlei oi State-er rule automatically apply hobe. State-er alada rule na thakle Common Rules use hobe.</p>
+        <div style={{...S.grid, marginTop:12}}>
+          <SelectField label="Rule State" name="ruleState" value={stateRuleState} onChange={e=>selectStateRule(e.target.value)} options={options.states || []}/>
+          {[['Basic %','basicPercent'],['HRA %','hraPercent'],['DA %','daPercent'],['Conveyance %','conveyancePercent'],['Other Allowance %','otherAllowancePercent'],['Gratuity %','gratuityPercent'],['Employee PF %','pfPercent'],['Employee ESI %','esiPercent'],['Employer PF %','employerPfPercent'],['Employer ESI %','employerEsiPercent']].map(([label,name]) => <Field key={name} label={label} name={name} type="number" value={stateRuleDraft[name] ?? ""} onChange={updateStateRule}/>)}
+          {[['HRA Base','hraBase'],['DA Base','daBase'],['Conveyance Base','conveyanceBase'],['Other Allowance Base','otherAllowanceBase'],['Gratuity Base','gratuityBase'],['PF Base','pfBase'],['ESI Base','esiBase']].map(([label,name]) => <Field key={name} label={label} name={name} value={stateRuleDraft[name] ?? ""} onChange={updateStateRule}><select name={name} value={stateRuleDraft[name] ?? ""} onChange={updateStateRule} style={S.input}><option value="gross">Gross Salary</option><option value="basic">Basic Salary</option><option value="basicDa">Basic + DA</option></select></Field>)}
+          <Field label="PF Maximum Wage" name="pfWageCeiling" type="number" value={stateRuleDraft.pfWageCeiling ?? ""} onChange={updateStateRule}/>
+          <Field label="ESI Wage Ceiling" name="esiWageCeiling" type="number" value={stateRuleDraft.esiWageCeiling ?? ""} onChange={updateStateRule}/>
+          <CheckField label="PF Ceiling Apply" name="pfCeilingEnabled" checked={!!stateRuleDraft.pfCeilingEnabled} onChange={updateStateRule}/>
+          <CheckField label="ESI Ceiling Apply" name="esiCeilingEnabled" checked={!!stateRuleDraft.esiCeilingEnabled} onChange={updateStateRule}/>
+        </div>
+        <div style={S.actions}><button type="button" onClick={applyStateRule} disabled={!stateRuleState} style={S.smallBtn}>Apply State Rule</button><button type="button" onClick={clearStateRule} disabled={!stateRuleState} style={S.cancel}>Use Common Rules</button></div>
+      </div>
     </section>
 
     <form onSubmit={save} style={S.card}>
       <Section title="Personal & Company Details">
-        <Field label="Employee ID" name="employeeCode" value={form.employeeCode} onChange={update}/><SelectField label="State" name="state" value={form.state} onChange={update} options={options.states || []}/><Field label="PIN Code" name="pinCode" value={form.pinCode} onChange={update}/>
+        <Field label="Employee ID" name="employeeCode" value={form.employeeCode} onChange={update}/><SelectField label="Work Location State" name="state" value={form.state} onChange={update} options={options.states || []} required/><Field label="PIN Code" name="pinCode" value={form.pinCode} onChange={update}/>
         <Field label="Company Name" name="companyName" value={form.companyName} onChange={update} required><select name="companyName" value={form.companyName} onChange={update} required style={S.input}><option value="">Select Company</option>{options.companies.map(x => <option key={x}>{x}</option>)}</select></Field>
         <div style={S.inlineAction}><button type="button" onClick={() => setShowCompany(v => !v)} style={S.smallBtn}>+ Add Company</button>{showCompany && <div style={S.addRow}><input value={newCompany} onChange={e => setNewCompany(e.target.value)} placeholder="New company name" style={S.input}/><button type="button" onClick={addCompany} style={S.smallBtn}>Save</button></div>}</div>
         <Field label="Employee Name" name="name" value={form.name} onChange={update} required/><Field label="Father / Husband Name" name="fatherName" value={form.fatherName} onChange={update}/><Field label="Date of Birth" name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={update}/><SelectField label="Gender" name="gender" value={form.gender} onChange={update} options={["Male","Female","Other"]}/><Field label="Mobile No." name="mobile" value={form.mobile} onChange={update}/><Field label="Email" name="email" type="email" value={form.email} onChange={update}/><Field label="Joining Date" name="joiningDate" type="date" value={form.joiningDate} onChange={update} required/>
-        <SelectField label="Department" name="department" value={form.department} onChange={update} options={options.departmentOptions}/><SelectField label="Designation" name="designation" value={form.designation} onChange={update} options={options.designationOptions}/><Field label="Location" name="location" value={form.location} onChange={update}/><SelectField label="Employee Type" name="employeeType" value={form.employeeType} onChange={update} options={options.employeeTypeOptions}/>
+        <SelectField label="Department" name="department" value={form.department} onChange={update} options={options.departmentOptions}/><SelectField label="Designation" name="designation" value={form.designation} onChange={update} options={options.designationOptions}/><Field label="Work Location" name="workLocation" value={form.workLocation} onChange={update} required/><SelectField label="Employee Type" name="employeeType" value={form.employeeType} onChange={update} options={options.employeeTypeOptions}/>
         <label style={{ ...S.label, gridColumn: "1 / -1" }}><span>Address</span><textarea name="address" value={form.address} onChange={update} style={{ ...S.input, minHeight: 70 }}/></label>
       </Section>
 
       <Section title="Salary, Deductions, Gratuity & CTC">
+        <div style={{...S.summary, gridColumn:"1 / -1", background:"#f7f9fc"}}><span>Payroll Rule Applied</span><b>{form.state ? (options.settings?.stateRules?.[form.state] ? `State Rule – ${form.state}` : `Common Rule – ${form.state}`) : "Select Work Location State"}</b></div>
         <MoneyField label="Gross Salary" name="grossSalary" value={form.grossSalary} onChange={update} required/>
-        <MoneyField label={`Basic (${rates.basicPercent}%)`} name="basicSalary" value={calculated.basic} onChange={()=>{}} readOnly/>
-        <MoneyField label={`HRA (${rates.hraPercent}%)`} name="hra" value={calculated.hra} onChange={()=>{}} readOnly/>
-        <MoneyField label={`DA (${rates.daPercent}%)`} name="da" value={calculated.da} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Conveyance (${rates.conveyancePercent}%)`} name="conveyance" value={calculated.conveyance} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Other Allowance (${rates.otherAllowancePercent}%)`} name="otherAllowance" value={calculated.otherAllowance} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Employee PF (${rates.pfPercent}%)`} name="pfAmount" value={calculated.pf} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Employee ESI (${rates.esiPercent}%)`} name="esiAmount" value={calculated.esi} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Basic (${calcRates.basicPercent}%)`} name="basicSalary" value={calculated.basic} onChange={()=>{}} readOnly/>
+        <MoneyField label={`HRA (${calcRates.hraPercent}%)`} name="hra" value={calculated.hra} onChange={()=>{}} readOnly/>
+        <MoneyField label={`DA (${calcRates.daPercent}%)`} name="da" value={calculated.da} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Conveyance (${calcRates.conveyancePercent}%)`} name="conveyance" value={calculated.conveyance} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Other Allowance (${calcRates.otherAllowancePercent}%)`} name="otherAllowance" value={calculated.otherAllowance} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Employee PF (${calcRates.pfPercent}%)`} name="pfAmount" value={calculated.pf} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Employee ESI (${calcRates.esiPercent}%)`} name="esiAmount" value={calculated.esi} onChange={()=>{}} readOnly/>
         <MoneyField label="Professional Tax (Auto by State)" name="professionalTax" value={calculated.pt} onChange={()=>{}} readOnly/>
         <MoneyField label="Other Employee Deduction (Manual)" name="otherDeduction" value={form.otherDeduction} onChange={update}/>
-        <MoneyField label={`Employer PF (${rates.employerPfPercent}%)`} name="employerPfAmount" value={calculated.employerPf} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Employer ESI (${rates.employerEsiPercent}%)`} name="employerEsiAmount" value={calculated.employerEsi} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Gratuity (${rates.gratuityPercent}% of ${rates.gratuityBase === "gross" ? "Gross" : rates.gratuityBase === "basicDa" ? "Basic + DA" : "Basic"})`} name="gratuityAmount" value={calculated.gratuity} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Employer PF (${calcRates.employerPfPercent}%)`} name="employerPfAmount" value={calculated.employerPf} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Employer ESI (${calcRates.employerEsiPercent}%)`} name="employerEsiAmount" value={calculated.employerEsi} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Gratuity (${calcRates.gratuityPercent}% of ${calcRates.gratuityBase === "gross" ? "Gross" : calcRates.gratuityBase === "basicDa" ? "Basic + DA" : "Basic"})`} name="gratuityAmount" value={calculated.gratuity} onChange={()=>{}} readOnly/>
         <CheckField label="PF Applicable" name="pfApplicable" checked={form.pfApplicable} onChange={update}/><Field label="PF Number" name="pfNumber" value={form.pfNumber} onChange={update}/>
         <CheckField label="ESI Applicable" name="esiApplicable" checked={form.esiApplicable} onChange={update}/><Field label="ESI Number" name="esiNumber" value={form.esiNumber} onChange={update}/>
         <div style={S.summary}><span>Employee Deduction</span><b>₹{(calculated.pf + calculated.esi + calculated.pt + Number(form.otherDeduction||0)).toLocaleString("en-IN", {minimumFractionDigits:2})}</b></div>
