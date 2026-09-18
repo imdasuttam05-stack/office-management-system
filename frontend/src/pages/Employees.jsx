@@ -4,7 +4,7 @@ import { hrApi } from "../lib/hrApi.js";
 const initialForm = {
   employeeCode: "", companyName: "", state: "", pinCode: "", name: "", fatherName: "", email: "", mobile: "",
   dateOfBirth: "", gender: "", address: "", department: "", designation: "", workLocation: "",
-  employeeType: "Permanent", joiningDate: new Date().toISOString().slice(0, 10),
+  employeeType: "Permanent", shiftId: "", joiningDate: new Date().toISOString().slice(0, 10),
   grossSalary: "", basicSalary: "", hra: "", da: "", conveyance: "", otherAllowance: "",
   professionalTax: "", otherDeduction: "", pfApplicable: true, pfNumber: "", pfRate: "",
   pfAmount: "", esiApplicable: false, esiNumber: "", esiRate: "", esiAmount: "",
@@ -37,7 +37,7 @@ function professionalTax(state, gross) {
 }
 
 export default function Employees() {
-  const [rows, setRows] = useState([]), [form, setForm] = useState(initialForm), [options, setOptions] = useState({ companies: [], departmentOptions: [], designationOptions: [], employeeTypeOptions: [], states: [], settings: {} });
+  const [rows, setRows] = useState([]), [form, setForm] = useState(initialForm), [shifts, setShifts] = useState([]), [options, setOptions] = useState({ companies: [], departmentOptions: [], designationOptions: [], employeeTypeOptions: [], states: [], settings: {} });
   const [rates, setRates] = useState({ basicPercent: 60, hraPercent: 20, daPercent: 10, conveyancePercent: 5, otherAllowancePercent: 0, gratuityPercent: 4.81, pfPercent: 12, esiPercent: 0.75, employerPfPercent: 12, employerEsiPercent: 3.25, hraBase: "gross", daBase: "gross", conveyanceBase: "gross", otherAllowanceBase: "gross", gratuityBase: "basic", pfBase: "gross", pfCeilingEnabled: true, pfWageCeiling: 15000, esiBase: "gross", esiCeilingEnabled: true, esiWageCeiling: 21000 });
   const [newCompany, setNewCompany] = useState(""); const [editingId, setEditingId] = useState(null), [showCompany, setShowCompany] = useState(false);
   const [error, setError] = useState(""), [message, setMessage] = useState(""), [saving, setSaving] = useState(false), [savingRates, setSavingRates] = useState(false);
@@ -45,7 +45,7 @@ export default function Employees() {
   const [stateRuleDraft, setStateRuleDraft] = useState({});
 
   async function load() {
-    try { setError(""); const [e, o] = await Promise.all([hrApi.employees(), hrApi.options()]); setRows(e.employees || []); setOptions(o); setRates(o.settings || rates); }
+    try { setError(""); const [e, o, sh] = await Promise.all([hrApi.employees(), hrApi.options(), hrApi.shifts()]); setRows(e.employees || []); setOptions(o); setShifts(sh.shifts || []); setRates(o.settings || rates); }
     catch (e) { setError(e.message); }
   }
   useEffect(() => { load(); }, []);
@@ -181,7 +181,7 @@ export default function Employees() {
         <Field label="Company Name" name="companyName" value={form.companyName} onChange={update} required><select name="companyName" value={form.companyName} onChange={update} required style={S.input}><option value="">Select Company</option>{options.companies.map(x => <option key={x}>{x}</option>)}</select></Field>
         <div style={S.inlineAction}><button type="button" onClick={() => setShowCompany(v => !v)} style={S.smallBtn}>+ Add Company</button>{showCompany && <div style={S.addRow}><input value={newCompany} onChange={e => setNewCompany(e.target.value)} placeholder="New company name" style={S.input}/><button type="button" onClick={addCompany} style={S.smallBtn}>Save</button></div>}</div>
         <Field label="Employee Name" name="name" value={form.name} onChange={update} required/><Field label="Father / Husband Name" name="fatherName" value={form.fatherName} onChange={update}/><Field label="Date of Birth" name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={update}/><SelectField label="Gender" name="gender" value={form.gender} onChange={update} options={["Male","Female","Other"]}/><Field label="Mobile No." name="mobile" value={form.mobile} onChange={update}/><Field label="Email" name="email" type="email" value={form.email} onChange={update}/><Field label="Joining Date" name="joiningDate" type="date" value={form.joiningDate} onChange={update} required/>
-        <SelectField label="Department" name="department" value={form.department} onChange={update} options={options.departmentOptions}/><SelectField label="Designation" name="designation" value={form.designation} onChange={update} options={options.designationOptions}/><Field label="Work Location" name="workLocation" value={form.workLocation} onChange={update} required/><SelectField label="Employee Type" name="employeeType" value={form.employeeType} onChange={update} options={options.employeeTypeOptions}/>
+        <SelectField label="Department" name="department" value={form.department} onChange={update} options={options.departmentOptions}/><SelectField label="Designation" name="designation" value={form.designation} onChange={update} options={options.designationOptions}/><Field label="Work Location" name="workLocation" value={form.workLocation} onChange={update} required/><SelectField label="Employee Type" name="employeeType" value={form.employeeType} onChange={update} options={options.employeeTypeOptions}/><label style={S.label}><span>Staff Shift</span><select name="shiftId" value={form.shiftId || ""} onChange={update} style={S.input}><option value="">Select Shift</option>{shifts.map(x => <option key={x._id} value={x._id}>{x.name} ({x.startTime} - {x.endTime})</option>)}</select></label>
         <label style={{ ...S.label, gridColumn: "1 / -1" }}><span>Address</span><textarea name="address" value={form.address} onChange={update} style={{ ...S.input, minHeight: 70 }}/></label>
       </Section>
 
