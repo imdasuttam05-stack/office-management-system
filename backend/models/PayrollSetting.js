@@ -24,6 +24,8 @@ const payrollSettingSchema = new mongoose.Schema(
     esiBase: { type: String, enum: ["gross", "basic", "basicDa"], default: "gross" },
     esiCeilingEnabled: { type: Boolean, default: true },
     esiWageCeiling: { type: Number, default: 21000, min: 0 },
+    // State-wise payroll overrides. If a state is not present, common rules above are used.
+    stateRules: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
 );
