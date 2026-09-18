@@ -38,7 +38,7 @@ function professionalTax(state, gross) {
 
 export default function Employees() {
   const [rows, setRows] = useState([]), [form, setForm] = useState(initialForm), [options, setOptions] = useState({ companies: [], departmentOptions: [], designationOptions: [], employeeTypeOptions: [], settings: {} });
-  const [rates, setRates] = useState({ basicPercent: 60, hraPercent: 20, daPercent: 10, conveyancePercent: 5, otherAllowancePercent: 0, gratuityPercent: 4.81, pfPercent: 12, esiPercent: 0.75, employerPfPercent: 12, employerEsiPercent: 3.25 });
+  const [rates, setRates] = useState({ basicPercent: 60, hraPercent: 20, daPercent: 10, conveyancePercent: 5, otherAllowancePercent: 0, gratuityPercent: 4.81, pfPercent: 12, esiPercent: 0.75, employerPfPercent: 12, employerEsiPercent: 3.25, hraBase: "gross", daBase: "gross", conveyanceBase: "gross", otherAllowanceBase: "gross", gratuityBase: "basic", pfBase: "gross", pfCeilingEnabled: true, pfWageCeiling: 15000, esiBase: "gross", esiCeilingEnabled: true, esiWageCeiling: 21000 });
   const [newCompany, setNewCompany] = useState(""); const [editingId, setEditingId] = useState(null), [showCompany, setShowCompany] = useState(false);
   const [error, setError] = useState(""), [message, setMessage] = useState(""), [saving, setSaving] = useState(false), [savingRates, setSavingRates] = useState(false);
 
@@ -51,18 +51,26 @@ export default function Employees() {
   const gross = Number(form.grossSalary || 0);
   const calculated = useMemo(() => {
     const basic = +(gross * Number(rates.basicPercent || 0) / 100).toFixed(2);
-    const hra = +(gross * Number(rates.hraPercent || 0) / 100).toFixed(2);
-    const da = +(gross * Number(rates.daPercent || 0) / 100).toFixed(2);
-    const conveyance = +(gross * Number(rates.conveyancePercent || 0) / 100).toFixed(2);
-    const otherAllowance = +(gross * Number(rates.otherAllowancePercent || 0) / 100).toFixed(2);
-    const pf = form.pfApplicable ? +(gross * Number(rates.pfPercent || 0) / 100).toFixed(2) : 0;
-    const esi = form.esiApplicable ? +(gross * Number(rates.esiPercent || 0) / 100).toFixed(2) : 0;
-    const employerPf = form.pfApplicable ? +(gross * Number(rates.employerPfPercent || 0) / 100).toFixed(2) : 0;
-    const employerEsi = form.esiApplicable ? +(gross * Number(rates.employerEsiPercent || 0) / 100).toFixed(2) : 0;
-    const gratuity = +(basic * Number(rates.gratuityPercent || 0) / 100).toFixed(2);
+    const baseAmount = (base) => base === "basic" ? basic : base === "basicDa" ? basic + da : gross;
+    const daBase = rates.daBase === "basic" ? basic : gross;
+    const da = +(daBase * Number(rates.daPercent || 0) / 100).toFixed(2);
+    const calcBase = (base) => base === "basic" ? basic : base === "basicDa" ? basic + da : gross;
+    const hra = +(calcBase(rates.hraBase) * Number(rates.hraPercent || 0) / 100).toFixed(2);
+    const conveyance = +(calcBase(rates.conveyanceBase) * Number(rates.conveyancePercent || 0) / 100).toFixed(2);
+    const otherAllowance = +(calcBase(rates.otherAllowanceBase) * Number(rates.otherAllowancePercent || 0) / 100).toFixed(2);
+    const pfWage = calcBase(rates.pfBase);
+    const pfBase = rates.pfCeilingEnabled ? Math.min(pfWage, Number(rates.pfWageCeiling || 0)) : pfWage;
+    const pf = form.pfApplicable ? +(pfBase * Number(rates.pfPercent || 0) / 100).toFixed(2) : 0;
+    const esiWage = calcBase(rates.esiBase);
+    const esiEligible = !rates.esiCeilingEnabled || esiWage <= Number(rates.esiWageCeiling || 0);
+    const esi = form.esiApplicable && esiEligible ? +(esiWage * Number(rates.esiPercent || 0) / 100).toFixed(2) : 0;
+    const employerPf = form.pfApplicable ? +(pfBase * Number(rates.employerPfPercent || 0) / 100).toFixed(2) : 0;
+    const employerEsi = form.esiApplicable && esiEligible ? +(esiWage * Number(rates.employerEsiPercent || 0) / 100).toFixed(2) : 0;
+    const gratuityBase = rates.gratuityBase === "gross" ? gross : rates.gratuityBase === "basicDa" ? basic + da : basic;
+    const gratuity = +(gratuityBase * Number(rates.gratuityPercent || 0) / 100).toFixed(2);
     const pt = professionalTax(form.state, gross);
     const ctc = +(gross + employerPf + employerEsi + gratuity).toFixed(2);
-    return { basic, hra, da, conveyance, otherAllowance, pf, esi, employerPf, employerEsi, gratuity, pt, ctc };
+    return { basic, hra, da, conveyance, otherAllowance, pf, esi, employerPf, employerEsi, gratuity, pt, ctc, pfWage, pfBase, esiWage, esiEligible };
   }, [gross, rates, form.pfApplicable, form.esiApplicable, form.state]);
 
   const update = e => { const { name, value, type, checked } = e.target; setForm(p => ({ ...p, [name]: type === "checkbox" ? checked : value })); setError(""); setMessage(""); };
@@ -71,7 +79,7 @@ export default function Employees() {
 
   async function saveRates() {
     setSavingRates(true); setError("");
-    try { const body = Object.fromEntries(Object.entries(rates).map(([k,v]) => [k, Number(v || 0)])); const result = await hrApi.saveOptions(body); setRates(result.settings); setMessage("Payroll percentages saved for all employees."); }
+    try { const body = { ...rates }; Object.keys(body).forEach(k => { if (k.endsWith("Percent") || k.endsWith("Ceiling")) body[k] = Number(body[k] || 0); }); const result = await hrApi.saveOptions(body); setRates(result.settings); setMessage("Payroll percentages saved for all employees."); }
     catch (e) { setError(e.message); } finally { setSavingRates(false); }
   }
   async function addCompany() {
@@ -114,6 +122,17 @@ export default function Employees() {
 
     <section style={S.card}><div style={S.rateHeader}><div><h2 style={S.sectionTitle}>Common Payroll % Settings</h2><p style={S.help}>These rates are common for all employees. Change once, then the same rates will calculate automatically.</p></div><button type="button" onClick={saveRates} disabled={savingRates} style={S.btn}>{savingRates ? "Saving..." : "Save Rates"}</button></div>
       <div style={S.grid}>{[["Basic %","basicPercent"],["HRA %","hraPercent"],["DA %","daPercent"],["Conveyance %","conveyancePercent"],["Other Allowance %","otherAllowancePercent"],["Gratuity %","gratuityPercent"],["Employee PF %","pfPercent"],["Employee ESI %","esiPercent"],["Employer PF %","employerPfPercent"],["Employer ESI %","employerEsiPercent"]].map(([label,name]) => <Field key={name} label={label} name={name} type="number" value={rates[name]} onChange={updateRate}/>)}</div>
+      <div style={{marginTop:18,padding:16,border:"1px solid #e5eaf1",borderRadius:12,background:"#fafcff"}}>
+        <h3 style={{margin:"0 0 12px",fontSize:16}}>Calculation Rules</h3>
+        <div style={S.grid}>
+          {[['HRA Calculation Base','hraBase'],['DA Calculation Base','daBase'],['Conveyance Calculation Base','conveyanceBase'],['Other Allowance Base','otherAllowanceBase'],['Gratuity Calculation Base','gratuityBase'],['PF Calculation Base','pfBase'],['ESI Calculation Base','esiBase']].map(([label,name]) => <Field key={name} label={label} name={name} value={rates[name]} onChange={updateRate}><select name={name} value={rates[name]} onChange={updateRate} style={S.input}><option value="gross">Gross Salary</option><option value="basic">Basic Salary</option><option value="basicDa">Basic + DA</option></select></Field>)}
+          <Field label="PF Maximum Wage" name="pfWageCeiling" type="number" value={rates.pfWageCeiling} onChange={updateRate}/>
+          <Field label="ESI Wage Ceiling" name="esiWageCeiling" type="number" value={rates.esiWageCeiling} onChange={updateRate}/>
+          <CheckField label={`PF Ceiling Apply (max ₹${Number(rates.pfWageCeiling || 0).toLocaleString("en-IN")})`} name="pfCeilingEnabled" checked={!!rates.pfCeilingEnabled} onChange={e=>setRates(p=>({...p,pfCeilingEnabled:e.target.checked}))}/>
+          <CheckField label={`ESI Ceiling Apply (₹${Number(rates.esiWageCeiling || 0).toLocaleString("en-IN")})`} name="esiCeilingEnabled" checked={!!rates.esiCeilingEnabled} onChange={e=>setRates(p=>({...p,esiCeilingEnabled:e.target.checked}))}/>
+        </div>
+        <p style={S.help}>PF/ESI base and ceiling can be changed centrally. Current defaults use PF ₹15,000 and ESI ₹21,000.</p>
+      </div>
     </section>
 
     <form onSubmit={save} style={S.card}>
@@ -139,7 +158,7 @@ export default function Employees() {
         <MoneyField label="Other Employee Deduction (Manual)" name="otherDeduction" value={form.otherDeduction} onChange={update}/>
         <MoneyField label={`Employer PF (${rates.employerPfPercent}%)`} name="employerPfAmount" value={calculated.employerPf} onChange={()=>{}} readOnly/>
         <MoneyField label={`Employer ESI (${rates.employerEsiPercent}%)`} name="employerEsiAmount" value={calculated.employerEsi} onChange={()=>{}} readOnly/>
-        <MoneyField label={`Gratuity (${rates.gratuityPercent}% of Basic)`} name="gratuityAmount" value={calculated.gratuity} onChange={()=>{}} readOnly/>
+        <MoneyField label={`Gratuity (${rates.gratuityPercent}% of ${rates.gratuityBase === "gross" ? "Gross" : rates.gratuityBase === "basicDa" ? "Basic + DA" : "Basic"})`} name="gratuityAmount" value={calculated.gratuity} onChange={()=>{}} readOnly/>
         <CheckField label="PF Applicable" name="pfApplicable" checked={form.pfApplicable} onChange={update}/><Field label="PF Number" name="pfNumber" value={form.pfNumber} onChange={update}/>
         <CheckField label="ESI Applicable" name="esiApplicable" checked={form.esiApplicable} onChange={update}/><Field label="ESI Number" name="esiNumber" value={form.esiNumber} onChange={update}/>
         <div style={S.summary}><span>Employee Deduction</span><b>₹{(calculated.pf + calculated.esi + calculated.pt + Number(form.otherDeduction||0)).toLocaleString("en-IN", {minimumFractionDigits:2})}</b></div>
