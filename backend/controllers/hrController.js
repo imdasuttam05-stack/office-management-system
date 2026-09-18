@@ -1,106 +1,236 @@
+import xlsx from "xlsx";
+
 import Employee from "../models/Employee.js";
 import Attendance from "../models/Attendance.js";
+import Shift from "../models/Shift.js";
+import AttendanceSetting from "../models/AttendanceSetting.js";
 import Leave from "../models/Leave.js";
 import Holiday from "../models/Holiday.js";
 import Salary from "../models/Salary.js";
-import PayrollSetting from "../models/PayrollSetting.js";
-import Company from "../models/Company.js";
-import Shift from "../models/Shift.js";
-import AttendanceSetting from "../models/AttendanceSetting.js";
-import XLSX from "xlsx";
-
-const n = v => Number.isFinite(Number(v)) ? Number(v) : 0;
-
 
 /* =========================================================
-   TIME HELPERS
-   ========================================================= */
+   COMMON HELPERS
+========================================================= */
+
+const n = (v) =>
+  Number.isFinite(Number(v)) ? Number(v) : 0;
+
+function clean(v) {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+}
 
 function timeToMinutes(value) {
-  if (!value) return null;
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
 
-  const m = String(value)
-    .trim()
-    .match(/^(\d{1,2})[:.](\d{2})\s*(AM|PM)?$/i);
+  // Excel can sometimes provide a numeric fraction of a day.
+  if (typeof value === "number" && value >= 0 && value < 1) {
+    return Math.round(value * 24 * 60);
+  }
+
+  const raw = String(value).trim();
+
+  // 10.12 / 10:12 / 10:12 AM / 18:50
+  const m = raw.match(
+    /^(\d{1,2})[:.](\d{2})\s*(AM|PM)?$/i
+  );
 
   if (!m) return null;
 
   let h = Number(m[1]);
-  const min = Number(m[2]);
+  const mm = Number(m[2]);
+
+  if (mm < 0 || mm > 59) return null;
 
   const ap = (m[3] || "").toUpperCase();
 
   if (ap === "PM" && h < 12) h += 12;
   if (ap === "AM" && h === 12) h = 0;
 
-  return h * 60 + min;
+  if (h < 0 || h > 23) return null;
+
+  return h * 60 + mm;
 }
 
+function normalizeTime(value) {
+  const mins = timeToMinutes(value);
+
+  if (mins === null) return "";
+
+  const h24 = Math.floor(mins / 60);
+  const mm = mins % 60;
+
+  const ap = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 || 12;
+
+  return `${String(h12).padStart(2, "0")}:${String(mm).padStart(
+    2,
+    "0"
+  )} ${ap}`;
+}
 
 /*
-  Calculates:
-  - Overtime Hours
-  - Cutting Minutes
+  Date parser supports:
 
+  18-09-2026
+  18/09/2026
+  18.09.2026
+  2026-09-18
+  Excel serial date
+  JS Date
+*/
+function parseAttendanceDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Date(
+      Date.UTC(
+        value.getFullYear(),
+        value.getMonth(),
+        value.getDate()
+      )
+    );
+  }
+
+  if (typeof value === "number") {
+    // Excel serial date
+    const parsed = xlsx.SSF.parse_date_code(value);
+
+    if (parsed) {
+      return new Date(
+        Date.UTC(
+          parsed.y,
+          parsed.m - 1,
+          parsed.d
+        )
+      );
+    }
+  }
+
+  const raw = clean(value);
+
+  if (!raw) return null;
+
+  // YYYY-MM-DD
+  let m = raw.match(
+    /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/
+  );
+
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+
+    const date = new Date(Date.UTC(y, mo - 1, d));
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY
+  m = raw.match(
+    /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/
+  );
+
+  if (m) {
+    const d = Number(m[1]);
+    const mo = Number(m[2]);
+    const y = Number(m[3]);
+
+    const date = new Date(Date.UTC(y, mo - 1, d));
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const parsed = new Date(raw);
+
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return new Date(
+    Date.UTC(
+      parsed.getFullYear(),
+      parsed.getMonth(),
+      parsed.getDate()
+    )
+  );
+}
+
+function dateKey(date) {
+  return new Date(date)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/*
+  Calculate OT and cutting.
+
+  IMPORTANT:
+  The calculation uses the shift's breakMinutes.
   Example:
 
-  Shift       10:00 AM - 06:30 PM
-  In          10:12 AM
-  Out         06:50 PM
+  Shift = 10:00 AM - 6:30 PM
+  Break = 0
+  Actual = 10:12 AM - 6:50 PM
 
-  Scheduled  = 8h 30m
-  Actual     = 8h 38m
-  Difference = +8 minutes
-
-  Result:
-  OT       = 0.13 hours
-  Cutting  = 0 minutes
+  Scheduled = 8h30m
+  Actual = 8h38m
+  OT = 8 minutes
 */
-
-function calculateTimeAdjustments(checkIn, checkOut, shift) {
+function calculateTimeAdjustments(
+  checkIn,
+  checkOut,
+  shift
+) {
   const cin = timeToMinutes(checkIn);
   const cout = timeToMinutes(checkOut);
 
-  if (cin == null || cout == null || !shift) {
+  if (
+    cin === null ||
+    cout === null ||
+    !shift
+  ) {
     return {
       overtimeHours: 0,
-      cuttingMinutes: 0
+      cuttingMinutes: 0,
     };
   }
 
-  const scheduledStart = timeToMinutes(shift.startTime);
-  const scheduledEnd = timeToMinutes(shift.endTime);
+  const scheduledStart = timeToMinutes(
+    shift.startTime
+  );
 
-  if (scheduledStart == null || scheduledEnd == null) {
+  const scheduledEnd = timeToMinutes(
+    shift.endTime
+  );
+
+  if (
+    scheduledStart === null ||
+    scheduledEnd === null
+  ) {
     return {
       overtimeHours: 0,
-      cuttingMinutes: 0
+      cuttingMinutes: 0,
     };
   }
 
-  // Scheduled shift duration
-  let scheduled = scheduledEnd - scheduledStart;
+  let scheduled =
+    scheduledEnd - scheduledStart;
 
-  // Overnight shift
   if (scheduled < 0) {
     scheduled += 1440;
   }
 
   /*
-    Shift break time is deducted from scheduled hours.
-    Example:
-    10:00 - 18:30 with 30 min break
-    = 8 hours scheduled working time.
+    Break is deducted only when configured.
+    If your shift should count the full
+    10:00-18:30 period, keep breakMinutes = 0.
   */
   scheduled = Math.max(
     0,
     scheduled - n(shift.breakMinutes)
   );
 
-  // Actual employee working duration
   let actual = cout - cin;
 
-  // Overnight attendance
   if (actual < 0) {
     actual += 1440;
   }
@@ -116,1309 +246,497 @@ function calculateTimeAdjustments(checkIn, checkOut, shift) {
     cuttingMinutes:
       delta < 0
         ? Math.abs(delta)
-        : 0
+        : 0,
   };
 }
-
-
-/* =========================================================
-   DATE RANGE
-   ========================================================= */
-
-function range(month, year) {
-  return {
-    start: new Date(Date.UTC(year, month - 1, 1)),
-    end: new Date(Date.UTC(year, month, 1))
-  };
-}
-
 
 /* =========================================================
    EMPLOYEES
-   ========================================================= */
+========================================================= */
 
-export async function employees(req, res) {
-  res.json({
-    success: true,
-    employees: await Employee.find().sort({ name: 1 })
-  });
-}
-
-
-/* =========================================================
-   PAYROLL OPTIONS
-   ========================================================= */
-
-export async function payrollOptions(req, res) {
-  let settings = await PayrollSetting.findOne({
-    key: "default"
-  }).lean();
-
-  if (!settings) {
-    settings = await PayrollSetting.create({
-      key: "default"
-    });
-  }
-
-  const companies = await Company.find({
-    status: "Active"
-  })
-    .sort({ name: 1 })
-    .lean();
-
-  const existingCompanyNames = await Employee.distinct(
-    "companyName",
-    {
-      companyName: {
-        $nin: ["", null]
-      }
-    }
-  );
-
-  const envCompanies = String(
-    process.env.COMPANY_NAMES || ""
-  )
-    .split(",")
-    .map(x => x.trim())
-    .filter(Boolean);
-
-  const companyNames = [
-    ...new Set([
-      ...companies.map(x => x.name),
-      ...existingCompanyNames,
-      ...envCompanies
-    ])
-  ].sort((a, b) => a.localeCompare(b));
-
-  res.json({
-    success: true,
-
-    companies: companyNames,
-
-    settings: {
-      basicPercent: Number(settings.basicPercent ?? 60),
-      hraPercent: Number(settings.hraPercent ?? 20),
-      daPercent: Number(settings.daPercent ?? 10),
-      conveyancePercent: Number(settings.conveyancePercent ?? 5),
-      otherAllowancePercent: Number(
-        settings.otherAllowancePercent ?? 0
-      ),
-
-      gratuityPercent: Number(
-        settings.gratuityPercent ?? 4.81
-      ),
-
-      pfPercent: Number(settings.pfPercent ?? 12),
-      esiPercent: Number(settings.esiPercent ?? 0.75),
-
-      employerPfPercent: Number(
-        settings.employerPfPercent ?? 12
-      ),
-
-      employerEsiPercent: Number(
-        settings.employerEsiPercent ?? 3.25
-      ),
-
-      hraBase: settings.hraBase ?? "gross",
-      daBase: settings.daBase ?? "gross",
-      conveyanceBase:
-        settings.conveyanceBase ?? "gross",
-
-      otherAllowanceBase:
-        settings.otherAllowanceBase ?? "gross",
-
-      gratuityBase:
-        settings.gratuityBase ?? "basic",
-
-      pfBase:
-        settings.pfBase ?? "gross",
-
-      pfCeilingEnabled:
-        settings.pfCeilingEnabled !== false,
-
-      pfWageCeiling:
-        Number(settings.pfWageCeiling ?? 15000),
-
-      esiBase:
-        settings.esiBase ?? "gross",
-
-      esiCeilingEnabled:
-        settings.esiCeilingEnabled !== false,
-
-      esiWageCeiling:
-        Number(settings.esiWageCeiling ?? 21000),
-
-      stateRules:
-        settings.stateRules || {}
-    },
-
-    states: [
-      "Andhra Pradesh",
-      "Arunachal Pradesh",
-      "Assam",
-      "Bihar",
-      "Chhattisgarh",
-      "Goa",
-      "Gujarat",
-      "Haryana",
-      "Himachal Pradesh",
-      "Jharkhand",
-      "Karnataka",
-      "Kerala",
-      "Madhya Pradesh",
-      "Maharashtra",
-      "Manipur",
-      "Meghalaya",
-      "Mizoram",
-      "Nagaland",
-      "Odisha",
-      "Punjab",
-      "Rajasthan",
-      "Sikkim",
-      "Tamil Nadu",
-      "Telangana",
-      "Tripura",
-      "Uttar Pradesh",
-      "Uttarakhand",
-      "West Bengal",
-      "Delhi",
-      "Jammu and Kashmir",
-      "Ladakh",
-      "Puducherry",
-      "Chandigarh"
-    ],
-
-    departmentOptions: [
-      "HR",
-      "Accounts",
-      "Sales",
-      "Purchase",
-      "Operations",
-      "Warehouse",
-      "Admin",
-      "IT"
-    ],
-
-    designationOptions: [
-      "Manager",
-      "Executive",
-      "Officer",
-      "Supervisor",
-      "Assistant",
-      "Accountant",
-      "Sales Executive",
-      "Worker"
-    ],
-
-    employeeTypeOptions: [
-      "Permanent",
-      "Temporary",
-      "Contract",
-      "Part Time",
-      "Trainee"
-    ]
-  });
-}
-
-
-/* =========================================================
-   SAVE PAYROLL OPTIONS
-   ========================================================= */
-
-export async function savePayrollOptions(req, res) {
-  const keys = [
-    "basicPercent",
-    "hraPercent",
-    "daPercent",
-    "conveyancePercent",
-    "otherAllowancePercent",
-    "gratuityPercent",
-    "pfPercent",
-    "esiPercent",
-    "employerPfPercent",
-    "employerEsiPercent",
-    "pfWageCeiling",
-    "esiWageCeiling"
-  ];
-
-  const data = {};
-
-  for (const key of keys) {
-    if (req.body?.[key] !== undefined) {
-      data[key] = n(req.body[key]);
-    }
-  }
-
-  for (const key of [
-    "hraBase",
-    "daBase",
-    "conveyanceBase",
-    "otherAllowanceBase",
-    "gratuityBase",
-    "pfBase",
-    "esiBase"
-  ]) {
-    if (req.body?.[key] !== undefined) {
-      data[key] = String(req.body[key]);
-    }
-  }
-
-  for (const key of [
-    "pfCeilingEnabled",
-    "esiCeilingEnabled"
-  ]) {
-    if (req.body?.[key] !== undefined) {
-      data[key] = Boolean(req.body[key]);
-    }
-  }
-
-  if (
-    req.body?.stateRules &&
-    typeof req.body.stateRules === "object"
-  ) {
-    const cleaned = {};
-
-    for (const [state, rule] of Object.entries(
-      req.body.stateRules
-    )) {
-      if (!rule || typeof rule !== "object") continue;
-
-      cleaned[state] = {};
-
-      for (const key of STATE_RULE_KEYS) {
-        if (rule[key] === undefined) continue;
-
-        if (
-          key.endsWith("Percent") ||
-          key.endsWith("Ceiling")
-        ) {
-          cleaned[state][key] = n(rule[key]);
-        } else if (key.endsWith("Enabled")) {
-          cleaned[state][key] = Boolean(rule[key]);
-        } else {
-          cleaned[state][key] = String(rule[key]);
-        }
-      }
-
-      if (rule.pfWageCeiling !== undefined) {
-        cleaned[state].pfWageCeiling =
-          n(rule.pfWageCeiling);
-      }
-
-      if (rule.esiWageCeiling !== undefined) {
-        cleaned[state].esiWageCeiling =
-          n(rule.esiWageCeiling);
-      }
-    }
-
-    data.stateRules = cleaned;
-  }
-
-  const structure = [
-    data.basicPercent,
-    data.hraPercent,
-    data.daPercent,
-    data.conveyancePercent,
-    data.otherAllowancePercent
-  ].reduce(
-    (a, b) =>
-      a + (Number.isFinite(b) ? b : 0),
-    0
-  );
-
-  if (structure > 100) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Basic + HRA + DA + Conveyance + Other Allowance percentages cannot exceed 100%."
-    });
-  }
-
-  const settings =
-    await PayrollSetting.findOneAndUpdate(
-      { key: "default" },
-      {
-        $set: data,
-        $setOnInsert: {
-          key: "default"
-        }
-      },
-      {
-        upsert: true,
-        new: true,
-        runValidators: true
-      }
-    );
-
-  res.json({
-    success: true,
-    settings
-  });
-}
-
-
-/* =========================================================
-   COMPANY
-   ========================================================= */
-
-export async function createCompany(req, res) {
-  const name = String(
-    req.body?.name || ""
-  ).trim();
-
-  if (!name) {
-    return res.status(400).json({
-      success: false,
-      message: "Company name is required."
-    });
-  }
-
+export async function getEmployees(req, res) {
   try {
-    const company =
-      await Company.create({ name });
+    const employees = await Employee.find({})
+      .sort({ name: 1 });
+
+    res.json({
+      success: true,
+      employees,
+    });
+  } catch (error) {
+    console.error("getEmployees:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+export async function createEmployee(req, res) {
+  try {
+    const employee = await Employee.create(req.body);
 
     res.status(201).json({
       success: true,
-      company
+      employee,
     });
   } catch (error) {
-    if (error?.code === 11000) {
-      return res.status(409).json({
+    console.error("createEmployee:", error);
+
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+export async function updateEmployee(req, res) {
+  try {
+    const employee =
+      await Employee.findByIdAndUpdate(
+        req.params.id,
+        req.body,
+        {
+          new: true,
+          runValidators: true,
+        }
+      );
+
+    if (!employee) {
+      return res.status(404).json({
         success: false,
-        message: "Company already exists."
+        message: "Employee not found.",
       });
     }
 
-    throw error;
-  }
-}
+    res.json({
+      success: true,
+      employee,
+    });
+  } catch (error) {
+    console.error("updateEmployee:", error);
 
-
-/* =========================================================
-   SALARY HELPERS
-   ========================================================= */
-
-function baseAmount(
-  base,
-  gross,
-  basic,
-  da
-) {
-  if (base === "basic") return basic;
-
-  if (base === "basicDa") {
-    return basic + da;
-  }
-
-  return gross;
-}
-
-
-const STATE_RULE_KEYS = [
-  "basicPercent",
-  "hraPercent",
-  "daPercent",
-  "conveyancePercent",
-  "otherAllowancePercent",
-
-  "gratuityPercent",
-  "pfPercent",
-  "esiPercent",
-
-  "employerPfPercent",
-  "employerEsiPercent",
-
-  "hraBase",
-  "daBase",
-  "conveyanceBase",
-  "otherAllowanceBase",
-  "gratuityBase",
-  "pfBase",
-
-  "pfCeilingEnabled",
-  "pfWageCeiling",
-
-  "esiBase",
-  "esiCeilingEnabled",
-  "esiWageCeiling"
-];
-
-
-function effectivePayrollSettings(
-  settings,
-  state
-) {
-  const common = {
-    ...settings
-  };
-
-  const rules =
-    settings?.stateRules &&
-    typeof settings.stateRules === "object"
-      ? settings.stateRules
-      : {};
-
-  const override =
-    state ? rules[state] : null;
-
-  if (
-    !override ||
-    typeof override !== "object"
-  ) {
-    return common;
-  }
-
-  const merged = {
-    ...common
-  };
-
-  for (const key of STATE_RULE_KEYS) {
-    if (override[key] !== undefined) {
-      merged[key] = override[key];
-    }
-  }
-
-  return merged;
-}
-
-
-function salaryBreakup(
-  body,
-  settings
-) {
-  const gross =
-    n(body.grossSalary);
-
-  const basic =
-    +(
-      gross *
-      n(settings.basicPercent) /
-      100
-    ).toFixed(2);
-
-  const daBaseAmount =
-    baseAmount(
-      settings.daBase,
-      gross,
-      basic,
-      0
-    );
-
-  const da =
-    +(
-      daBaseAmount *
-      n(settings.daPercent) /
-      100
-    ).toFixed(2);
-
-  const hra =
-    +(
-      baseAmount(
-        settings.hraBase,
-        gross,
-        basic,
-        da
-      ) *
-      n(settings.hraPercent) /
-      100
-    ).toFixed(2);
-
-  const conveyance =
-    +(
-      baseAmount(
-        settings.conveyanceBase,
-        gross,
-        basic,
-        da
-      ) *
-      n(settings.conveyancePercent) /
-      100
-    ).toFixed(2);
-
-  const otherAllowance =
-    +(
-      baseAmount(
-        settings.otherAllowanceBase,
-        gross,
-        basic,
-        da
-      ) *
-      n(settings.otherAllowancePercent) /
-      100
-    ).toFixed(2);
-
-  const pfWage =
-    baseAmount(
-      settings.pfBase,
-      gross,
-      basic,
-      da
-    );
-
-  const pfBaseAmount =
-    settings.pfCeilingEnabled
-      ? Math.min(
-          pfWage,
-          n(settings.pfWageCeiling)
-        )
-      : pfWage;
-
-  const pf =
-    body.pfApplicable
-      ? +(
-          pfBaseAmount *
-          n(settings.pfPercent) /
-          100
-        ).toFixed(2)
-      : 0;
-
-  const esiWage =
-    baseAmount(
-      settings.esiBase,
-      gross,
-      basic,
-      da
-    );
-
-  const esiEligible =
-    !settings.esiCeilingEnabled ||
-    esiWage <=
-      n(settings.esiWageCeiling);
-
-  const esi =
-    body.esiApplicable &&
-    esiEligible
-      ? +(
-          esiWage *
-          n(settings.esiPercent) /
-          100
-        ).toFixed(2)
-      : 0;
-
-  const employerPf =
-    body.pfApplicable
-      ? +(
-          pfBaseAmount *
-          n(settings.employerPfPercent) /
-          100
-        ).toFixed(2)
-      : 0;
-
-  const employerEsi =
-    body.esiApplicable &&
-    esiEligible
-      ? +(
-          esiWage *
-          n(settings.employerEsiPercent) /
-          100
-        ).toFixed(2)
-      : 0;
-
-  const gratuityBaseAmount =
-    settings.gratuityBase === "gross"
-      ? gross
-      : settings.gratuityBase === "basicDa"
-        ? basic + da
-        : basic;
-
-  const gratuity =
-    +(
-      gratuityBaseAmount *
-      n(settings.gratuityPercent) /
-      100
-    ).toFixed(2);
-
-  const ctc =
-    +(
-      gross +
-      employerPf +
-      employerEsi +
-      gratuity
-    ).toFixed(2);
-
-  return {
-    grossSalary: gross,
-    basicSalary: basic,
-    hra,
-    da,
-    conveyance,
-    otherAllowance,
-
-    pfAmount: pf,
-    esiAmount: esi,
-
-    pfRate: n(settings.pfPercent),
-    esiRate: n(settings.esiPercent),
-
-    employerPfAmount: employerPf,
-    employerPfRate:
-      n(settings.employerPfPercent),
-
-    employerEsiAmount: employerEsi,
-    employerEsiRate:
-      n(settings.employerEsiPercent),
-
-    gratuityAmount: gratuity,
-    gratuityPercent:
-      n(settings.gratuityPercent),
-
-    ctc,
-
-    pfWageBase: pfWage,
-    pfBaseAmount,
-
-    esiWageBase: esiWage,
-    esiEligible
-  };
-}
-
-
-/* =========================================================
-   EMPLOYEE CREATE / UPDATE
-   ========================================================= */
-
-export async function createEmployee(
-  req,
-  res
-) {
-  const body = {
-    ...req.body
-  };
-
-  if (!String(body.name || "").trim()) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
-      message: "Employee name is required."
+      message: error.message,
     });
   }
+}
 
-  if (!body.joiningDate) {
-    return res.status(400).json({
+/* =========================================================
+   OPTIONS
+========================================================= */
+
+export async function getOptions(req, res) {
+  try {
+    const [employees, shifts] =
+      await Promise.all([
+        Employee.find({}).sort({ name: 1 }),
+        Shift.find({ status: { $ne: "Inactive" } }).sort({
+          name: 1,
+        }),
+      ]);
+
+    res.json({
+      success: true,
+      employees,
+      shifts,
+    });
+  } catch (error) {
+    console.error("getOptions:", error);
+
+    res.status(500).json({
       success: false,
-      message: "Joining date is required."
+      message: error.message,
     });
   }
+}
 
-  if (
-    !body.employeeCode ||
-    !String(body.employeeCode).trim()
-  ) {
-    const year =
-      new Date().getFullYear();
+export async function saveOptions(req, res) {
+  res.json({
+    success: true,
+    message: "Options saved.",
+  });
+}
 
-    const prefix =
-      `EMP-${year}-`;
-
-    const latest =
-      await Employee.findOne({
-        employeeCode:
-          new RegExp(
-            `^${prefix}\\d+$`
-          )
-      })
-        .sort({
-          employeeCode: -1
-        })
-        .select("employeeCode")
-        .lean();
-
-    const last =
-      latest?.employeeCode
-        ?.match(/(\d+)$/)?.[1];
-
-    body.employeeCode =
-      `${prefix}${String(
-        Number(last || 0) + 1
-      ).padStart(5, "0")}`;
-  }
-
-  for (const f of [
-    "dateOfBirth",
-    "joiningDate"
-  ]) {
-    if (body[f]) {
-      body[f] = new Date(body[f]);
-    }
-  }
-
-  for (const f of [
-    "grossSalary",
-    "basicSalary",
-    "hra",
-    "da",
-    "conveyance",
-    "otherAllowance",
-    "professionalTax",
-    "otherDeduction",
-    "pfRate",
-    "pfAmount",
-    "esiRate",
-    "esiAmount",
-    "employerPfRate",
-    "employerPfAmount",
-    "employerEsiRate",
-    "employerEsiAmount",
-    "gratuityPercent",
-    "gratuityAmount",
-    "ctc"
-  ]) {
-    body[f] = n(body[f]);
-  }
-
-  let settings =
-    await PayrollSetting.findOne({
-      key: "default"
-    }).lean();
-
-  if (!settings) {
-    settings =
-      await PayrollSetting.create({
-        key: "default"
-      });
-  }
-
-  settings =
-    effectivePayrollSettings(
-      settings,
-      body.state
-    );
-
-  Object.assign(
-    body,
-    salaryBreakup(
-      body,
-      settings
-    )
-  );
-
-  const employee =
-    await Employee.create(body);
-
+export async function createCompany(req, res) {
   res.status(201).json({
     success: true,
-    employee
+    message: "Company created.",
+    company: req.body,
   });
 }
 
+/* =========================================================
+   ATTENDANCE
+========================================================= */
 
-export async function updateEmployee(
-  req,
-  res
-) {
-  const current =
-    await Employee.findById(
-      req.params.id
-    );
+export async function getAttendance(req, res) {
+  try {
+    const {
+      from,
+      to,
+      includeStaff,
+    } = req.query;
 
-  if (!current) {
-    return res.status(404).json({
-      success: false,
-      message: "Employee not found."
-    });
-  }
+    const query = {};
 
-  const body = {
-    ...req.body
-  };
+    if (from || to) {
+      query.date = {};
 
-  let settings =
-    await PayrollSetting.findOne({
-      key: "default"
-    }).lean();
-
-  if (!settings) {
-    settings =
-      await PayrollSetting.create({
-        key: "default"
-      });
-  }
-
-  settings =
-    effectivePayrollSettings(
-      settings,
-      body.state
-    );
-
-  if (
-    body.grossSalary !== undefined
-  ) {
-    Object.assign(
-      body,
-      salaryBreakup(
-        body,
-        settings
-      )
-    );
-  }
-
-  for (const f of [
-    "dateOfBirth",
-    "joiningDate"
-  ]) {
-    if (body[f]) {
-      body[f] = new Date(body[f]);
-    }
-  }
-
-  const employee =
-    await Employee.findByIdAndUpdate(
-      req.params.id,
-      body,
-      {
-        new: true,
-        runValidators: true
+      if (from) {
+        query.date.$gte =
+          new Date(`${from}T00:00:00.000Z`);
       }
-    );
 
-  res.json({
-    success: true,
-    employee
-  });
-}
-
-
-/* =========================================================
-   ATTENDANCE HELPERS
-   ========================================================= */
-
-function isoDays(
-  from,
-  to
-) {
-  const out = [];
-
-  const d =
-    new Date(
-      `${from}T00:00:00.000Z`
-    );
-
-  const end =
-    new Date(
-      `${to}T00:00:00.000Z`
-    );
-
-  while (d < end) {
-    out.push(
-      d.toISOString().slice(0, 10)
-    );
-
-    d.setUTCDate(
-      d.getUTCDate() + 1
-    );
-  }
-
-  return out;
-}
-
-
-function dayRuleForDate(
-  settings,
-  iso
-) {
-  const weekday =
-    new Date(
-      `${iso}T00:00:00.000Z`
-    ).getUTCDay();
-
-  const key = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday"
-  ][weekday];
-
-  return key === "saturday"
-    ? settings?.saturday
-    : settings?.days?.[key];
-}
-
-
-/* =========================================================
-   ATTENDANCE LIST
-   ========================================================= */
-
-export async function attendance(
-  req,
-  res
-) {
-  const query = {};
-
-  if (req.query.employeeId) {
-    query.employeeId =
-      req.query.employeeId;
-  }
-
-  if (req.query.location) {
-    query.workLocation =
-      req.query.location;
-  }
-
-  if (
-    req.query.from ||
-    req.query.to
-  ) {
-    query.date = {};
-
-    if (req.query.from) {
-      query.date.$gte =
-        new Date(
-          `${req.query.from}T00:00:00.000Z`
-        );
+      if (to) {
+        query.date.$lt =
+          new Date(`${to}T00:00:00.000Z`);
+      }
     }
 
-    if (req.query.to) {
-      query.date.$lt =
-        new Date(
-          `${req.query.to}T00:00:00.000Z`
-        );
-    }
-  }
-
-  const rows =
-    await Attendance.find(query)
+    let attendance = await Attendance.find(query)
       .populate(
         "employeeId",
-        "employeeCode name workLocation state shiftId"
+        "employeeCode name department designation workLocation location"
       )
       .populate(
         "shiftId",
-        "name startTime endTime breakMinutes graceMinutes"
+        "name startTime endTime breakMinutes graceMinutes overtimeAfterMinutes"
       )
       .sort({
-        date: 1
+        date: 1,
       });
 
-  const includeStaff =
-    req.query.includeStaff !== "0";
-
-  if (
-    !includeStaff ||
-    !req.query.from ||
-    !req.query.to
-  ) {
-    return res.json({
-      success: true,
-      attendance: rows
-    });
-  }
-
-  const settings =
-    await AttendanceSetting.findOne({
-      key: "default"
-    }).lean();
-
-  const employees =
-    await Employee.find({
-      status: "Active"
-    })
-      .populate(
-        "shiftId",
-        "name startTime endTime breakMinutes graceMinutes"
-      )
-      .lean();
-
-  const rowMap =
-    new Map(
-      rows.map(r => [
-        `${String(
-          r.employeeId?._id ||
-          r.employeeId
-        )}|${new Date(
-          r.date
+    /*
+      includeStaff=1 means employees without an
+      attendance record must also appear.
+    */
+    if (includeStaff === "1") {
+      const existing = new Set(
+        attendance.map(
+          (a) =>
+            `${a.employeeId?._id}_${dateKey(a.date)}`
         )
-          .toISOString()
-          .slice(0, 10)}`,
-        r
-      ])
-    );
-
-  const dates =
-    isoDays(
-      req.query.from,
-      req.query.to
-    );
-
-  const merged = [];
-
-  for (const employee of employees) {
-    if (
-      req.query.location &&
-      (
-        employee.workLocation ||
-        employee.location ||
-        ""
-      ) !== req.query.location
-    ) {
-      continue;
-    }
-
-    for (const iso of dates) {
-      const key =
-        `${employee._id}|${iso}`;
-
-      const existing =
-        rowMap.get(key);
-
-      if (existing) {
-        merged.push(existing);
-        continue;
-      }
-
-      const rule =
-        dayRuleForDate(
-          settings,
-          iso
-        ) || {
-          type: "Working",
-          shiftId: null,
-          overtimeAllowed: true
-        };
-
-      const shiftId =
-        employee.shiftId?._id ||
-        rule.shiftId ||
-        settings?.defaultShiftId ||
-        null;
-
-      let shift =
-        employee.shiftId ||
-        null;
-
-      if (!shift && shiftId) {
-        shift =
-          await Shift.findById(
-            shiftId
-          ).lean();
-      }
-
-      const status =
-        rule.type === "Week Off"
-          ? "Week Off"
-          : rule.type === "Half Day"
-            ? "Half Day"
-            : "Absent";
-
-      merged.push({
-        _id:
-          `virtual-${employee._id}-${iso}`,
-
-        employeeId: {
-          ...employee,
-          shiftId:
-            employee.shiftId?._id ||
-            null
-        },
-
-        date:
-          new Date(
-            `${iso}T00:00:00.000Z`
-          ),
-
-        status,
-
-        checkIn: "",
-        checkOut: "",
-
-        workLocation:
-          employee.workLocation ||
-          employee.location ||
-          "",
-
-        shiftId:
-          shift?._id ||
-          null,
-
-        shiftName:
-          shift?.name ||
-          "",
-
-        shift,
-
-        overtimeHours: 0,
-        cuttingMinutes: 0,
-        fineHours: 0,
-
-        virtual: true
-      });
-    }
-  }
-
-  merged.sort(
-    (a, b) =>
-      new Date(a.date) -
-        new Date(b.date) ||
-      String(
-        a.employeeId?.name || ""
-      ).localeCompare(
-        String(
-          b.employeeId?.name || ""
-        )
-      )
-  );
-
-  res.json({
-    success: true,
-    attendance: merged
-  });
-}
-
-
-/* =========================================================
-   EXCEL IMPORT
-   ========================================================= */
-
-function excelDateToISO(
-  value
-) {
-  if (value instanceof Date) {
-    return value
-      .toISOString()
-      .slice(0, 10);
-  }
-
-  if (typeof value === "number") {
-    const d =
-      XLSX.SSF.parse_date_code(
-        value
       );
 
-    if (d) {
-      return `${d.y}-${String(
-        d.m
-      ).padStart(2, "0")}-${String(
-        d.d
-      ).padStart(2, "0")}`;
+      const employees = await Employee.find({})
+        .sort({ name: 1 });
+
+      const fromDate = from
+        ? new Date(`${from}T00:00:00.000Z`)
+        : null;
+
+      const toDate = to
+        ? new Date(`${to}T00:00:00.000Z`)
+        : null;
+
+      if (
+        fromDate &&
+        toDate &&
+        fromDate.getTime() <
+          toDate.getTime()
+      ) {
+        for (
+          let d = new Date(fromDate);
+          d < toDate;
+          d.setUTCDate(d.getUTCDate() + 1)
+        ) {
+          for (const emp of employees) {
+            const key =
+              `${emp._id}_${dateKey(d)}`;
+
+            if (existing.has(key)) continue;
+
+            attendance.push({
+              _id: `virtual-${emp._id}-${dateKey(d)}`,
+              employeeId: emp,
+              date: new Date(d),
+              status: "Absent",
+              checkIn: "",
+              checkOut: "",
+              workLocation:
+                emp.workLocation ||
+                emp.location ||
+                "",
+              shiftId: null,
+              shiftName: "",
+              overtimeHours: 0,
+              cuttingMinutes: 0,
+              note: "",
+              virtual: true,
+            });
+          }
+        }
+
+        attendance.sort(
+          (a, b) =>
+            new Date(a.date) -
+            new Date(b.date)
+        );
+      }
     }
+
+    res.json({
+      success: true,
+      attendance,
+    });
+  } catch (error) {
+    console.error("getAttendance:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
-
-  const raw =
-    String(value || "").trim();
-
-  if (!raw) return "";
-
-  const m =
-    raw.match(
-      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/
-    );
-
-  if (m) {
-    return `${m[3]}-${String(
-      m[2]
-    ).padStart(2, "0")}-${String(
-      m[1]
-    ).padStart(2, "0")}`;
-  }
-
-  const d =
-    new Date(raw);
-
-  return Number.isNaN(
-    d.getTime()
-  )
-    ? ""
-    : d.toISOString().slice(0, 10);
 }
 
+export async function saveAttendance(req, res) {
+  try {
+    const {
+      employeeId,
+      date,
+      shiftId,
+      checkIn,
+      checkOut,
+      status,
+      workLocation,
+      note,
+    } = req.body;
 
-function normalizeKey(k) {
-  return String(k || "")
-    .toLowerCase()
-    .replace(
-      /[^a-z0-9]/g,
-      ""
-    );
-}
+    if (!employeeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee is required.",
+      });
+    }
 
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date is required.",
+      });
+    }
 
-function rowValue(
-  row,
-  aliases
-) {
-  const map =
-    Object.fromEntries(
-      Object.entries(row).map(
-        ([k, v]) => [
-          normalizeKey(k),
-          v
-        ]
-      )
-    );
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required.",
+      });
+    }
 
-  for (const a of aliases) {
     if (
-      map[normalizeKey(a)] !==
-      undefined
+      status === "Present" &&
+      (!checkIn || !checkOut)
     ) {
-      return map[
-        normalizeKey(a)
-      ];
+      return res.status(400).json({
+        success: false,
+        message:
+          "Out time is mandatory to mark present.",
+      });
     }
-  }
 
-  return "";
+    const employee =
+      await Employee.findById(employeeId);
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found.",
+      });
+    }
+
+    let shift = null;
+
+    if (shiftId) {
+      shift = await Shift.findById(shiftId);
+    }
+
+    const adjustment =
+      status === "Present"
+        ? calculateTimeAdjustments(
+            checkIn,
+            checkOut,
+            shift
+          )
+        : {
+            overtimeHours: 0,
+            cuttingMinutes: 0,
+          };
+
+    const attendance =
+      await Attendance.findOneAndUpdate(
+        {
+          employeeId,
+          date: new Date(date),
+        },
+        {
+          $set: {
+            employeeId,
+            date: new Date(date),
+            status,
+            checkIn: normalizeTime(checkIn),
+            checkOut: normalizeTime(checkOut),
+            workLocation:
+              workLocation ||
+              employee.workLocation ||
+              employee.location ||
+              "",
+            shiftId: shift?._id || null,
+            shiftName: shift?.name || "",
+            overtimeHours:
+              adjustment.overtimeHours,
+            cuttingMinutes:
+              adjustment.cuttingMinutes,
+
+            /*
+              New attendance save requires
+              fresh approval.
+            */
+            overtimeApproved: false,
+            overtimeApprovedBy: null,
+            overtimeApprovedAt: null,
+
+            cuttingApproved: false,
+            cuttingApprovedBy: null,
+            cuttingApprovedAt: null,
+
+            note: note || "",
+          },
+        },
+        {
+          new: true,
+          upsert: true,
+          setDefaultsOnInsert: true,
+        }
+      );
+
+    res.json({
+      success: true,
+      message: "Attendance saved successfully.",
+      attendance,
+    });
+  } catch (error) {
+    console.error("saveAttendance:", error);
+
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
 }
 
+/* =========================================================
+   BULK EXCEL ATTENDANCE IMPORT
+========================================================= */
 
-export async function attendanceImport(
+export async function importAttendanceExcel(
   req,
   res
 ) {
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Excel file is required."
-    });
-  }
-
   try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please upload an Excel or CSV file.",
+      });
+    }
+
     const workbook =
-      XLSX.read(
-        req.file.buffer,
-        {
-          type: "buffer",
-          cellDates: true
-        }
-      );
+      xlsx.read(req.file.buffer, {
+        type: "buffer",
+        cellDates: true,
+      });
+
+    const sheetName =
+      workbook.SheetNames[0];
+
+    if (!sheetName) {
+      return res.status(400).json({
+        success: false,
+        message: "Excel file has no worksheet.",
+      });
+    }
 
     const sheet =
-      workbook.Sheets[
-        workbook.SheetNames[0]
-      ];
+      workbook.Sheets[sheetName];
 
-    const rows =
-      XLSX.utils.sheet_to_json(
-        sheet,
-        {
-          defval: ""
+    const data =
+      xlsx.utils.sheet_to_json(sheet, {
+        defval: "",
+        raw: true,
+      });
+
+    if (!data.length) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Excel file contains no attendance rows.",
+      });
+    }
+
+    /*
+      Accept common variations of column names.
+    */
+    function getValue(row, names) {
+      for (const name of names) {
+        if (
+          Object.prototype.hasOwnProperty.call(
+            row,
+            name
+          )
+        ) {
+          return row[name];
         }
-      );
+      }
+
+      /*
+        Case-insensitive fallback.
+      */
+      const keys = Object.keys(row);
+
+      for (const name of names) {
+        const found = keys.find(
+          (key) =>
+            key.trim().toLowerCase() ===
+            name.trim().toLowerCase()
+        );
+
+        if (found) return row[found];
+      }
+
+      return "";
+    }
 
     const employees =
-      await Employee.find().lean();
+      await Employee.find({});
 
-    const byCode =
-      new Map(
-        employees.map(e => [
-          String(
-            e.employeeCode || ""
-          ).toLowerCase(),
-          e
-        ])
-      );
+    const employeeMap = new Map();
 
-    const byName =
-      new Map(
-        employees.map(e => [
-          String(
-            e.name || ""
-          ).toLowerCase(),
-          e
-        ])
-      );
+    for (const employee of employees) {
+      if (employee.employeeCode) {
+        employeeMap.set(
+          clean(employee.employeeCode).toLowerCase(),
+          employee
+        );
+      }
+    }
+
+    const shifts =
+      await Shift.find({});
+
+    const shiftMap = new Map();
+
+    for (const shift of shifts) {
+      if (shift.name) {
+        shiftMap.set(
+          clean(shift.name).toLowerCase(),
+          shift
+        );
+      }
+    }
 
     let imported = 0;
     let skipped = 0;
@@ -1426,1143 +744,1151 @@ export async function attendanceImport(
     const errors = [];
 
     for (
-      let i = 0;
-      i < rows.length;
-      i++
+      let index = 0;
+      index < data.length;
+      index++
     ) {
-      const r = rows[i];
+      const row = data[index];
 
-      const code =
-        String(
-          rowValue(
-            r,
-            [
+      const excelRow = index + 2;
+
+      try {
+        const employeeCode =
+          clean(
+            getValue(row, [
               "Employee Code",
               "EmployeeCode",
-              "Code",
+              "Employee code",
               "Emp Code",
-              "EmpCode"
-            ]
-          )
-        )
-          .trim()
-          .toLowerCase();
+              "EmpCode",
+              "Code",
+            ])
+          );
 
-      const name =
-        String(
-          rowValue(
-            r,
-            [
-              "Employee Name",
-              "Name",
-              "Staff Name"
-            ]
-          )
-        )
-          .trim()
-          .toLowerCase();
+        const rawDate =
+          getValue(row, [
+            "Date",
+            "Attendance Date",
+            "attendanceDate",
+          ]);
 
-      const employee =
-        (code &&
-          byCode.get(code)) ||
-        (name &&
-          byName.get(name));
+        const rawStatus =
+          clean(
+            getValue(row, [
+              "Status",
+              "Attendance Status",
+            ])
+          );
 
-      const date =
-        excelDateToISO(
-          rowValue(
-            r,
-            [
-              "Date",
-              "Attendance Date",
-              "Work Date"
-            ]
-          )
+        const rawCheckIn =
+          getValue(row, [
+            "Check In",
+            "CheckIn",
+            "In",
+            "Start Time",
+            "Start",
+          ]);
+
+        const rawCheckOut =
+          getValue(row, [
+            "Check Out",
+            "CheckOut",
+            "Out",
+            "End Time",
+            "End",
+          ]);
+
+        const workLocation =
+          clean(
+            getValue(row, [
+              "Work Location",
+              "Location",
+              "WorkLocation",
+            ])
+          );
+
+        const shiftName =
+          clean(
+            getValue(row, [
+              "Shift Name",
+              "Shift",
+              "ShiftName",
+            ])
+          );
+
+        const note =
+          clean(
+            getValue(row, [
+              "Note",
+              "Notes",
+              "Employee Note",
+              "Remarks",
+            ])
+          );
+
+        if (!employeeCode) {
+          throw new Error(
+            "Employee Code is missing."
+          );
+        }
+
+        const employee =
+          employeeMap.get(
+            employeeCode.toLowerCase()
+          );
+
+        if (!employee) {
+          throw new Error(
+            `Employee Code "${employeeCode}" not found in Employee Master.`
+          );
+        }
+
+        const parsedDate =
+          parseAttendanceDate(rawDate);
+
+        if (!parsedDate) {
+          throw new Error(
+            "Invalid or missing Date."
+          );
+        }
+
+        /*
+          Normalize status.
+        */
+        let status = rawStatus;
+
+        const statusMap = {
+          p: "Present",
+          present: "Present",
+
+          a: "Absent",
+          absent: "Absent",
+
+          hd: "Half Day",
+          "half day": "Half Day",
+          halfday: "Half Day",
+
+          l: "Leave",
+          leave: "Leave",
+
+          h: "Holiday",
+          holiday: "Holiday",
+
+          wo: "Week Off",
+          "week off": "Week Off",
+          weekoff: "Week Off",
+        };
+
+        status =
+          statusMap[
+            status.toLowerCase()
+          ] || status;
+
+        const validStatuses = [
+          "Present",
+          "Absent",
+          "Half Day",
+          "Leave",
+          "Holiday",
+          "Week Off",
+        ];
+
+        if (
+          !validStatuses.includes(status)
+        ) {
+          throw new Error(
+            `Invalid Status "${rawStatus}".`
+          );
+        }
+
+        /*
+          Find shift by name.
+        */
+        let shift = null;
+
+        if (shiftName) {
+          shift =
+            shiftMap.get(
+              shiftName.toLowerCase()
+            ) || null;
+
+          if (!shift) {
+            throw new Error(
+              `Shift "${shiftName}" not found.`
+            );
+          }
+        }
+
+        /*
+          Normalize times.
+        */
+        const checkIn =
+          normalizeTime(rawCheckIn);
+
+        const checkOut =
+          normalizeTime(rawCheckOut);
+
+        /*
+          Present attendance requires both
+          In and Out.
+        */
+        if (
+          status === "Present" &&
+          (!checkIn || !checkOut)
+        ) {
+          throw new Error(
+            "Present attendance requires Check In and Check Out."
+          );
+        }
+
+        const adjustment =
+          status === "Present"
+            ? calculateTimeAdjustments(
+                checkIn,
+                checkOut,
+                shift
+              )
+            : {
+                overtimeHours: 0,
+                cuttingMinutes: 0,
+              };
+
+        /*
+          Employee location is the fallback.
+        */
+        const finalLocation =
+          workLocation ||
+          employee.workLocation ||
+          employee.location ||
+          "";
+
+        /*
+          UPSERT:
+          Same Employee + Date will update
+          the existing attendance record.
+        */
+        await Attendance.findOneAndUpdate(
+          {
+            employeeId: employee._id,
+            date: parsedDate,
+          },
+          {
+            $set: {
+              employeeId: employee._id,
+              date: parsedDate,
+              status,
+              checkIn,
+              checkOut,
+              workLocation: finalLocation,
+
+              shiftId:
+                shift?._id || null,
+
+              shiftName:
+                shift?.name ||
+                shiftName ||
+                "",
+
+              overtimeHours:
+                adjustment.overtimeHours,
+
+              cuttingMinutes:
+                adjustment.cuttingMinutes,
+
+              /*
+                New imported attendance needs
+                fresh payroll approval.
+              */
+              overtimeApproved: false,
+              overtimeApprovedBy: null,
+              overtimeApprovedAt: null,
+
+              cuttingApproved: false,
+              cuttingApprovedBy: null,
+              cuttingApprovedAt: null,
+
+              note,
+            },
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+          }
         );
 
-      if (!employee || !date) {
+        imported++;
+      } catch (rowError) {
         skipped++;
 
-        errors.push(
-          `Row ${i + 2}: employee code/name or date not found.`
-        );
-
-        continue;
+        errors.push({
+          row: excelRow,
+          message: rowError.message,
+        });
       }
-
-      const statusRaw =
-        String(
-          rowValue(
-            r,
-            [
-              "Status",
-              "Attendance",
-              "Present/Absent"
-            ]
-          )
-        )
-          .trim()
-          .toLowerCase();
-
-      const status =
-        statusRaw.includes("absent") ||
-        statusRaw === "a"
-          ? "Absent"
-          : statusRaw.includes("half") ||
-              statusRaw === "hd"
-            ? "Half Day"
-            : statusRaw.includes("leave") ||
-                statusRaw === "l"
-              ? "Leave"
-              : statusRaw.includes("holiday")
-                ? "Holiday"
-                : statusRaw.includes("week")
-                  ? "Week Off"
-                  : "Present";
-
-      const workLocation =
-        String(
-          rowValue(
-            r,
-            [
-              "Work Location",
-              "Location"
-            ]
-          ) ||
-            employee.workLocation ||
-            employee.location ||
-            ""
-        ).trim();
-
-      const shiftName =
-        String(
-          rowValue(
-            r,
-            [
-              "Shift",
-              "Shift Name"
-            ]
-          ) || ""
-        ).trim();
-
-      let shift =
-        shiftName
-          ? await Shift.findOne({
-              name: shiftName
-            })
-          : null;
-
-      if (
-        !shift &&
-        employee.shiftId
-      ) {
-        shift =
-          await Shift.findById(
-            employee.shiftId
-          );
-      }
-
-      const data = {
-        employeeId:
-          employee._id,
-
-        date:
-          new Date(
-            `${date}T00:00:00.000Z`
-          ),
-
-        status,
-
-        checkIn:
-          String(
-            rowValue(
-              r,
-              [
-                "Check In",
-                "CheckIn",
-                "In Time",
-                "Punch In"
-              ]
-            ) || ""
-          ).trim(),
-
-        checkOut:
-          String(
-            rowValue(
-              r,
-              [
-                "Check Out",
-                "CheckOut",
-                "Out Time",
-                "Punch Out"
-              ]
-            ) || ""
-          ).trim(),
-
-        note:
-          String(
-            rowValue(
-              r,
-              [
-                "Note",
-                "Remarks"
-              ]
-            ) || ""
-          ).trim(),
-
-        workLocation,
-
-        shiftId:
-          shift?._id || null,
-
-        shiftName:
-          shift?.name ||
-          shiftName
-      };
-
-      /*
-        Calculate OT/Cutting from
-        actual In/Out and shift.
-      */
-      if (
-        data.checkIn &&
-        data.checkOut &&
-        shift
-      ) {
-        const calc =
-          calculateTimeAdjustments(
-            data.checkIn,
-            data.checkOut,
-            shift
-          );
-
-        data.overtimeHours =
-          calc.overtimeHours;
-
-        data.cuttingMinutes =
-          calc.cuttingMinutes;
-      } else {
-        data.overtimeHours = 0;
-        data.cuttingMinutes = 0;
-      }
-
-      /*
-        Imported attendance requires
-        approval again.
-      */
-      data.overtimeApproved = false;
-      data.cuttingApproved = false;
-      data.overtimeApprovedBy = null;
-      data.overtimeApprovedAt = null;
-      data.cuttingApprovedBy = null;
-      data.cuttingApprovedAt = null;
-
-      await Attendance.findOneAndUpdate(
-        {
-          employeeId:
-            employee._id,
-          date:
-            data.date
-        },
-        data,
-        {
-          upsert: true,
-          new: true,
-          runValidators: true
-        }
-      );
-
-      imported++;
     }
 
     res.json({
       success: true,
+      message:
+        "Attendance Excel import completed.",
       imported,
       skipped,
-      errors:
-        errors.slice(0, 50)
+      total: data.length,
+      errors,
     });
-
   } catch (error) {
-    res.status(400).json({
+    console.error(
+      "importAttendanceExcel:",
+      error
+    );
+
+    res.status(500).json({
       success: false,
       message:
         error.message ||
-        "Excel import failed."
+        "Attendance Excel import failed.",
     });
   }
 }
-
-
-/* =========================================================
-   SAVE ATTENDANCE
-   ========================================================= */
-
-export async function saveAttendance(
-  req,
-  res
-) {
-  const employee =
-    await Employee.findById(
-      req.body.employeeId
-    ).lean();
-
-  if (!employee) {
-    return res.status(404).json({
-      success: false,
-      message: "Employee not found."
-    });
-  }
-
-  const data = {
-    ...req.body,
-    date: new Date(
-      req.body.date
-    )
-  };
-
-  data.workLocation =
-    employee.workLocation ||
-    employee.location ||
-    req.body.workLocation ||
-    "";
-
-  let shift = null;
-
-  if (req.body.shiftId) {
-    shift =
-      await Shift.findById(
-        req.body.shiftId
-      ).lean();
-  } else if (employee.shiftId) {
-    shift =
-      await Shift.findById(
-        employee.shiftId
-      ).lean();
-  }
-
-  if (shift) {
-    data.shiftName =
-      shift.name;
-
-    data.shiftId =
-      shift._id;
-  }
-
-  /*
-    Present attendance must have
-    both In and Out time.
-  */
-  if (
-    data.checkIn &&
-    !data.checkOut &&
-    String(
-      req.body.status ||
-      "Present"
-    ) === "Present"
-  ) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Out time is mandatory to mark present."
-    });
-  }
-
-  /*
-    If both In and Out exist,
-    automatically mark Present.
-  */
-  if (
-    data.checkIn &&
-    data.checkOut
-  ) {
-    data.status = "Present";
-  } else if (
-    !data.checkIn &&
-    !data.checkOut &&
-    !data.status
-  ) {
-    data.status = "Absent";
-  }
-
-
-  /* =====================================================
-     OT / CUTTING CALCULATION
-     ===================================================== */
-
-  if (
-    data.checkIn &&
-    data.checkOut &&
-    shift
-  ) {
-    const calc =
-      calculateTimeAdjustments(
-        data.checkIn,
-        data.checkOut,
-        shift
-      );
-
-    /*
-      IMPORTANT:
-      Always use backend calculation.
-      Do not allow old frontend OT value
-      to overwrite the calculation.
-    */
-    data.overtimeHours =
-      calc.overtimeHours;
-
-    data.cuttingMinutes =
-      calc.cuttingMinutes;
-
-  } else {
-    data.overtimeHours = 0;
-    data.cuttingMinutes = 0;
-  }
-
-
-  /* =====================================================
-     RESET APPROVAL AFTER ATTENDANCE CHANGE
-     ===================================================== */
-
-  data.overtimeApproved = false;
-  data.cuttingApproved = false;
-
-  data.overtimeApprovedBy = null;
-  data.overtimeApprovedAt = null;
-
-  data.cuttingApprovedBy = null;
-  data.cuttingApprovedAt = null;
-
-
-  const row =
-    await Attendance.findOneAndUpdate(
-      {
-        employeeId:
-          req.body.employeeId,
-
-        date:
-          data.date
-      },
-
-      data,
-
-      {
-        upsert: true,
-        new: true,
-        runValidators: true
-      }
-    );
-
-  res.json({
-    success: true,
-    attendance: row
-  });
-}
-
-
-/* =========================================================
-   SHIFTS
-   ========================================================= */
-
-export async function shifts(
-  req,
-  res
-) {
-  res.json({
-    success: true,
-    shifts:
-      await Shift.find({
-        status: "Active"
-      }).sort({
-        name: 1
-      })
-  });
-}
-
-
-export async function createShift(
-  req,
-  res
-) {
-  const shift =
-    await Shift.create(
-      req.body
-    );
-
-  res.status(201).json({
-    success: true,
-    shift
-  });
-}
-
-
-export async function updateShift(
-  req,
-  res
-) {
-  const shift =
-    await Shift.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true
-      }
-    );
-
-  if (!shift) {
-    return res.status(404).json({
-      success: false,
-      message: "Shift not found."
-    });
-  }
-
-  res.json({
-    success: true,
-    shift
-  });
-}
-
 
 /* =========================================================
    ATTENDANCE SETTINGS
-   ========================================================= */
+========================================================= */
 
-export async function attendanceSettings(
+export async function getAttendanceSettings(
   req,
   res
 ) {
-  let settings =
-    await AttendanceSetting.findOne({
-      key: "default"
-    }).lean();
+  try {
+    let settings =
+      await AttendanceSetting.findOne({});
 
-  if (!settings) {
-    settings =
-      await AttendanceSetting.create({
-        key: "default"
+    if (!settings) {
+      settings =
+        await AttendanceSetting.create({
+          saturday: {
+            type: "Working",
+            shiftId: null,
+            overtimeAllowed: true,
+          },
+
+          days: {
+            monday: {
+              type: "Working",
+              shiftId: null,
+              overtimeAllowed: true,
+            },
+            tuesday: {
+              type: "Working",
+              shiftId: null,
+              overtimeAllowed: true,
+            },
+            wednesday: {
+              type: "Working",
+              shiftId: null,
+              overtimeAllowed: true,
+            },
+            thursday: {
+              type: "Working",
+              shiftId: null,
+              overtimeAllowed: true,
+            },
+            friday: {
+              type: "Working",
+              shiftId: null,
+              overtimeAllowed: true,
+            },
+            saturday: {
+              type: "Working",
+              shiftId: null,
+              overtimeAllowed: true,
+            },
+            sunday: {
+              type: "Week Off",
+              shiftId: null,
+              overtimeAllowed: false,
+            },
+          },
+        });
+    }
+
+    const shifts =
+      await Shift.find({}).sort({
+        name: 1,
       });
+
+    res.json({
+      success: true,
+      settings,
+      shifts,
+    });
+  } catch (error) {
+    console.error(
+      "getAttendanceSettings:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
-
-  res.json({
-    success: true,
-    settings,
-
-    shifts:
-      await Shift.find({
-        status: "Active"
-      }).sort({
-        name: 1
-      })
-  });
 }
-
 
 export async function saveAttendanceSettings(
   req,
   res
 ) {
-  const data = {
-    ...req.body,
-    key: "default"
-  };
+  try {
+    let settings =
+      await AttendanceSetting.findOne({});
 
-  const settings =
-    await AttendanceSetting.findOneAndUpdate(
-      {
-        key: "default"
-      },
-      data,
-      {
-        upsert: true,
-        new: true,
-        runValidators: true
-      }
+    if (!settings) {
+      settings =
+        await AttendanceSetting.create(
+          req.body
+        );
+    } else {
+      Object.assign(
+        settings,
+        req.body
+      );
+
+      await settings.save();
+    }
+
+    res.json({
+      success: true,
+      message:
+        "Attendance rules saved.",
+      settings,
+    });
+  } catch (error) {
+    console.error(
+      "saveAttendanceSettings:",
+      error
     );
 
-  res.json({
-    success: true,
-    settings
-  });
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
 }
 
+/* =========================================================
+   SHIFTS
+========================================================= */
+
+export async function getShifts(req, res) {
+  try {
+    const shifts =
+      await Shift.find({}).sort({
+        name: 1,
+      });
+
+    res.json({
+      success: true,
+      shifts,
+    });
+  } catch (error) {
+    console.error("getShifts:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+export async function createShift(req, res) {
+  try {
+    const shift =
+      await Shift.create({
+        ...req.body,
+        breakMinutes:
+          n(req.body.breakMinutes),
+        graceMinutes:
+          n(req.body.graceMinutes),
+        overtimeAfterMinutes:
+          n(
+            req.body.overtimeAfterMinutes
+          ),
+      });
+
+    res.status(201).json({
+      success: true,
+      message: "Shift created.",
+      shift,
+    });
+  } catch (error) {
+    console.error("createShift:", error);
+
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+export async function updateShift(req, res) {
+  try {
+    const shift =
+      await Shift.findByIdAndUpdate(
+        req.params.id,
+        {
+          ...req.body,
+          breakMinutes:
+            n(req.body.breakMinutes),
+          graceMinutes:
+            n(req.body.graceMinutes),
+          overtimeAfterMinutes:
+            n(
+              req.body.overtimeAfterMinutes
+            ),
+        },
+        {
+          new: true,
+          runValidators: true,
+        }
+      );
+
+    if (!shift) {
+      return res.status(404).json({
+        success: false,
+        message: "Shift not found.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Shift updated.",
+      shift,
+    });
+  } catch (error) {
+    console.error(
+      "updateShift:",
+      error
+    );
+
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
 
 /* =========================================================
    LEAVES
-   ========================================================= */
+========================================================= */
 
-export async function leaves(
-  req,
-  res
-) {
-  const q =
-    req.query.employeeId
-      ? {
-          employeeId:
-            req.query.employeeId
-        }
-      : {};
-
-  res.json({
-    success: true,
-
-    leaves:
-      await Leave.find(q)
+export async function getLeaves(req, res) {
+  try {
+    const leaves =
+      await Leave.find({})
         .populate(
           "employeeId",
-          "employeeCode name"
+          "employeeCode name department designation"
         )
         .sort({
-          fromDate: -1
-        })
-  });
-}
+          fromDate: -1,
+        });
 
-
-export async function createLeave(
-  req,
-  res
-) {
-  const from =
-    new Date(
-      req.body.fromDate
-    );
-
-  const to =
-    new Date(
-      req.body.toDate
-    );
-
-  const days =
-    Math.max(
-      0.5,
-      Math.floor(
-        (to - from) /
-          86400000
-      ) + 1
-    );
-
-  const leave =
-    await Leave.create({
-      ...req.body,
-      fromDate: from,
-      toDate: to,
-      days
+    res.json({
+      success: true,
+      leaves,
     });
+  } catch (error) {
+    console.error("getLeaves:", error);
 
-  res.status(201).json({
-    success: true,
-    leave
-  });
-}
-
-
-export async function leaveStatus(
-  req,
-  res
-) {
-  const leave =
-    await Leave.findByIdAndUpdate(
-      req.params.id,
-      {
-        status:
-          req.body.status
-      },
-      {
-        new: true,
-        runValidators: true
-      }
-    );
-
-  if (!leave) {
-    return res.status(404).json({
+    res.status(500).json({
       success: false,
-      message: "Leave not found."
+      message: error.message,
     });
   }
-
-  res.json({
-    success: true,
-    leave
-  });
 }
 
+export async function createLeave(req, res) {
+  try {
+    const leave =
+      await Leave.create(req.body);
+
+    res.status(201).json({
+      success: true,
+      leave,
+    });
+  } catch (error) {
+    console.error("createLeave:", error);
+
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+export async function updateLeaveStatus(
+  req,
+  res
+) {
+  try {
+    const leave =
+      await Leave.findByIdAndUpdate(
+        req.params.id,
+        {
+          status: req.body.status,
+        },
+        {
+          new: true,
+        }
+      );
+
+    if (!leave) {
+      return res.status(404).json({
+        success: false,
+        message: "Leave not found.",
+      });
+    }
+
+    res.json({
+      success: true,
+      leave,
+    });
+  } catch (error) {
+    console.error(
+      "updateLeaveStatus:",
+      error
+    );
+
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
 
 /* =========================================================
    HOLIDAYS
-   ========================================================= */
+========================================================= */
 
-export async function holidays(
-  req,
-  res
-) {
-  res.json({
-    success: true,
+export async function getHolidays(req, res) {
+  try {
+    const holidays =
+      await Holiday.find({}).sort({
+        date: 1,
+      });
 
-    holidays:
-      await Holiday.find()
-        .sort({
-          date: 1
-        })
-  });
+    res.json({
+      success: true,
+      holidays,
+    });
+  } catch (error) {
+    console.error(
+      "getHolidays:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 }
-
 
 export async function createHoliday(
   req,
   res
 ) {
-  const holiday =
-    await Holiday.create({
-      ...req.body,
-      date:
-        new Date(
-          req.body.date
-        )
+  try {
+    const holiday =
+      await Holiday.create(req.body);
+
+    res.status(201).json({
+      success: true,
+      holiday,
     });
-
-  res.status(201).json({
-    success: true,
-    holiday
-  });
-}
-
-
-/* =========================================================
-   GENERATE SALARY
-   ========================================================= */
-
-export async function generateSalary(
-  req,
-  res
-) {
-  const month =
-    n(req.body.month);
-
-  const year =
-    n(req.body.year);
-
-  const employee =
-    await Employee.findById(
-      req.body.employeeId
+  } catch (error) {
+    console.error(
+      "createHoliday:",
+      error
     );
 
-  if (!employee) {
-    return res.status(404).json({
+    res.status(400).json({
       success: false,
-      message: "Employee not found."
+      message: error.message,
     });
   }
-
-  const {
-    start,
-    end
-  } = range(
-    month,
-    year
-  );
-
-  const days =
-    new Date(
-      Date.UTC(
-        year,
-        month,
-        0
-      )
-    ).getUTCDate();
-
-  const [
-    att,
-    holidays
-  ] =
-    await Promise.all([
-      Attendance.find({
-        employeeId:
-          employee._id,
-
-        date: {
-          $gte: start,
-          $lt: end
-        }
-      }),
-
-      Holiday.find({
-        date: {
-          $gte: start,
-          $lt: end
-        }
-      })
-    ]);
-
-  const holidaySet =
-    new Set(
-      holidays.map(x =>
-        new Date(x.date)
-          .toISOString()
-          .slice(0, 10)
-      )
-    );
-
-  const byDate =
-    new Map(
-      att.map(x => [
-        new Date(x.date)
-          .toISOString()
-          .slice(0, 10),
-        x
-      ])
-    );
-
-  let workingDays = 0;
-  let presentDays = 0;
-  let halfDays = 0;
-  let paidLeaveDays = 0;
-  let absentDays = 0;
-  let holidayDays = 0;
-  let weekOffDays = 0;
-
-  let overtimeHours = 0;
-  let cuttingMinutes = 0;
-
-
-  for (
-    let d = 1;
-    d <= days;
-    d++
-  ) {
-    const date =
-      new Date(
-        Date.UTC(
-          year,
-          month - 1,
-          d
-        )
-      );
-
-    const key =
-      date
-        .toISOString()
-        .slice(0, 10);
-
-    if (
-      holidaySet.has(key)
-    ) {
-      holidayDays++;
-      continue;
-    }
-
-    if (
-      date.getUTCDay() === 0
-    ) {
-      weekOffDays++;
-      continue;
-    }
-
-    workingDays++;
-
-    const a =
-      byDate.get(key);
-
-    if (!a) {
-      absentDays++;
-      continue;
-    }
-
-    if (
-      a.status === "Present"
-    ) {
-      presentDays++;
-    } else if (
-      a.status === "Half Day"
-    ) {
-      halfDays++;
-    } else if (
-      a.status === "Leave"
-    ) {
-      paidLeaveDays++;
-    } else if (
-      a.status === "Absent"
-    ) {
-      absentDays++;
-    } else if (
-      a.status === "Holiday"
-    ) {
-      holidayDays++;
-    } else if (
-      a.status === "Week Off"
-    ) {
-      weekOffDays++;
-    }
-
-
-    /*
-      IMPORTANT:
-      Only approved OT is paid.
-    */
-    if (
-      a.overtimeApproved
-    ) {
-      overtimeHours +=
-        n(
-          a.overtimeHours
-        );
-    }
-
-
-    /*
-      IMPORTANT:
-      Only approved cutting
-      is deducted.
-    */
-    if (
-      a.cuttingApproved
-    ) {
-      cuttingMinutes +=
-        n(
-          a.cuttingMinutes
-        );
-    }
-  }
-
-
-  const mapAllowanceTotal =
-    employee.allowances
-      ? [
-          ...employee.allowances.values()
-        ].reduce(
-          (s, v) =>
-            s + n(v),
-          0
-        )
-      : 0;
-
-  const fixedAllowanceTotal =
-    n(employee.hra) +
-    n(employee.da) +
-    n(employee.conveyance) +
-    n(employee.otherAllowance);
-
-  const allowanceTotal =
-    mapAllowanceTotal +
-    fixedAllowanceTotal;
-
-  const basic =
-    n(employee.basicSalary);
-
-  const perDay =
-    workingDays
-      ? basic / workingDays
-      : 0;
-
-  const attendancePay =
-    (
-      presentDays +
-      paidLeaveDays +
-      halfDays * 0.5
-    ) * perDay;
-
-  const unpaidDeduction =
-    absentDays * perDay;
-
-
-  /*
-    OT rate:
-    Basic / 26 / 8 * 1.5
-  */
-  const overtimeRate =
-    n(req.body.overtimeRate) ||
-    (
-      basic /
-      26 /
-      8 *
-      1.5
-    );
-
-  const overtimeAmount =
-    overtimeHours *
-    overtimeRate;
-
-
-  /*
-    Cutting rate:
-    Basic / 26 / 8
-  */
-  const cuttingRate =
-    basic /
-    26 /
-    8;
-
-  const cuttingAmount =
-    (
-      cuttingMinutes /
-      60
-    ) * cuttingRate;
-
-
-  const bonus =
-    n(req.body.bonus);
-
-  const deductions =
-    unpaidDeduction +
-    cuttingAmount +
-    n(req.body.deductions) +
-    n(employee.professionalTax) +
-    n(employee.otherDeduction);
-
-  const grossSalary =
-    attendancePay +
-    allowanceTotal +
-    overtimeAmount +
-    bonus;
-
-  const netSalary =
-    Math.max(
-      0,
-      grossSalary -
-        deductions
-    );
-
-
-  const salary =
-    await Salary.findOneAndUpdate(
-      {
-        employeeId:
-          employee._id,
-        month,
-        year
-      },
-
-      {
-        employeeId:
-          employee._id,
-
-        month,
-        year,
-
-        workingDays,
-        presentDays,
-        halfDays,
-        paidLeaveDays,
-
-        unpaidLeaveDays: 0,
-
-        absentDays,
-        holidayDays,
-        weekOffDays,
-
-        basicSalary:
-          basic,
-
-        attendancePay,
-
-        allowances:
-          allowanceTotal,
-
-        overtimeHours,
-
-        overtimeAmount,
-
-        overtimeApprovedAmount:
-          overtimeAmount,
-
-        cuttingMinutes,
-
-        cuttingAmount,
-
-        bonus,
-
-        deductions,
-
-        grossSalary,
-
-        netSalary,
-
-        status:
-          "Processed"
-      },
-
-      {
-        upsert: true,
-        new: true,
-        runValidators: true
-      }
-    );
-
-  res.json({
-    success: true,
-    salary
-  });
 }
 
-
 /* =========================================================
-   SALARIES
-   ========================================================= */
+   SALARY
+========================================================= */
 
-export async function salaries(
-  req,
-  res
-) {
-  const q = {};
-
-  if (req.query.employeeId) {
-    q.employeeId =
-      req.query.employeeId;
-  }
-
-  if (req.query.month) {
-    q.month =
-      n(req.query.month);
-  }
-
-  if (req.query.year) {
-    q.year =
-      n(req.query.year);
-  }
-
-  res.json({
-    success: true,
-
-    salaries:
-      await Salary.find(q)
+export async function getSalaries(req, res) {
+  try {
+    const salaries =
+      await Salary.find({})
         .populate(
           "employeeId",
           "employeeCode name department designation"
         )
         .sort({
           year: -1,
-          month: -1
-        })
-  });
+          month: -1,
+        });
+
+    res.json({
+      success: true,
+      salaries,
+    });
+  } catch (error) {
+    console.error(
+      "getSalaries:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 }
 
-
-/* =========================================================
-   SALARY SLIP
-   ========================================================= */
-
-export async function salarySlip(
+export async function generateSalary(
   req,
   res
 ) {
-  const salary =
-    await Salary.findById(
-      req.params.id
-    ).populate(
-      "employeeId",
-      "employeeCode name email mobile department designation joiningDate"
+  try {
+    const month =
+      Number(req.body.month);
+
+    const year =
+      Number(req.body.year);
+
+    if (
+      !month ||
+      !year ||
+      month < 1 ||
+      month > 12
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Valid month and year are required.",
+      });
+    }
+
+    const employees =
+      await Employee.find({});
+
+    const start = new Date(
+      Date.UTC(
+        year,
+        month - 1,
+        1
+      )
     );
 
-  if (!salary) {
-    return res.status(404).json({
-      success: false,
+    const end = new Date(
+      Date.UTC(
+        year,
+        month,
+        1
+      )
+    );
+
+    const attendance =
+      await Attendance.find({
+        date: {
+          $gte: start,
+          $lt: end,
+        },
+      });
+
+    const generated = [];
+
+    for (const employee of employees) {
+      const employeeAttendance =
+        attendance.filter(
+          (a) =>
+            String(a.employeeId) ===
+            String(employee._id)
+        );
+
+      const presentDays =
+        employeeAttendance.filter(
+          (a) =>
+            a.status === "Present"
+        ).length;
+
+      const halfDays =
+        employeeAttendance.filter(
+          (a) =>
+            a.status === "Half Day"
+        ).length;
+
+      const basic =
+        n(employee.basic);
+
+      const gross =
+        n(employee.grossSalary);
+
+      const workingDays = 26;
+
+      const payableDays =
+        presentDays +
+        halfDays * 0.5;
+
+      const attendancePay =
+        gross > 0
+          ? (gross / workingDays) *
+            payableDays
+          : 0;
+
+      let overtimeHours = 0;
+      let cuttingMinutes = 0;
+
+      for (const a of employeeAttendance) {
+        if (a.overtimeApproved) {
+          overtimeHours +=
+            n(a.overtimeHours);
+        }
+
+        if (a.cuttingApproved) {
+          cuttingMinutes +=
+            n(a.cuttingMinutes);
+        }
+      }
+
+      const overtimeRate =
+        n(req.body.overtimeRate) ||
+        (basic / 26 / 8) * 1.5;
+
+      const overtimeAmount =
+        overtimeHours *
+        overtimeRate;
+
+      const cuttingRate =
+        basic / 26 / 8;
+
+      const cuttingAmount =
+        (cuttingMinutes / 60) *
+        cuttingRate;
+
+      const unpaidDeduction =
+        Math.max(
+          0,
+          workingDays -
+            payableDays
+        ) *
+        (gross / workingDays);
+
+      const deductions =
+        unpaidDeduction +
+        cuttingAmount;
+
+      const grossSalary =
+        attendancePay +
+        overtimeAmount;
+
+      const netSalary =
+        Math.max(
+          0,
+          grossSalary -
+            deductions
+        );
+
+      const salary =
+        await Salary.findOneAndUpdate(
+          {
+            employeeId:
+              employee._id,
+            month,
+            year,
+          },
+          {
+            $set: {
+              employeeId:
+                employee._id,
+
+              month,
+              year,
+
+              workingDays,
+              presentDays,
+              halfDays,
+              payableDays,
+
+              overtimeHours,
+              overtimeAmount,
+
+              cuttingMinutes,
+              cuttingAmount,
+
+              grossSalary,
+              deductions,
+              netSalary,
+            },
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+          }
+        );
+
+      generated.push(salary);
+    }
+
+    res.json({
+      success: true,
       message:
-        "Salary record not found."
+        "Salary generated successfully.",
+      salaries: generated,
+    });
+  } catch (error) {
+    console.error(
+      "generateSalary:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
+}
 
-  res.json({
-    success: true,
-    salary
-  });
+export async function getSalarySlip(
+  req,
+  res
+) {
+  try {
+    const salary =
+      await Salary.findById(
+        req.params.id
+      ).populate(
+        "employeeId"
+      );
+
+    if (!salary) {
+      return res.status(404).json({
+        success: false,
+        message: "Salary not found.",
+      });
+    }
+
+    res.json({
+      success: true,
+      salary,
+    });
+  } catch (error) {
+    console.error(
+      "getSalarySlip:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+/* =========================================================
+   PAYROLL APPROVAL
+========================================================= */
+
+function payrollRange(
+  month,
+  year
+) {
+  return {
+    start: new Date(
+      Date.UTC(
+        year,
+        month - 1,
+        1
+      )
+    ),
+
+    end: new Date(
+      Date.UTC(
+        year,
+        month,
+        1
+      )
+    ),
+  };
+}
+
+export async function payrollApprovals(
+  req,
+  res
+) {
+  try {
+    const month =
+      Number(req.query.month) ||
+      new Date().getMonth() + 1;
+
+    const year =
+      Number(req.query.year) ||
+      new Date().getFullYear();
+
+    const {
+      start,
+      end,
+    } = payrollRange(
+      month,
+      year
+    );
+
+    const rows =
+      await Attendance.find({
+        date: {
+          $gte: start,
+          $lt: end,
+        },
+
+        $or: [
+          {
+            overtimeHours: {
+              $gt: 0,
+            },
+          },
+          {
+            cuttingMinutes: {
+              $gt: 0,
+            },
+          },
+        ],
+      })
+        .populate(
+          "employeeId",
+          "employeeCode name department designation workLocation"
+        )
+        .populate(
+          "shiftId",
+          "name startTime endTime breakMinutes"
+        )
+        .sort({
+          date: 1,
+        });
+
+    res.json({
+      success: true,
+      approvals: rows,
+    });
+  } catch (error) {
+    console.error(
+      "payrollApprovals:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+export async function approvePayrollAdjustments(
+  req,
+  res
+) {
+  try {
+    const ids = Array.isArray(
+      req.body.ids
+    )
+      ? req.body.ids
+      : [];
+
+    if (!ids.length) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Select at least one record.",
+      });
+    }
+
+    const update = {};
+    const now = new Date();
+
+    if (
+      req.body.overtimeApproved !==
+      undefined
+    ) {
+      const approved =
+        Boolean(
+          req.body.overtimeApproved
+        );
+
+      update.overtimeApproved =
+        approved;
+
+      update.overtimeApprovedBy =
+        req.user?._id || null;
+
+      update.overtimeApprovedAt =
+        approved ? now : null;
+    }
+
+    if (
+      req.body.cuttingApproved !==
+      undefined
+    ) {
+      const approved =
+        Boolean(
+          req.body.cuttingApproved
+        );
+
+      update.cuttingApproved =
+        approved;
+
+      update.cuttingApprovedBy =
+        req.user?._id || null;
+
+      update.cuttingApprovedAt =
+        approved ? now : null;
+    }
+
+    if (!Object.keys(update).length) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Choose OT approval or cutting approval.",
+      });
+    }
+
+    const result =
+      await Attendance.updateMany(
+        {
+          _id: {
+            $in: ids,
+          },
+        },
+        {
+          $set: update,
+        }
+      );
+
+    res.json({
+      success: true,
+      message:
+        `${result.modifiedCount} attendance adjustment(s) updated.`,
+      modifiedCount:
+        result.modifiedCount,
+    });
+  } catch (error) {
+    console.error(
+      "approvePayrollAdjustments:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 }
