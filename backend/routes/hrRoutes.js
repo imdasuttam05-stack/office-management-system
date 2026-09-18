@@ -8,6 +8,7 @@ import {
   generateSalary, salaries, salarySlip, attendanceImport, attendanceSettings, saveAttendanceSettings, shifts, createShift, updateShift
 } from "../controllers/hrController.js";
 import { hrAuth, hrAdmin } from "../middleware/hrAuth.js";
+import { payrollApprovals, approvePayrollAdjustments } from "../controllers/payrollApprovalController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -42,6 +43,8 @@ router.get("/holidays", holidays);
 router.post("/holidays", hrAdmin, createHoliday);
 
 router.get("/salaries", salaries);
+router.get("/payroll/approvals", payrollApprovals);
+router.post("/payroll/approvals/bulk", hrAdmin, approvePayrollAdjustments);
 router.post("/salaries/generate", hrAdmin, generateSalary);
 router.get("/salaries/:id/slip", salarySlip);
 
