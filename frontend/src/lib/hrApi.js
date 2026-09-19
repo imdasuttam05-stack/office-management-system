@@ -99,6 +99,39 @@ export const hrApi = {
       body: JSON.stringify(body),
     }),
 
+  employeeTasks: (q = "") =>
+    request(`/employee-tasks${q}`),
+
+  createEmployeeTask: (body) =>
+    request("/employee-tasks", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateEmployeeTask: (id, body) =>
+    request(`/employee-tasks/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  employeeLetterTypes: () =>
+    request("/employee-letter-types"),
+
+  previewEmployeeLetter: (body) =>
+    request("/employee-letters/preview", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  sendEmployeeLetter: (body) =>
+    request("/employee-letters/send", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  employeeLetters: (q = "") =>
+    request(`/employee-letters${q}`),
+
   // =========================
   // ATTENDANCE
   // =========================
