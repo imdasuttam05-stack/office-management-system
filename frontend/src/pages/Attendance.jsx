@@ -371,12 +371,31 @@ export default function Attendance() {
 
       const r = await hrApi.uploadAttendance(file);
 
-      setMessage(
-        `Imported ${r.imported} records. Skipped ${r.skipped}.`
-      );
+      const imported = Number(r.imported || 0);
+      const skipped = Number(r.skipped || 0);
+
+      if (imported === 0 && skipped > 0) {
+        throw new Error(
+          `No records imported. ${skipped} row(s) skipped.` +
+            (r.errors?.length
+              ? ` First error: ${r.errors[0].message}`
+              : "")
+        );
+      }
+
+      if (skipped > 0) {
+        setError(
+          `Imported ${imported} record(s), but ${skipped} row(s) were skipped.` +
+            (r.errors?.length
+              ? ` First error: ${r.errors[0].message}`
+              : "")
+        );
+        setMessage("Import completed with skipped rows.");
+      } else {
+        setMessage(`Successfully imported ${imported} record(s).`);
+      }
 
       setView("month");
-
       await load();
     } catch (err) {
       setError(err.message);
