@@ -323,10 +323,27 @@ router.post(
 );
 
 
-// /api/payroll/payroll/approvals
+// /api/payroll/approvals
+// server.js mounts this router at /api/payroll
+router.get(
+  "/approvals",
+  payrollApprovals
+);
+
+router.post(
+  "/approvals/bulk",
+  approvePayrollAdjustments
+);
+
+// Backward-compatible aliases for older frontend builds
 router.get(
   "/payroll/approvals",
   payrollApprovals
+);
+
+router.post(
+  "/payroll/approvals/bulk",
+  approvePayrollAdjustments
 );
 
 router.post(
