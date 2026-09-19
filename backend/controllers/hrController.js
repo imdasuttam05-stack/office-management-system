@@ -22,6 +22,15 @@ function clean(v) {
   return String(v).trim();
 }
 
+function normalizeLookupKey(v) {
+  return clean(v)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[“”]/g, '"')
+    .replace(/[’']/g, "'")
+    .trim();
+}
+
 /* =========================================================
    TIME HELPERS
 ========================================================= */
@@ -52,16 +61,18 @@ function timeToMinutes(value) {
 
   const raw = String(value).trim();
 
+  // Supports HH:MM, HH:MM:SS, HH.MM and optional AM/PM.
   const m = raw.match(
-    /^(\d{1,2})[:.](\d{2})\s*(AM|PM)?$/i
+    /^(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?\s*(AM|PM)?$/i
   );
 
   if (!m) return null;
 
   let h = Number(m[1]);
   const mm = Number(m[2]);
+  const ss = m[3] === undefined ? 0 : Number(m[3]);
 
-  if (mm < 0 || mm > 59) {
+  if (mm < 0 || mm > 59 || ss < 0 || ss > 59) {
     return null;
   }
 
@@ -958,9 +969,9 @@ export async function importAttendanceExcel(
     for (const employee of employees) {
       if (employee.employeeCode) {
         employeeMap.set(
-          clean(
+          normalizeLookupKey(
             employee.employeeCode
-          ).toLowerCase(),
+          ),
           employee
         );
       }
@@ -974,7 +985,7 @@ export async function importAttendanceExcel(
     for (const shift of shifts) {
       if (shift.name) {
         shiftMap.set(
-          clean(shift.name).toLowerCase(),
+          normalizeLookupKey(shift.name),
           shift
         );
       }
@@ -1076,7 +1087,7 @@ export async function importAttendanceExcel(
 
         const employee =
           employeeMap.get(
-            employeeCode.toLowerCase()
+            normalizeLookupKey(employeeCode)
           );
 
         if (!employee) {
@@ -1157,14 +1168,22 @@ export async function importAttendanceExcel(
         if (shiftName) {
           shift =
             shiftMap.get(
-              shiftName.toLowerCase()
+              normalizeLookupKey(shiftName)
             ) || null;
 
-          if (!shift) {
-            throw new Error(
-              `Shift "${shiftName}" not found.`
-            );
+          // Excel import should not fail only because the text label
+          // differs slightly from the master shift name.
+          if (!shift && employee.shiftId) {
+            shift =
+              shifts.find(
+                (s) => String(s._id) === String(employee.shiftId)
+              ) || null;
           }
+        } else if (employee.shiftId) {
+          shift =
+            shifts.find(
+              (s) => String(s._id) === String(employee.shiftId)
+            ) || null;
         }
 
         /* -----------------------------------------
