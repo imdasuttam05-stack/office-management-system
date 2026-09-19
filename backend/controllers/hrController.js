@@ -1,6 +1,8 @@
 import xlsx from "xlsx";
 
 import Employee from "../models/Employee.js";
+import Company from "../models/Company.js";
+import PayrollSetting from "../models/PayrollSetting.js";
 import Attendance from "../models/Attendance.js";
 import Shift from "../models/Shift.js";
 import AttendanceSetting from "../models/AttendanceSetting.js";
@@ -491,25 +493,54 @@ export async function updateEmployee(req, res) {
 
 export async function getOptions(req, res) {
   try {
-    const [employees, shifts] =
+    const [employees, shifts, companies, payrollSetting] =
       await Promise.all([
-        Employee.find({}).sort({
-          name: 1,
-        }),
-
-        Shift.find({
-          status: {
-            $ne: "Inactive",
-          },
-        }).sort({
-          name: 1,
-        }),
+        Employee.find({}).sort({ name: 1 }).lean(),
+        Shift.find({ status: { $ne: "Inactive" } }).sort({ name: 1 }).lean(),
+        Company.find({ status: "Active" }).sort({ name: 1 }).lean(),
+        PayrollSetting.findOne({ key: "default" }).lean(),
       ]);
+
+    const unique = (values) =>
+      [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+    const states = [
+      "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+      "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand",
+      "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur",
+      "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab",
+      "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
+      "Uttar Pradesh", "Uttarakhand", "West Bengal",
+    ];
+
+    const departmentOptions = unique([
+      "HR", "Accounts", "Sales", "Purchase", "Warehouse", "Operations",
+      "Administration", "IT", "Production", "Dispatch", "Security",
+      ...employees.map((e) => e.department),
+    ]);
+
+    const designationOptions = unique([
+      "Manager", "Supervisor", "Executive", "Officer", "Accountant",
+      "Sales Executive", "Warehouse Executive", "Operator", "Helper",
+      "Driver", "Security Guard",
+      ...employees.map((e) => e.designation),
+    ]);
+
+    const employeeTypeOptions = unique([
+      "Permanent", "Contract", "Temporary", "Intern", "Part Time",
+      ...employees.map((e) => e.employeeType),
+    ]);
 
     res.json({
       success: true,
       employees,
       shifts,
+      companies: companies.map((c) => c.name),
+      departmentOptions,
+      designationOptions,
+      employeeTypeOptions,
+      states,
+      settings: payrollSetting || {},
     });
   } catch (error) {
     console.error("getOptions:", error);
@@ -522,18 +553,50 @@ export async function getOptions(req, res) {
 }
 
 export async function saveOptions(req, res) {
-  res.json({
-    success: true,
-    message: "Options saved.",
-  });
+  try {
+    const payload = { ...req.body };
+    delete payload.key;
+    const settings = await PayrollSetting.findOneAndUpdate(
+      { key: "default" },
+      { $set: payload, $setOnInsert: { key: "default" } },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+
+    res.json({
+      success: true,
+      message: "Payroll options saved.",
+      settings,
+    });
+  } catch (error) {
+    console.error("saveOptions:", error);
+    res.status(400).json({
+      success: false,
+      message: error.message,
+    });
+  }
 }
 
 export async function createCompany(req, res) {
-  res.status(201).json({
-    success: true,
-    message: "Company created.",
-    company: req.body,
-  });
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ success: false, message: "Company name is required." });
+    }
+
+    const company = await Company.create({ name });
+
+    res.status(201).json({
+      success: true,
+      message: "Company created.",
+      company,
+    });
+  } catch (error) {
+    console.error("createCompany:", error);
+    res.status(400).json({
+      success: false,
+      message: error.code === 11000 ? "Company already exists." : error.message,
+    });
+  }
 }
 
 /* =========================================================
