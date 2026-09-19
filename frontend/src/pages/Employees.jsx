@@ -160,22 +160,62 @@ export default function Employees() {
     try { await hrApi.updateEmployee(employee._id, { status: next }); setRows(p => p.map(x => x._id === employee._id ? { ...x, status: next } : x)); setMessage(`${employee.name} is now ${next}.`); }
     catch (e) { setError(e.message); }
   };
-  const openTask = () => { if (!selectedIds.length) return setError("Select at least one employee for the task."); setTaskOpen(true); setError(""); };
+  const openTask = (ids = selectedIds) => {
+    const nextIds = Array.isArray(ids) ? ids.filter(Boolean) : [ids].filter(Boolean);
+    if (!nextIds.length) return setError("Select at least one employee for the task.");
+    setSelectedIds(nextIds);
+    setTaskOpen(true);
+    setError("");
+  };
   const saveTask = async () => {
     if (!taskForm.title.trim()) return setError("Task title is required.");
-    try { await hrApi.createEmployeeTask({ ...taskForm, employeeIds: selectedIds }); setTaskForm({ title: "", description: "", priority: "Medium", dueDate: "" }); setTaskOpen(false); setMessage(`Task assigned to ${selectedIds.length} employee(s).`); } catch (e) { setError(e.message); }
+    if (!selectedIds.length) return setError("Select at least one employee for the task.");
+    try {
+      await hrApi.createEmployeeTask({ ...taskForm, employeeIds: selectedIds });
+      setTaskForm({ title: "", description: "", priority: "Medium", dueDate: "" });
+      setTaskOpen(false);
+      setMessage(`Task assigned to ${selectedIds.length} employee(s).`);
+    } catch (e) { setError(e.message); }
   };
+
+  const localLetterTypes = [
+    "Offer Letter", "Appointment / Joining Letter", "Confirmation Letter", "Promotion Letter",
+    "Salary Revision Letter", "Increment Letter", "Transfer Letter", "Warning Letter",
+    "Experience Letter", "Relieving Letter", "Termination Letter", "No Objection Certificate", "Custom Letter",
+  ];
+
   const openLetter = async (employeeId = selectedIds[0]) => {
     if (!employeeId) return setError("Select one employee for the letter.");
+
+    const employee = rows.find(x => String(x._id) === String(employeeId));
+    const name = employee?.name || "Employee";
+    const company = employee?.companyName || "Your Company";
+    const designation = employee?.designation || "Employee";
+    const code = employee?.employeeCode || "";
+    const joining = employee?.joiningDate ? new Date(employee.joiningDate).toLocaleDateString("en-IN") : "";
+    const defaultSubject = `Offer Letter - ${name}`;
+    const defaultBody = `Dear ${name},\n\nWe are pleased to offer you employment with ${company} for the position of ${designation}. Your employee ID is ${code}. Your joining date is ${joining || "to be confirmed"}.\n\nPlease review the terms communicated by the company and confirm your acceptance.\n\nRegards,\nHR Department\n${company}`;
+
+    // Open the window immediately so a slow API/email service cannot make the click look unresponsive.
+    setSelectedIds([employeeId]);
+    setLetterTypes(localLetterTypes);
+    setLetterForm({ employeeId, type: "Offer Letter", subject: defaultSubject, body: defaultBody });
+    setLetterPreview("");
+    setLetterOpen(true);
+    setError("");
+
     try {
       const r = await hrApi.employeeLetterTypes();
-      const type = (r.types || ["Offer Letter"])[0];
+      const types = Array.isArray(r?.types) && r.types.length ? r.types : localLetterTypes;
+      const type = types[0] || "Offer Letter";
       const preview = await hrApi.previewEmployeeLetter({ employeeId, type });
-      setLetterTypes(r.types || []);
-      setLetterForm({ employeeId, type, subject: preview.subject || "", body: preview.body || "" });
+      setLetterTypes(types);
+      setLetterForm({ employeeId, type, subject: preview.subject || defaultSubject, body: preview.body || defaultBody });
       setLetterPreview(preview.html || "");
-      setLetterOpen(true); setError("");
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // Keep the local professional template open; direct email will still show the real backend error if mail is not configured.
+      setError(`Letter template service unavailable. Local template loaded. ${e.message}`);
+    }
   };
   const loadLetterTemplate = async (type) => {
     const employeeId = letterForm.employeeId;
@@ -288,14 +328,14 @@ export default function Employees() {
           <td>{e.pfApplicable ? `₹${Number(e.pfAmount || 0).toLocaleString("en-IN")}` : <span style={S.noBadge}>No</span>}</td>
           <td>{e.esiApplicable ? `₹${Number(e.esiAmount || 0).toLocaleString("en-IN")}` : <span style={S.noBadge}>No</span>}</td>
           <td><button type="button" onClick={()=>changeEmployeeStatus(e)} style={e.status === "Inactive" ? S.statusInactive : S.statusActive}>{e.status || "Active"}</button></td>
-          <td><div style={S.rowActions}><button type="button" onClick={()=>startEdit(e)} style={S.editBtn}>Edit</button><button type="button" onClick={()=>{setSelectedIds([e._id]);openTask()}} style={S.iconBtn}>Task</button><button type="button" onClick={()=>openLetter(e._id)} style={S.iconBtn}>Letter</button></div></td>
+          <td><div style={S.rowActions}><button type="button" onClick={()=>startEdit(e)} style={S.editBtn}>Edit</button><button type="button" onClick={()=>openTask([e._id])} style={S.iconBtn}>Task</button><button type="button" onClick={()=>openLetter(e._id)} style={S.iconBtn}>Letter</button></div></td>
         </tr>)}{!visibleRows.length && <tr><td colSpan="10" style={S.empty}>No employees match your search/filter.</td></tr>}</tbody></table>
       </div>
     </section>
 
-    {taskOpen && <div style={S.overlay}><div style={S.modal}><div style={S.modalHead}><div><h2 style={S.modalTitle}>Assign Work / Task</h2><p style={S.help}>{selectedIds.length} employee(s) selected</p></div><button onClick={()=>setTaskOpen(false)} style={S.close}>×</button></div><div style={S.grid}><Field label="Task Title" name="title" value={taskForm.title} onChange={e=>setTaskForm(p=>({...p,title:e.target.value}))} required/><Field label="Priority" name="priority" value={taskForm.priority} onChange={e=>setTaskForm(p=>({...p,priority:e.target.value}))}><select style={S.input} value={taskForm.priority} onChange={e=>setTaskForm(p=>({...p,priority:e.target.value}))}><option>Low</option><option>Medium</option><option>High</option><option>Urgent</option></select></Field><Field label="Due Date" name="dueDate" type="date" value={taskForm.dueDate} onChange={e=>setTaskForm(p=>({...p,dueDate:e.target.value}))}/><label style={{...S.label,gridColumn:"1 / -1"}}><span>Description / Instructions</span><textarea value={taskForm.description} onChange={e=>setTaskForm(p=>({...p,description:e.target.value}))} style={{...S.input,minHeight:110}} placeholder="What work should the employee complete?"/></label></div><div style={S.actions}><button onClick={saveTask} style={S.btn}>Assign Task</button><button onClick={()=>setTaskOpen(false)} style={S.cancel}>Cancel</button></div></div></div>}
+    {taskOpen && <div style={S.overlay}><div style={S.modal}><div style={S.modalHead}><div><h2 style={S.modalTitle}>Assign Work / Task</h2><p style={S.help}>{selectedIds.length} employee(s) selected</p></div><button type="button" onClick={()=>setTaskOpen(false)} style={S.close}>×</button></div><div style={S.grid}><Field label="Task Title" name="title" value={taskForm.title} onChange={e=>setTaskForm(p=>({...p,title:e.target.value}))} required/><Field label="Priority" name="priority" value={taskForm.priority} onChange={e=>setTaskForm(p=>({...p,priority:e.target.value}))}><select style={S.input} value={taskForm.priority} onChange={e=>setTaskForm(p=>({...p,priority:e.target.value}))}><option>Low</option><option>Medium</option><option>High</option><option>Urgent</option></select></Field><Field label="Due Date" name="dueDate" type="date" value={taskForm.dueDate} onChange={e=>setTaskForm(p=>({...p,dueDate:e.target.value}))}/><label style={{...S.label,gridColumn:"1 / -1"}}><span>Description / Instructions</span><textarea value={taskForm.description} onChange={e=>setTaskForm(p=>({...p,description:e.target.value}))} style={{...S.input,minHeight:110}} placeholder="What work should the employee complete?"/></label></div><div style={S.actions}><button type="button" onClick={saveTask} style={S.btn}>Assign Task</button><button type="button" onClick={()=>setTaskOpen(false)} style={S.cancel}>Cancel</button></div></div></div>}
 
-    {letterOpen && <div style={S.overlay}><div style={{...S.modal,maxWidth:1000}}><div style={S.modalHead}><div><h2 style={S.modalTitle}>HR Letter Centre</h2><p style={S.help}>Professional letter + direct email to employee</p></div><button onClick={()=>setLetterOpen(false)} style={S.close}>×</button></div><div style={S.letterGrid}><div><Field label="Letter Type" name="type" value={letterForm.type} onChange={e=>loadLetterTemplate(e.target.value)}><select style={S.input} value={letterForm.type} onChange={e=>loadLetterTemplate(e.target.value)}>{letterTypes.map(x=><option key={x}>{x}</option>)}</select></Field><Field label="Subject" name="subject" value={letterForm.subject} onChange={e=>setLetterForm(p=>({...p,subject:e.target.value}))}/><label style={S.label}><span>Letter Body</span><textarea value={letterForm.body} onChange={e=>setLetterForm(p=>({...p,body:e.target.value}))} style={{...S.input,minHeight:360}}/></label></div><div><div style={S.previewLabel}>Live Preview</div><div style={S.previewBox} dangerouslySetInnerHTML={{__html:letterPreview || "<div style='color:#667085;padding:20px'>Select a letter type to load the professional format.</div>"}}/></div></div><div style={S.actions}><button onClick={async()=>{const r=await hrApi.previewEmployeeLetter(letterForm);setLetterPreview(r.html||"")}} style={S.lightBtn}>Refresh Preview</button><button onClick={sendLetter} disabled={sendingLetter} style={S.btn}>{sendingLetter ? "Sending..." : "Send Direct Email"}</button><button onClick={()=>setLetterOpen(false)} style={S.cancel}>Close</button></div></div></div>}
+    {letterOpen && <div style={S.overlay}><div style={{...S.modal,maxWidth:1000}}><div style={S.modalHead}><div><h2 style={S.modalTitle}>HR Letter Centre</h2><p style={S.help}>Professional letter + direct email to employee</p></div><button type="button" onClick={()=>setLetterOpen(false)} style={S.close}>×</button></div><div style={S.letterGrid}><div><Field label="Letter Type" name="type" value={letterForm.type} onChange={e=>loadLetterTemplate(e.target.value)}><select style={S.input} value={letterForm.type} onChange={e=>loadLetterTemplate(e.target.value)}>{letterTypes.map(x=><option key={x}>{x}</option>)}</select></Field><Field label="Subject" name="subject" value={letterForm.subject} onChange={e=>setLetterForm(p=>({...p,subject:e.target.value}))}/><label style={S.label}><span>Letter Body</span><textarea value={letterForm.body} onChange={e=>setLetterForm(p=>({...p,body:e.target.value}))} style={{...S.input,minHeight:360}}/></label></div><div><div style={S.previewLabel}>Live Preview</div><div style={S.previewBox} dangerouslySetInnerHTML={{__html:letterPreview || "<div style='color:#667085;padding:20px'>Select a letter type to load the professional format.</div>"}}/></div></div><div style={S.actions}><button type="button" onClick={async()=>{try{const r=await hrApi.previewEmployeeLetter(letterForm);setLetterPreview(r.html||"");setError("")}catch(e){setError(e.message)}}} style={S.lightBtn}>Refresh Preview</button><button type="button" onClick={sendLetter} disabled={sendingLetter} style={S.btn}>{sendingLetter ? "Sending..." : "Send Direct Email"}</button><button type="button" onClick={()=>setLetterOpen(false)} style={S.cancel}>Close</button></div></div></div>}
   </main>;
 }
 
