@@ -214,16 +214,16 @@ export const hrApi = {
   // =========================
 
   shifts: () =>
-    request("/attendance/shifts"),
+    request("/shifts"),
 
   createShift: (body) =>
-    request("/attendance/shifts", {
+    request("/shifts", {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
   updateShift: (id, body) =>
-    request(`/attendance/shifts/${id}`, {
+    request(`/shifts/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
