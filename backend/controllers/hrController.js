@@ -1,14 +1,14 @@
 import xlsx from "xlsx";
 
 import Employee from "../models/Employee.js";
-import Company from "../models/Company.js";
-import PayrollSetting from "../models/PayrollSetting.js";
 import Attendance from "../models/Attendance.js";
 import Shift from "../models/Shift.js";
 import AttendanceSetting from "../models/AttendanceSetting.js";
 import Leave from "../models/Leave.js";
 import Holiday from "../models/Holiday.js";
 import Salary from "../models/Salary.js";
+import Company from "../models/Company.js";
+import PayrollSetting from "../models/PayrollSetting.js";
 
 /* =========================================================
    COMMON HELPERS
@@ -493,109 +493,53 @@ export async function updateEmployee(req, res) {
 
 export async function getOptions(req, res) {
   try {
-    const [employees, shifts, companies, payrollSetting] =
-      await Promise.all([
-        Employee.find({}).sort({ name: 1 }).lean(),
-        Shift.find({ status: { $ne: "Inactive" } }).sort({ name: 1 }).lean(),
-        Company.find({ status: "Active" }).sort({ name: 1 }).lean(),
-        PayrollSetting.findOne({ key: "default" }).lean(),
-      ]);
-
-    const unique = (values) =>
-      [...new Set(values.map((v) => String(v || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-
-    const states = [
-      "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
-      "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand",
-      "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur",
-      "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab",
-      "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
-      "Uttar Pradesh", "Uttarakhand", "West Bengal",
-    ];
-
-    const departmentOptions = unique([
-      "HR", "Accounts", "Sales", "Purchase", "Warehouse", "Operations",
-      "Administration", "IT", "Production", "Dispatch", "Security",
-      ...employees.map((e) => e.department),
+    const [employees, shifts, companies, setting] = await Promise.all([
+      Employee.find({}).sort({ name: 1 }),
+      Shift.find({ status: { $ne: "Inactive" } }).sort({ name: 1 }),
+      Company.find({ status: { $ne: "Inactive" } }).sort({ name: 1 }),
+      PayrollSetting.findOne({ key: "default" }),
     ]);
 
-    const designationOptions = unique([
-      "Manager", "Supervisor", "Executive", "Officer", "Accountant",
-      "Sales Executive", "Warehouse Executive", "Operator", "Helper",
-      "Driver", "Security Guard",
-      ...employees.map((e) => e.designation),
-    ]);
+    const departmentOptions = [...new Set(employees.map(e => clean(e.department)).filter(Boolean))].sort();
+    const designationOptions = [...new Set(employees.map(e => clean(e.designation)).filter(Boolean))].sort();
+    const employeeTypeOptions = [...new Set(["Permanent", "Contract", "Temporary", "Intern", ...employees.map(e => clean(e.employeeType))].filter(Boolean))].sort();
+    const states = [...new Set(["West Bengal", "Maharashtra", "Karnataka", "Telangana", "Andhra Pradesh", "Tamil Nadu", "Gujarat", ...employees.map(e => clean(e.state))].filter(Boolean))].sort();
 
-    const employeeTypeOptions = unique([
-      "Permanent", "Contract", "Temporary", "Intern", "Part Time",
-      ...employees.map((e) => e.employeeType),
-    ]);
+    const defaults = {
+      basicPercent: 60, hraPercent: 20, daPercent: 10, conveyancePercent: 5, otherAllowancePercent: 0, gratuityPercent: 4.81,
+      pfPercent: 12, esiPercent: 0.75, employerPfPercent: 12, employerEsiPercent: 3.25, hraBase: "gross", daBase: "gross",
+      conveyanceBase: "gross", otherAllowanceBase: "gross", gratuityBase: "basic", pfBase: "gross", pfCeilingEnabled: true,
+      pfWageCeiling: 15000, esiBase: "gross", esiCeilingEnabled: true, esiWageCeiling: 21000, stateRules: {},
+    };
 
-    res.json({
-      success: true,
-      employees,
-      shifts,
-      companies: companies.map((c) => c.name),
-      departmentOptions,
-      designationOptions,
-      employeeTypeOptions,
-      states,
-      settings: payrollSetting || {},
-    });
+    res.json({ success: true, employees, shifts, companies: companies.map(c => c.name), departmentOptions, designationOptions, employeeTypeOptions, states, settings: setting ? setting.toObject() : defaults });
   } catch (error) {
     console.error("getOptions:", error);
-
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 }
 
 export async function saveOptions(req, res) {
   try {
-    const payload = { ...req.body };
-    delete payload.key;
     const settings = await PayrollSetting.findOneAndUpdate(
       { key: "default" },
-      { $set: payload, $setOnInsert: { key: "default" } },
+      { $set: { ...req.body, key: "default" } },
       { new: true, upsert: true, runValidators: true }
-    ).lean();
-
-    res.json({
-      success: true,
-      message: "Payroll options saved.",
-      settings,
-    });
+    );
+    res.json({ success: true, message: "Payroll options saved.", settings });
   } catch (error) {
-    console.error("saveOptions:", error);
-    res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(400).json({ success: false, message: error.message });
   }
 }
 
 export async function createCompany(req, res) {
   try {
-    const name = String(req.body?.name || "").trim();
-    if (!name) {
-      return res.status(400).json({ success: false, message: "Company name is required." });
-    }
-
+    const name = clean(req.body?.name);
+    if (!name) return res.status(400).json({ success: false, message: "Company name is required." });
     const company = await Company.create({ name });
-
-    res.status(201).json({
-      success: true,
-      message: "Company created.",
-      company,
-    });
+    res.status(201).json({ success: true, message: "Company created.", company });
   } catch (error) {
-    console.error("createCompany:", error);
-    res.status(400).json({
-      success: false,
-      message: error.code === 11000 ? "Company already exists." : error.message,
-    });
+    res.status(400).json({ success: false, message: error.code === 11000 ? "Company already exists." : error.message });
   }
 }
 
