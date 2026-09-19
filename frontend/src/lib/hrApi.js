@@ -233,10 +233,10 @@ export const hrApi = {
   // =========================
 
   payrollApprovals: (q = "") =>
-    request(`/payroll/approvals${q}`),
+    request(`/approvals${q}`),
 
   approvePayrollAdjustments: (body) =>
-    request("/payroll/approvals/bulk", {
+    request("/approvals/bulk", {
       method: "POST",
       body: JSON.stringify(body),
     }),
