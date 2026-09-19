@@ -76,17 +76,22 @@ function timeToMinutes(value) {
     return null;
   }
 
-  const ap = (m[3] || "").toUpperCase();
+  // m[4] is the optional AM/PM part. m[3] is seconds.
+  const ap = (m[4] || "").toUpperCase();
 
-  if (ap === "PM" && h < 12) {
-    h += 12;
-  }
+  if (ap) {
+    if (h < 1 || h > 12) {
+      return null;
+    }
 
-  if (ap === "AM" && h === 12) {
-    h = 0;
-  }
+    if (ap === "PM" && h < 12) {
+      h += 12;
+    }
 
-  if (h < 0 || h > 23) {
+    if (ap === "AM" && h === 12) {
+      h = 0;
+    }
+  } else if (h < 0 || h > 23) {
     return null;
   }
 
@@ -1292,17 +1297,30 @@ export async function importAttendanceExcel(
       }
     }
 
+    // Do not report a completely failed import as a successful upload.
+    if (imported === 0 && skipped > 0) {
+      return res.status(400).json({
+        success: false,
+        imported,
+        skipped,
+        total: data.length,
+        errors,
+        message: `No attendance records were imported. ${skipped} row(s) were skipped.`,
+      });
+    }
+
     res.json({
-      success: true,
+      success: skipped === 0,
+      partialSuccess: imported > 0 && skipped > 0,
 
       message:
-        "Attendance Excel import completed.",
+        skipped > 0
+          ? `Imported ${imported} record(s); ${skipped} row(s) skipped.`
+          : `Successfully imported ${imported} record(s).`,
 
       imported,
       skipped,
-
       total: data.length,
-
       errors,
     });
   } catch (error) {
