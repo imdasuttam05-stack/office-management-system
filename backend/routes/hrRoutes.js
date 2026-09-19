@@ -183,6 +183,14 @@ router.put(
   updateShift
 );
 
+// Compatibility: frontend HR API currently uses /api/payroll/attendance/shifts
+router.get("/attendance/shifts", getShifts);
+router.post("/attendance/shifts", createShift);
+router.put(
+  "/attendance/shifts/:id",
+  updateShift
+);
+
 
 /* =========================================================
    LEAVES
