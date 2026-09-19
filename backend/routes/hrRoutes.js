@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 
 import {
   getEmployees,
@@ -46,6 +47,47 @@ import {
 } from "../controllers/employeeCommunicationController.js";
 
 const router = express.Router();
+
+/* =========================================================
+   ATTENDANCE EXCEL UPLOAD
+   Keep the uploaded workbook in memory because the attendance
+   importer reads the XLS/XLSX/CSV buffer directly.
+========================================================= */
+const attendanceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    const name = String(file.originalname || "").toLowerCase();
+    const allowed =
+      name.endsWith(".xlsx") ||
+      name.endsWith(".xls") ||
+      name.endsWith(".csv");
+
+    if (!allowed) {
+      return cb(
+        new Error("Only Excel (.xlsx/.xls) or CSV files are allowed.")
+      );
+    }
+
+    cb(null, true);
+  },
+}).single("file");
+
+function handleAttendanceUpload(req, res, next) {
+  attendanceUpload(req, res, (err) => {
+    if (err) {
+      console.error("Attendance upload middleware:", err);
+      return res.status(400).json({
+        success: false,
+        message: err.message || "Attendance file upload failed.",
+      });
+    }
+
+    next();
+  });
+}
 
 
 /* =========================================================
@@ -123,6 +165,7 @@ router.get("/attendance", getAttendance);
 router.post("/attendance", saveAttendance);
 router.post(
   "/attendance/import",
+  handleAttendanceUpload,
   importAttendanceExcel
 );
 
@@ -133,6 +176,7 @@ router.get("/payroll/attendance", getAttendance);
 router.post("/payroll/attendance", saveAttendance);
 router.post(
   "/payroll/attendance/import",
+  handleAttendanceUpload,
   importAttendanceExcel
 );
 
