@@ -315,6 +315,12 @@ router.get(
   getSalaries
 );
 
+// Backward-compatible aliases for payroll generation
+router.post(
+  "/salaries/generate",
+  generateSalary
+);
+
 router.post(
   "/payroll/salary/generate",
   generateSalary
