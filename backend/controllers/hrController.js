@@ -2548,8 +2548,18 @@ export async function generateSalary(
       });
     }
 
+    const employeeFilter = {};
+
+    if (Array.isArray(req.body.employeeIds) && req.body.employeeIds.length) {
+      employeeFilter._id = { $in: req.body.employeeIds };
+    }
+
+    if (req.body.companyName) {
+      employeeFilter.companyName = String(req.body.companyName).trim();
+    }
+
     const employees =
-      await Employee.find({});
+      await Employee.find(employeeFilter);
 
     const start = new Date(
       Date.UTC(
@@ -2598,7 +2608,7 @@ export async function generateSalary(
         ).length;
 
       const basic =
-        n(employee.basic);
+        n(employee.basicSalary || employee.basic);
 
       const gross =
         n(employee.grossSalary);
@@ -2702,6 +2712,7 @@ export async function generateSalary(
               grossSalary,
               deductions,
               netSalary,
+              status: "Processed",
             },
           },
 
