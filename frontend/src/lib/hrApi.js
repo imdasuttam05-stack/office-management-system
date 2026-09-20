@@ -351,4 +351,10 @@ export const hrApi = {
 
   exportSalarySlip: (id, filename = `salary-slip-${id}.xlsx`) =>
     downloadFile(`/reports/salary-slip/${id}.xlsx`, filename),
+
+  sendSalarySlipEmail: (id, to = "") =>
+    request(`/reports/salary-slip/${id}/email`, {
+      method: "POST",
+      body: JSON.stringify({ to }),
+    }),
 };
