@@ -68,6 +68,9 @@ export default function Dashboard() {
   const [employeeCount, setEmployeeCount] =
     useState(0);
 
+  const [activeEmployeeCount, setActiveEmployeeCount] =
+    useState(0);
+
   const [pendingTasks, setPendingTasks] =
     useState(0);
 
@@ -178,7 +181,7 @@ export default function Dashboard() {
               "Content-Type": "application/json",
             },
           }),
-          fetch(`${API_URL}/api/hr/employees`, {
+          fetch(`${API_URL}/api/payroll/employees`, {
             method: "GET",
             headers: {
               Authorization: `Bearer ${token}`,
@@ -196,7 +199,15 @@ export default function Dashboard() {
             : Array.isArray(employeeData?.data)
             ? employeeData.data
             : [];
-          if (!cancelled) setEmployeeCount(employees.length);
+          if (!cancelled) {
+            setEmployeeCount(employees.length);
+            setActiveEmployeeCount(
+              employees.filter((employee) =>
+                employee?.isActive !== false &&
+                employee?.active !== false
+              ).length
+            );
+          }
         }
 
         /* Expenses */
@@ -916,7 +927,7 @@ export default function Dashboard() {
               </strong>
 
               <small>
-                Active employees
+                {activeEmployeeCount} Active employees
               </small>
 
             </div>
