@@ -446,18 +446,142 @@ export async function exportAttendanceReportExcel(req, res) {
   }
 }
 
+async function ensureSalaryRecordsForPeriod(req, month, year, employees) {
+  if (!month || !year || !employees.length) return [];
+
+  // Build the same virtual attendance view used by the Attendance Report so
+  // salary for older months is based on actual attendance + configured
+  // weekly-off/holiday/leave rules, not merely on existing Salary documents.
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  const attendanceRequest = {
+    query: {
+      from: dateKey(start),
+      to: dateKey(new Date(end.getTime() - 86400000)),
+      employeeIds: employees.map((e) => String(e._id)).join(","),
+      companyName: clean(req.query.companyName || ""),
+      department: clean(req.query.department || ""),
+    },
+  };
+  const attendanceData = await buildAttendanceRows(attendanceRequest);
+
+  const byEmployee = new Map();
+  for (const row of attendanceData.rows) {
+    if (!byEmployee.has(row.employeeId)) byEmployee.set(row.employeeId, []);
+    byEmployee.get(row.employeeId).push(row);
+  }
+
+  const generated = [];
+
+  for (const employee of employees) {
+    const rows = byEmployee.get(String(employee._id)) || [];
+    const presentDays = rows.filter((r) => r.status === "Present").length;
+    const halfDays = rows.filter((r) => r.status === "Half Day").length;
+    const absentDays = rows.filter((r) => r.status === "Absent").length;
+    const leaveDays = rows.filter((r) => r.status === "Leave").length;
+    const weekOffDays = rows.filter((r) => r.status === "Week Off" && !String(r.note || "").toLowerCase().startsWith("holiday:")).length;
+    const holidayDays = rows.filter((r) => r.status === "Week Off" && String(r.note || "").toLowerCase().startsWith("holiday:")).length;
+
+    // Scheduled working days exclude weekly offs and holidays. A salaried
+    // employee's paid attendance includes approved leave plus non-working days.
+    const scheduledWorkingDays = Math.max(0, rows.length - weekOffDays - holidayDays);
+    const paidScheduledDays = Math.min(
+      scheduledWorkingDays,
+      presentDays + halfDays * 0.5 + leaveDays
+    );
+
+    const gross = n(employee.grossSalary);
+    const basic = n(employee.basicSalary || employee.basic);
+    const attendancePay = scheduledWorkingDays > 0
+      ? (gross / scheduledWorkingDays) * paidScheduledDays
+      : 0;
+
+    let overtimeHours = 0;
+    let cuttingMinutes = 0;
+    for (const row of rows) {
+      if (row.status === "Present") {
+        overtimeHours += n(row.overtimeHours);
+        cuttingMinutes += n(row.cuttingMinutes);
+      }
+    }
+
+    const overtimeRate =
+      n(req.body?.overtimeRate) ||
+      (basic > 0 ? (basic / 26 / 8) * 1.5 : 0);
+    const overtimeAmount = overtimeHours * overtimeRate;
+    const cuttingRate = basic > 0 ? basic / 26 / 8 : 0;
+    const cuttingAmount = (cuttingMinutes / 60) * cuttingRate;
+
+    const unpaidDays = Math.max(0, scheduledWorkingDays - paidScheduledDays);
+    const unpaidDeduction = scheduledWorkingDays > 0
+      ? unpaidDays * (gross / scheduledWorkingDays)
+      : 0;
+
+    const deductions = unpaidDeduction + cuttingAmount + n(employee.otherDeduction);
+    const grossSalary = attendancePay + overtimeAmount;
+    const netSalary = Math.max(0, grossSalary - deductions);
+
+    const salary = await Salary.findOneAndUpdate(
+      { employeeId: employee._id, month, year },
+      {
+        $set: {
+          employeeId: employee._id,
+          month,
+          year,
+          workingDays: scheduledWorkingDays,
+          presentDays,
+          halfDays,
+          paidLeaveDays: leaveDays,
+          absentDays,
+          holidayDays,
+          weekOffDays,
+          basicSalary: basic,
+          attendancePay,
+          allowances: n(employee.hra) + n(employee.conveyance) + n(employee.otherAllowance),
+          overtimeHours,
+          overtimeAmount,
+          overtimeApprovedAmount: overtimeAmount,
+          cuttingMinutes,
+          cuttingAmount,
+          grossSalary,
+          deductions,
+          netSalary,
+        },
+        $setOnInsert: { status: "Processed" },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    generated.push(salary);
+  }
+
+  return generated;
+}
+
 export async function getSalaryReport(req, res) {
   try {
     const month = Number(req.query.month);
     const year = Number(req.query.year);
+    if (!month || !year || month < 1 || month > 12) {
+      return res.status(400).json({ success: false, message: "Valid month and year are required." });
+    }
+
     const { filter } = employeeFilter(req);
     const employees = await Employee.find(filter).sort({ name: 1 });
     const employeeIds = employees.map((e) => e._id);
-    const salaryFilter = { employeeId: { $in: employeeIds } };
-    if (month) salaryFilter.month = month;
-    if (year) salaryFilter.year = year;
-    const salaries = await Salary.find(salaryFilter).populate("employeeId").sort({ "employeeId.name": 1 });
-    res.json({ success: true, salaries });
+
+    // IMPORTANT: Do not limit this to the current month or pre-existing
+    // Salary documents. Any selected historical month can be generated on
+    // demand from attendance, then immediately returned to the report.
+    await ensureSalaryRecordsForPeriod(req, month, year, employees);
+
+    const salaries = await Salary.find({
+      employeeId: { $in: employeeIds },
+      month,
+      year,
+    }).populate("employeeId").sort({ "employeeId.name": 1 });
+
+    res.json({ success: true, month, year, salaries });
   } catch (error) {
     console.error("getSalaryReport:", error);
     res.status(500).json({ success: false, message: error.message });
