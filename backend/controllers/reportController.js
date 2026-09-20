@@ -7,6 +7,7 @@ import Holiday from "../models/Holiday.js";
 import Shift from "../models/Shift.js";
 import Leave from "../models/Leave.js";
 import Salary from "../models/Salary.js";
+import { sendEmployeeEmail } from "../services/employeeCommunicationService.js";
 
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const clean = (v) => (v === undefined || v === null ? "" : String(v).trim());
@@ -691,7 +692,7 @@ export async function getSalarySlip(req, res) {
 
     const pfBase = employee.pfApplicable ? Math.min(basic, employee.pfWageCeiling || 15000) : 0;
     const pf = employee.pfApplicable ? roundMoney(employee.pfAmount || (pfBase * n(employee.pfRate || 12)) / 100) : 0;
-    const esi = employee.esiApplicable ? roundMoney(employee.esiAmount || (Math.min(gross, employee.esiWageCeiling || 21000) * n(employee.esiRate || 0.75)) / 100) : 0;
+    const esi = employee.esiApplicable ? roundMoney(employee.esiAmount || (Math.min(totalGross, employee.esiWageCeiling || 21000) * n(employee.esiRate || 0.75)) / 100) : 0;
     const professionalTax = roundMoney(employee.professionalTax);
     const cutting = roundMoney(salary.cuttingAmount);
     const otherDeduction = Math.max(0, roundMoney(n(salary.deductions) - cutting));
@@ -705,6 +706,7 @@ export async function getSalarySlip(req, res) {
       monthLabel: formatMonth(salary.month, salary.year),
       employeeName: employee.name || "",
       employeeCode: employee.employeeCode || "",
+      employeeEmail: employee.email || "",
       designation: employee.designation || "",
       uanNo: employee.uanNo || "",
       esiNo: employee.esiNumber || "",
@@ -750,6 +752,98 @@ export async function getSalarySlip(req, res) {
     res.json({ success: true, salary, slip });
   } catch (error) {
     console.error("getSalarySlip report:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+
+export async function sendSalarySlipEmail(req, res) {
+  try {
+    const salary = await Salary.findById(req.params.id).populate("employeeId");
+    if (!salary || !salary.employeeId) {
+      return res.status(404).json({ success: false, message: "Salary not found." });
+    }
+
+    const employee = salary.employeeId;
+    const to = clean(req.body?.to || employee.email);
+    if (!to) {
+      return res.status(400).json({ success: false, message: "Employee email address is missing. Please add an email in Employee Master." });
+    }
+
+    const days = new Date(Date.UTC(salary.year, salary.month, 0)).getUTCDate();
+    const present = n(salary.presentDays);
+    const halfDays = n(salary.halfDays);
+    const leave = n(salary.paidLeaveDays || salary.unpaidLeaveDays);
+    const weekOff = n(salary.weekOffDays);
+    const holiday = n(salary.holidayDays);
+    const paidDays = Math.min(days, roundMoney(present + halfDays * 0.5 + leave + weekOff + holiday));
+    const lop = Math.max(0, roundMoney(days - paidDays));
+    const basic = roundMoney(salary.basicSalary || employee.basicSalary);
+    const hra = roundMoney(employee.hra);
+    const conveyance = roundMoney(employee.conveyance);
+    const totalGross = roundMoney(salary.grossSalary || (basic + hra + conveyance + employee.otherAllowance));
+    const overtimeAmount = roundMoney(salary.overtimeAmount || salary.overtimeApprovedAmount);
+    const baseGross = roundMoney(Math.max(0, totalGross - overtimeAmount));
+    const others = roundMoney(baseGross - basic - hra - conveyance);
+    const pfBase = employee.pfApplicable ? Math.min(basic, employee.pfWageCeiling || 15000) : 0;
+    const pf = employee.pfApplicable ? roundMoney(employee.pfAmount || (pfBase * n(employee.pfRate || 12)) / 100) : 0;
+    const esi = employee.esiApplicable ? roundMoney(employee.esiAmount || (Math.min(totalGross, employee.esiWageCeiling || 21000) * n(employee.esiRate || 0.75)) / 100) : 0;
+    const professionalTax = roundMoney(employee.professionalTax);
+    const cutting = roundMoney(salary.cuttingAmount);
+    const otherDeduction = Math.max(0, roundMoney(n(salary.deductions) - cutting));
+    const totalDeductions = roundMoney(pf + esi + professionalTax + cutting + otherDeduction);
+    const netPayable = roundMoney(Math.max(0, totalGross - totalDeductions));
+    const moneyHtml = (v) => `₹${Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const monthLabel = formatMonth(salary.month, salary.year);
+    const companyName = clean(employee.companyName) || "Company";
+    const companyAddress = clean(employee.companyAddress);
+    const esc = (v) => clean(v).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const actualOt = n(salary.overtimeHours);
+    const approvedOt = n(salary.overtimeApprovedHours);
+    const actualCut = n(salary.cuttingMinutes);
+    const approvedCut = n(salary.cuttingApprovedMinutes);
+
+    const subject = `Salary Slip - ${monthLabel} - ${employee.name || employee.employeeCode || "Employee"}`;
+    const html = `
+      <div style="font-family:Arial,sans-serif;background:#f4f7fb;padding:24px;color:#172033">
+        <div style="max-width:760px;margin:auto;background:#fff;border:1px solid #dfe5ee;border-radius:12px;padding:28px">
+          <div style="text-align:center;border-bottom:2px solid #1d4f91;padding-bottom:14px;margin-bottom:18px">
+            <h1 style="margin:0;color:#172b4d;font-size:24px">${esc(companyName)}</h1>
+            <div style="color:#667085;margin-top:5px">${esc(companyAddress)}</div>
+            <h2 style="margin:9px 0 0;font-size:18px">Salary Slip - ${esc(monthLabel)}</h2>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px">
+            <tr><td style="padding:7px;border:1px solid #e3e8ef"><b>Employee's Name</b></td><td style="padding:7px;border:1px solid #e3e8ef">${esc(employee.name)}</td><td style="padding:7px;border:1px solid #e3e8ef"><b>Employee ID</b></td><td style="padding:7px;border:1px solid #e3e8ef">${esc(employee.employeeCode)}</td></tr>
+            <tr><td style="padding:7px;border:1px solid #e3e8ef"><b>Designation</b></td><td style="padding:7px;border:1px solid #e3e8ef">${esc(employee.designation)}</td><td style="padding:7px;border:1px solid #e3e8ef"><b>Paid Days</b></td><td style="padding:7px;border:1px solid #e3e8ef">${paidDays}</td></tr>
+            <tr><td style="padding:7px;border:1px solid #e3e8ef"><b>Bank Name</b></td><td style="padding:7px;border:1px solid #e3e8ef">${esc(employee.bankName)}</td><td style="padding:7px;border:1px solid #e3e8ef"><b>LOP</b></td><td style="padding:7px;border:1px solid #e3e8ef">${lop}</td></tr>
+          </table>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr><th colspan="2" style="padding:9px;border:1px solid #dfe6ef;background:#eef4fb">Actuals</th><th colspan="2" style="padding:9px;border:1px solid #dfe6ef;background:#eef4fb">Earnings</th><th colspan="2" style="padding:9px;border:1px solid #dfe6ef;background:#eef4fb">Deductions</th></tr></thead>
+            <tbody>
+              <tr><td style="padding:7px;border:1px solid #e3e8ef">Basic</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(basic)}</td><td style="padding:7px;border:1px solid #e3e8ef">Basic</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(basic)}</td><td style="padding:7px;border:1px solid #e3e8ef">ESI Employee</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(esi)}</td></tr>
+              <tr><td style="padding:7px;border:1px solid #e3e8ef">HRA</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(hra)}</td><td style="padding:7px;border:1px solid #e3e8ef">HRA</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(hra)}</td><td style="padding:7px;border:1px solid #e3e8ef">PF Employee</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(pf)}</td></tr>
+              <tr><td style="padding:7px;border:1px solid #e3e8ef">Conveyance</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(conveyance)}</td><td style="padding:7px;border:1px solid #e3e8ef">Conveyance</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(conveyance)}</td><td style="padding:7px;border:1px solid #e3e8ef">Professional Tax</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(professionalTax)}</td></tr>
+              <tr><td style="padding:7px;border:1px solid #e3e8ef">Others</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(others)}</td><td style="padding:7px;border:1px solid #e3e8ef">Others</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(others)}</td><td style="padding:7px;border:1px solid #e3e8ef">Fine / Cutting</td><td style="padding:7px;border:1px solid #e3e8ef;text-align:right">${moneyHtml(cutting)}</td></tr>
+              <tr style="background:#f4f7fb"><th style="padding:8px;border:1px solid #e3e8ef" colspan="2">Total Rs. ${moneyHtml(totalGross)}</th><th style="padding:8px;border:1px solid #e3e8ef" colspan="2">Earnings ${moneyHtml(totalGross)}</th><th style="padding:8px;border:1px solid #e3e8ef" colspan="2">Deductions ${moneyHtml(totalDeductions)}</th></tr>
+            </tbody>
+          </table>
+          <div style="margin-top:16px;padding:14px 16px;background:#eef5ff;border:1px solid #cfe0fa;border-radius:9px;display:flex;justify-content:space-between"><b>Total Net Payable</b><b style="font-size:20px;color:#17365d">${moneyHtml(netPayable)}</b></div>
+          ${(actualOt > 0 || approvedOt > 0 || overtimeAmount > 0) ? `<p style="font-size:12px;color:#667085;margin-top:15px"><b>OT:</b> Actual ${actualOt}h · Approved ${approvedOt}h · Amount ${moneyHtml(overtimeAmount)}</p>` : ""}
+          ${(actualCut > 0 || approvedCut > 0 || cutting > 0) ? `<p style="font-size:12px;color:#667085"><b>Fine / Cutting:</b> Actual ${actualCut}m · Approved ${approvedCut}m · Amount ${moneyHtml(cutting)}</p>` : ""}
+          <p style="font-size:11px;color:#667085;margin-top:18px">This is an electronically generated salary slip.</p>
+        </div>
+      </div>`;
+
+    await sendEmployeeEmail({
+      to,
+      subject,
+      html,
+      text: `${companyName}\nSalary Slip - ${monthLabel}\nEmployee: ${employee.name}\nNet Payable: ${moneyHtml(netPayable)}`,
+    });
+
+    res.json({ success: true, message: `Salary slip sent to ${to}.`, email: to });
+  } catch (error) {
+    console.error("sendSalarySlipEmail:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 }
