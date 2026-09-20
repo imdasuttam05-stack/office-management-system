@@ -217,10 +217,13 @@ export default function Attendance() {
     date: today,
     type: "Working",
     shiftId: "",
+    shiftIds: [],
     overtimeAllowed: true,
     requiredWorkMinutes: null,
     note: ""
   });
+
+  const [holidays, setHolidays] = useState([]);
 
   const [modal, setModal] = useState(null);
 
@@ -260,6 +263,12 @@ export default function Attendance() {
           : [],
       });
       setShifts(s.shifts || []);
+      try {
+        const h = await hrApi.holidays();
+        setHolidays(h.holidays || []);
+      } catch {
+        setHolidays([]);
+      }
     } catch (e) {
       setError(e.message);
     }
@@ -406,7 +415,7 @@ export default function Attendance() {
         );
         setMessage("Import completed with skipped rows.");
       } else {
-        setMessage(`Successfully imported ${imported} record(s).`);
+        setMessage(`Successfully imported ${imported} record(s)${r.sheetName ? ` from first sheet "${r.sheetName}"` : ""}.`);
       }
 
       setView("month");
@@ -431,10 +440,15 @@ export default function Attendance() {
         ? s.dateOverrides
         : [];
 
+      const selectedShiftIds = Array.isArray(dateRuleForm.shiftIds)
+        ? dateRuleForm.shiftIds.filter(Boolean)
+        : (dateRuleForm.shiftId ? [dateRuleForm.shiftId] : []);
+
       const nextItem = {
         date,
         type: dateRuleForm.type,
-        shiftId: dateRuleForm.shiftId || null,
+        shiftId: selectedShiftIds[0] || null,
+        shiftIds: selectedShiftIds,
         overtimeAllowed: dateRuleForm.overtimeAllowed !== false,
         requiredWorkMinutes:
           dateRuleForm.requiredWorkMinutes === null ||
@@ -561,6 +575,7 @@ export default function Attendance() {
     settings?.days?.[k] || {
       type: "Working",
       shiftId: null,
+      shiftIds: [],
       overtimeAllowed: true,
       requiredWorkMinutes: null
     };
@@ -581,9 +596,64 @@ export default function Attendance() {
     settings?.saturday || {
       type: "Working",
       shiftId: null,
+      shiftIds: [],
       overtimeAllowed: true,
       requiredWorkMinutes: null
     };
+
+  const ruleShiftIds = (rule) => {
+    if (Array.isArray(rule?.shiftIds)) return rule.shiftIds.map(String);
+    return rule?.shiftId ? [String(rule.shiftId)] : [];
+  };
+
+  const setRuleShiftIds = (day, values) => {
+    const shiftIds = Array.from(new Set(values || []));
+    if (day === "saturday") {
+      setSettings((s) => ({
+        ...s,
+        saturday: { ...(s?.saturday || {}), shiftIds, shiftId: shiftIds[0] || null },
+      }));
+    } else {
+      setSettings((s) => ({
+        ...s,
+        days: {
+          ...(s?.days || {}),
+          [day]: { ...ruleFor(day), shiftIds, shiftId: shiftIds[0] || null },
+        },
+      }));
+    }
+  };
+
+  const monthRuleRows = useMemo(() => {
+    const [yy, mm] = String(selectedMonth).split("-").map(Number);
+    if (!yy || !mm || !settings) return [];
+    const count = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+    return Array.from({ length: count }, (_, idx) => {
+      const day = idx + 1;
+      const dt = new Date(Date.UTC(yy, mm - 1, day));
+      const key = `${yy}-${String(mm).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const override = (settings.dateOverrides || []).find((x) => String(x.date).slice(0, 10) === key);
+      const base = override || (dt.getUTCDay() === 6 ? settings.saturday : settings.days?.[dayNames[dt.getUTCDay()]]);
+      const holiday = (holidays || []).find((h) => String(h.date).slice(0, 10) === key);
+      const names = ruleShiftIds(base).map((id) => {
+        const sh = shifts.find((x) => String(x._id) === String(id));
+        return sh ? `${sh.name} (${sh.startTime}-${sh.endTime})` : "";
+      }).filter(Boolean);
+
+      return {
+        key,
+        day: dt.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }),
+        rule: holiday ? "Holiday" : (base?.type || "Working"),
+        shifts: names.length ? names.join(", ") : "Employee Shift",
+        target: Number.isFinite(Number(base?.requiredWorkMinutes)) ? `${(Number(base.requiredWorkMinutes) / 60).toFixed(2).replace(/\.00$/, "")} h` : "Shift duration",
+        ot: holiday ? "No" : (base?.overtimeAllowed === false ? "No" : "Yes"),
+        source: override ? "Date Rule" : (dt.getUTCDay() === 6 ? "Saturday Rule" : "Weekly Rule"),
+        note: override?.note || holiday?.name || "",
+      };
+    });
+  }, [selectedMonth, settings, shifts, holidays]);
 
   return (
     <main style={S.page}>
@@ -1065,45 +1135,23 @@ export default function Attendance() {
                       </option>
                     </select>
 
-                    <select
-                      style={S.input}
-                      value={r.shiftId || ""}
-                      onChange={(e) =>
-                        day === "saturday"
-                          ? setSettings(
-                              (s) => ({
-                                ...s,
-                                saturday: {
-                                  ...saturday,
-                                  shiftId:
-                                    e.target.value ||
-                                    null
-                                }
-                              })
-                            )
-                          : setDayRule(
-                              day,
-                              "shiftId",
-                              e.target.value ||
-                                null
-                            )
-                      }
-                    >
-                      <option value="">
-                        Default Shift
-                      </option>
-
-                      {shifts.map((x) => (
-                        <option
-                          value={x._id}
-                          key={x._id}
-                        >
-                          {x.name} (
-                          {x.startTime}-
-                          {x.endTime})
-                        </option>
-                      ))}
-                    </select>
+                    <label style={S.label}>
+                      <span>Apply to Shift(s)</span>
+                      <select
+                        multiple
+                        size={Math.min(4, Math.max(2, shifts.length))}
+                        style={{ ...S.input, minHeight: 86 }}
+                        value={ruleShiftIds(r)}
+                        onChange={(e) => setRuleShiftIds(day, Array.from(e.target.selectedOptions).map((o) => o.value))}
+                      >
+                        {shifts.map((x) => (
+                          <option value={x._id} key={x._id}>
+                            {x.name} ({x.startTime}-{x.endTime})
+                          </option>
+                        ))}
+                      </select>
+                      <small style={{ color: "#667085" }}>Ctrl + click = multiple shifts. Blank = employee's assigned shift.</small>
+                    </label>
 
                     <label style={S.label}>
                       <span>Target Work (hours)</span>
@@ -1201,19 +1249,24 @@ export default function Attendance() {
                 </label>
 
                 <label style={S.label}>
-                  <span>Shift</span>
+                  <span>Shift(s)</span>
                   <select
-                    style={S.input}
-                    value={dateRuleForm.shiftId || ""}
-                    onChange={(e) => setDateRuleForm((v) => ({ ...v, shiftId: e.target.value }))}
+                    multiple
+                    size={Math.min(4, Math.max(2, shifts.length))}
+                    style={{ ...S.input, minHeight: 86 }}
+                    value={Array.isArray(dateRuleForm.shiftIds) ? dateRuleForm.shiftIds : (dateRuleForm.shiftId ? [dateRuleForm.shiftId] : [])}
+                    onChange={(e) => {
+                      const ids = Array.from(e.target.selectedOptions).map((o) => o.value);
+                      setDateRuleForm((v) => ({ ...v, shiftIds: ids, shiftId: ids[0] || "" }));
+                    }}
                   >
-                    <option value="">Use Employee Shift</option>
                     {shifts.map((x) => (
                       <option value={x._id} key={x._id}>
                         {x.name} ({x.startTime}-{x.endTime})
                       </option>
                     ))}
                   </select>
+                  <small style={{ color: "#667085" }}>Blank = Employee Shift.</small>
                 </label>
 
                 <label style={S.label}>
@@ -1281,12 +1334,19 @@ export default function Attendance() {
                     </thead>
                     <tbody>
                       {[...settings.dateOverrides].sort((a, b) => String(a.date).localeCompare(String(b.date))).map((item) => {
-                        const shift = shifts.find((x) => String(x._id) === String(item.shiftId));
+                        const ids = Array.isArray(item.shiftIds) && item.shiftIds.length
+                          ? item.shiftIds
+                          : (item.shiftId ? [item.shiftId] : []);
+                        const shiftText = ids
+                          .map((id) => shifts.find((x) => String(x._id) === String(id)))
+                          .filter(Boolean)
+                          .map((shift) => `${shift.name} (${shift.startTime}-${shift.endTime})`)
+                          .join(", ");
                         return (
                           <tr key={item.date}>
                             <td style={S.td}>{item.date}</td>
                             <td style={S.td}>{item.type}</td>
-                            <td style={S.td}>{shift ? `${shift.name} (${shift.startTime}-${shift.endTime})` : "Employee Shift"}</td>
+                            <td style={S.td}>{shiftText || "Employee Shift"}</td>
                             <td style={S.td}>{Number.isFinite(Number(item.requiredWorkMinutes)) ? `${(Number(item.requiredWorkMinutes) / 60).toFixed(2).replace(/\.00$/, "")} h` : "Shift duration"}</td>
                             <td style={S.td}>{item.overtimeAllowed === false ? "No" : "Yes"}</td>
                             <td style={S.td}>{item.note || "-"}</td>
@@ -1300,6 +1360,43 @@ export default function Attendance() {
                   </table>
                 </div>
               )}
+            </div>
+
+            <div style={{ ...S.ruleCard, marginTop: 18 }}>
+              <b>RULES FOR SELECTED MONTH — {selectedMonth}</b>
+              <div style={{ marginTop: 8, fontSize: 13, color: "#475467" }}>
+                Monthly rules active in the app. Date Rule has priority; Holiday comes from Holiday Master.
+              </div>
+              <div style={{ marginTop: 12, overflowX: "auto", maxHeight: 360 }}>
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>Date</th>
+                      <th style={S.th}>Day</th>
+                      <th style={S.th}>Rule</th>
+                      <th style={S.th}>Shift(s)</th>
+                      <th style={S.th}>Target</th>
+                      <th style={S.th}>OT</th>
+                      <th style={S.th}>Source</th>
+                      <th style={S.th}>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthRuleRows.map((item) => (
+                      <tr key={item.key}>
+                        <td style={S.td}>{item.key}</td>
+                        <td style={S.td}>{item.day}</td>
+                        <td style={S.td}><b>{item.rule}</b></td>
+                        <td style={S.td}>{item.shifts}</td>
+                        <td style={S.td}>{item.target}</td>
+                        <td style={S.td}>{item.ot}</td>
+                        <td style={S.td}>{item.source}</td>
+                        <td style={S.td}>{item.note || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {showShift && (
