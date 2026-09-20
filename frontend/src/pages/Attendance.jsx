@@ -213,6 +213,15 @@ export default function Attendance() {
     overtimeAfterMinutes: 0
   });
 
+  const [dateRuleForm, setDateRuleForm] = useState({
+    date: today,
+    type: "Working",
+    shiftId: "",
+    overtimeAllowed: true,
+    requiredWorkMinutes: null,
+    note: ""
+  });
+
   const [modal, setModal] = useState(null);
 
   const fileRef = useRef(null);
@@ -244,7 +253,12 @@ export default function Attendance() {
 
       setEmployees(e.employees || []);
       setRows(a.attendance || []);
-      setSettings(s.settings);
+      setSettings({
+        ...(s.settings || {}),
+        dateOverrides: Array.isArray(s.settings?.dateOverrides)
+          ? s.settings.dateOverrides
+          : [],
+      });
       setShifts(s.shifts || []);
     } catch (e) {
       setError(e.message);
@@ -404,6 +418,55 @@ export default function Attendance() {
     }
   }
 
+  function addOrUpdateDateRule() {
+    const date = String(dateRuleForm.date || "").trim();
+
+    if (!date) {
+      setError("Date is required for a date-specific attendance rule.");
+      return;
+    }
+
+    setSettings((s) => {
+      const current = Array.isArray(s?.dateOverrides)
+        ? s.dateOverrides
+        : [];
+
+      const nextItem = {
+        date,
+        type: dateRuleForm.type,
+        shiftId: dateRuleForm.shiftId || null,
+        overtimeAllowed: dateRuleForm.overtimeAllowed !== false,
+        requiredWorkMinutes:
+          dateRuleForm.requiredWorkMinutes === null ||
+          dateRuleForm.requiredWorkMinutes === ""
+            ? null
+            : Math.round(Number(dateRuleForm.requiredWorkMinutes) * 60),
+        note: dateRuleForm.note || "",
+      };
+
+      const exists = current.some((item) => item.date === date);
+      const dateOverrides = exists
+        ? current.map((item) =>
+            item.date === date ? { ...item, ...nextItem } : item
+          )
+        : [...current, nextItem];
+
+      return { ...s, dateOverrides };
+    });
+
+    setMessage(`Date rule prepared for ${date}. Click Save Rules.`);
+  }
+
+  function removeDateRule(date) {
+    setSettings((s) => ({
+      ...s,
+      dateOverrides: (Array.isArray(s?.dateOverrides)
+        ? s.dateOverrides
+        : []
+      ).filter((item) => item.date !== date),
+    }));
+  }
+
   async function saveRules() {
     try {
       await hrApi.saveAttendanceSettings(settings);
@@ -498,7 +561,8 @@ export default function Attendance() {
     settings?.days?.[k] || {
       type: "Working",
       shiftId: null,
-      overtimeAllowed: true
+      overtimeAllowed: true,
+      requiredWorkMinutes: null
     };
 
   const setDayRule = (k, f, v) =>
@@ -517,7 +581,8 @@ export default function Attendance() {
     settings?.saturday || {
       type: "Working",
       shiftId: null,
-      overtimeAllowed: true
+      overtimeAllowed: true,
+      requiredWorkMinutes: null
     };
 
   return (
@@ -1040,6 +1105,35 @@ export default function Attendance() {
                       ))}
                     </select>
 
+                    <label style={S.label}>
+                      <span>Target Work (hours)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        style={S.input}
+                        value={
+                          r.requiredWorkMinutes === null ||
+                          r.requiredWorkMinutes === undefined
+                            ? ""
+                            : (Number(r.requiredWorkMinutes) / 60).toString()
+                        }
+                        placeholder="Use shift hours"
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const value = raw === "" ? null : Math.round(Number(raw) * 60);
+                          if (day === "saturday") {
+                            setSettings((s) => ({
+                              ...s,
+                              saturday: { ...saturday, requiredWorkMinutes: value }
+                            }));
+                          } else {
+                            setDayRule(day, "requiredWorkMinutes", value);
+                          }
+                        }}
+                      />
+                    </label>
+
                     <label>
                       <input
                         type="checkbox"
@@ -1074,6 +1168,138 @@ export default function Attendance() {
                 );
               })}
 
+            </div>
+
+            <div style={{ ...S.ruleCard, marginTop: 18 }}>
+              <b>DATE-SPECIFIC RULE</b>
+              <div style={{ marginTop: 8, fontSize: 13, color: "#475467" }}>
+                Use this for a special date, e.g. 2026-09-01. This date rule overrides the normal weekday/Saturday rule for that date only.
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1.5fr 1.05fr 1fr auto", gap: 10, alignItems: "end", marginTop: 12 }}>
+                <label style={S.label}>
+                  <span>Date</span>
+                  <input
+                    type="date"
+                    style={S.input}
+                    value={dateRuleForm.date}
+                    onChange={(e) => setDateRuleForm((v) => ({ ...v, date: e.target.value }))}
+                  />
+                </label>
+
+                <label style={S.label}>
+                  <span>Rule</span>
+                  <select
+                    style={S.input}
+                    value={dateRuleForm.type}
+                    onChange={(e) => setDateRuleForm((v) => ({ ...v, type: e.target.value }))}
+                  >
+                    <option>Working</option>
+                    <option>Half Day</option>
+                    <option>Week Off</option>
+                  </select>
+                </label>
+
+                <label style={S.label}>
+                  <span>Shift</span>
+                  <select
+                    style={S.input}
+                    value={dateRuleForm.shiftId || ""}
+                    onChange={(e) => setDateRuleForm((v) => ({ ...v, shiftId: e.target.value }))}
+                  >
+                    <option value="">Use Employee Shift</option>
+                    {shifts.map((x) => (
+                      <option value={x._id} key={x._id}>
+                        {x.name} ({x.startTime}-{x.endTime})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={S.label}>
+                  <span>Target Work (hours)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    style={S.input}
+                    value={
+                      dateRuleForm.requiredWorkMinutes === null ||
+                      dateRuleForm.requiredWorkMinutes === undefined
+                        ? ""
+                        : (Number(dateRuleForm.requiredWorkMinutes) / 60).toString()
+                    }
+                    placeholder="Use shift hours"
+                    onChange={(e) =>
+                      setDateRuleForm((v) => ({
+                        ...v,
+                        requiredWorkMinutes:
+                          e.target.value === ""
+                            ? null
+                            : Math.round(Number(e.target.value) * 60)
+                      }))
+                    }
+                  />
+                </label>
+
+                <label style={{ ...S.label, paddingBottom: 8 }}>
+                  <span>OT</span>
+                  <span>
+                    <input
+                      type="checkbox"
+                      checked={dateRuleForm.overtimeAllowed !== false}
+                      onChange={(e) => setDateRuleForm((v) => ({ ...v, overtimeAllowed: e.target.checked }))}
+                    /> {dateRuleForm.overtimeAllowed ? "Allowed" : "Not allowed"}
+                  </span>
+                </label>
+
+                <button type="button" style={S.btn2} onClick={addOrUpdateDateRule}>
+                  Add / Update
+                </button>
+              </div>
+
+              <input
+                style={{ ...S.input, marginTop: 10 }}
+                placeholder="Optional note (e.g. special opening / festival work)"
+                value={dateRuleForm.note}
+                onChange={(e) => setDateRuleForm((v) => ({ ...v, note: e.target.value }))}
+              />
+
+              {Array.isArray(settings?.dateOverrides) && settings.dateOverrides.length > 0 && (
+                <div style={{ marginTop: 12, overflowX: "auto" }}>
+                  <table style={S.table}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Date</th>
+                        <th style={S.th}>Rule</th>
+                        <th style={S.th}>Shift</th>
+                        <th style={S.th}>Target</th>
+                        <th style={S.th}>OT</th>
+                        <th style={S.th}>Note</th>
+                        <th style={S.th}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...settings.dateOverrides].sort((a, b) => String(a.date).localeCompare(String(b.date))).map((item) => {
+                        const shift = shifts.find((x) => String(x._id) === String(item.shiftId));
+                        return (
+                          <tr key={item.date}>
+                            <td style={S.td}>{item.date}</td>
+                            <td style={S.td}>{item.type}</td>
+                            <td style={S.td}>{shift ? `${shift.name} (${shift.startTime}-${shift.endTime})` : "Employee Shift"}</td>
+                            <td style={S.td}>{Number.isFinite(Number(item.requiredWorkMinutes)) ? `${(Number(item.requiredWorkMinutes) / 60).toFixed(2).replace(/\.00$/, "")} h` : "Shift duration"}</td>
+                            <td style={S.td}>{item.overtimeAllowed === false ? "No" : "Yes"}</td>
+                            <td style={S.td}>{item.note || "-"}</td>
+                            <td style={S.td}>
+                              <button type="button" style={S.btnDanger || S.btn2} onClick={() => removeDateRule(item.date)}>Remove</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {showShift && (
