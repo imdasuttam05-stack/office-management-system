@@ -370,21 +370,31 @@ const attendanceDayKeys = [
   "saturday",
 ];
 
+function normalizeRuleShiftIds(rule, fallbackShiftId = null) {
+  const raw = Array.isArray(rule?.shiftIds)
+    ? rule.shiftIds
+    : rule?.shiftId
+      ? [rule.shiftId]
+      : fallbackShiftId
+        ? [fallbackShiftId]
+        : [];
+
+  return [...new Set(raw.filter(Boolean).map((id) => String(id)))];
+}
+
 function getEffectiveAttendanceRule(settings, date) {
   const key = dateKey(date);
-
   const overrides = Array.isArray(settings?.dateOverrides)
     ? settings.dateOverrides
     : [];
-
-  const override = overrides.find(
-    (item) => dateKey(item?.date) === key
-  );
+  const override = overrides.find((item) => dateKey(item?.date) === key);
 
   if (override) {
+    const shiftIds = normalizeRuleShiftIds(override, settings?.defaultShiftId || null);
     return {
       type: override.type || "Working",
-      shiftId: override.shiftId || null,
+      shiftId: shiftIds[0] || null,
+      shiftIds,
       overtimeAllowed: override.overtimeAllowed !== false,
       requiredWorkMinutes:
         Number.isFinite(Number(override.requiredWorkMinutes))
@@ -399,15 +409,14 @@ function getEffectiveAttendanceRule(settings, date) {
     const d = new Date(`${key}T00:00:00.000Z`);
     const dayIndex = d.getUTCDay();
     const dayKey = attendanceDayKeys[dayIndex];
-    const rule =
-      dayIndex === 6
-        ? settings.saturday
-        : settings.days?.[dayKey];
+    const rule = dayIndex === 6 ? settings.saturday : settings.days?.[dayKey];
 
     if (rule) {
+      const shiftIds = normalizeRuleShiftIds(rule, settings.defaultShiftId || null);
       return {
         type: rule.type || "Working",
-        shiftId: rule.shiftId || settings.defaultShiftId || null,
+        shiftId: shiftIds[0] || null,
+        shiftIds,
         overtimeAllowed: rule.overtimeAllowed !== false,
         requiredWorkMinutes:
           Number.isFinite(Number(rule.requiredWorkMinutes))
@@ -419,14 +428,35 @@ function getEffectiveAttendanceRule(settings, date) {
     }
   }
 
+  const fallbackShiftIds = normalizeRuleShiftIds({ shiftId: settings?.defaultShiftId || null });
   return {
     type: "Working",
-    shiftId: settings?.defaultShiftId || null,
+    shiftId: fallbackShiftIds[0] || null,
+    shiftIds: fallbackShiftIds,
     overtimeAllowed: true,
     requiredWorkMinutes: null,
     note: "",
     source: "default",
   };
+}
+
+function getRuleShiftForEmployee(rule, employee, shifts = []) {
+  const allowed = normalizeRuleShiftIds(rule);
+  const employeeShiftId = employee?.shiftId ? String(employee.shiftId) : "";
+
+  if (employeeShiftId && allowed.includes(employeeShiftId)) {
+    return shifts.find((s) => String(s._id) === employeeShiftId) || null;
+  }
+
+  if (!allowed.length && employeeShiftId) {
+    return shifts.find((s) => String(s._id) === employeeShiftId) || null;
+  }
+
+  if (allowed.length) {
+    return shifts.find((s) => String(s._id) === allowed[0]) || null;
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -753,22 +783,22 @@ export async function getAttendance(req, res) {
             recordDate
           );
 
-          const effectiveShiftId =
-            effectiveRule.shiftId ||
-            record.shiftId?._id ||
-            employee?.shiftId ||
-            null;
-
+          const employeeShift = getRuleShiftForEmployee(
+            effectiveRule,
+            employee,
+            allShifts
+          );
+          const storedShift = record.shiftId?._id
+            ? shiftById.get(String(record.shiftId._id)) ||
+              allShifts.find((s) => String(s._id) === String(record.shiftId._id))
+            : null;
           const effectiveShift =
-            effectiveShiftId
-              ? (
-                  shiftById.get(String(effectiveShiftId)) ||
-                  allShifts.find(
-                    (s) => String(s._id) === String(effectiveShiftId)
-                  ) ||
-                  null
-                )
-              : null;
+            employeeShift ||
+            storedShift ||
+            (effectiveRule.shiftId
+              ? shiftById.get(String(effectiveRule.shiftId)) ||
+                allShifts.find((s) => String(s._id) === String(effectiveRule.shiftId))
+              : null);
 
           const requiredWorkMinutes =
             Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
@@ -1041,10 +1071,15 @@ export async function saveAttendance(req, res) {
 
     let shift = null;
 
+    const allowedShiftIds = Array.isArray(effectiveRule.shiftIds)
+      ? effectiveRule.shiftIds.map(String)
+      : [];
     const effectiveShiftId =
       shiftId ||
-      effectiveRule.shiftId ||
-      employee.shiftId ||
+      (employee.shiftId &&
+      (!allowedShiftIds.length || allowedShiftIds.includes(String(employee.shiftId)))
+        ? employee.shiftId
+        : effectiveRule.shiftId) ||
       null;
 
     if (effectiveShiftId) {
@@ -1590,13 +1625,8 @@ export async function importAttendanceExcel(
             const rawF = getCell(fRow, col);
 
             const dayShift =
-              effectiveRule.shiftId
-                ? shiftMap.get(String(effectiveRule.shiftId)) ||
-                  shifts.find(
-                    (s) => String(s._id) === String(effectiveRule.shiftId)
-                  ) ||
-                  baseShift
-                : baseShift;
+              getRuleShiftForEmployee(effectiveRule, employee, shifts) ||
+              baseShift;
 
             let calculated = {
               overtimeHours: 0,
@@ -1716,6 +1746,8 @@ export async function importAttendanceExcel(
         success: skipped === 0,
         partialSuccess: imported > 0 && skipped > 0,
         format: "monthly-multi-staff",
+        sheetName,
+        firstSheet: true,
         message:
           skipped > 0
             ? `Imported ${imported} working-day record(s); ${skipped} error(s) found. WO/H non-working days skipped.`
@@ -1916,18 +1948,8 @@ export async function importAttendanceExcel(
           ? shiftMap.get(normalizeLookupKey(shiftName)) || null
           : null;
 
-        if (!shift && effectiveRule.shiftId) {
-          shift =
-            shifts.find(
-              (s) => String(s._id) === String(effectiveRule.shiftId)
-            ) || null;
-        }
-
-        if (!shift && employee.shiftId) {
-          shift =
-            shifts.find(
-              (s) => String(s._id) === String(employee.shiftId)
-            ) || null;
+        if (!shift) {
+          shift = getRuleShiftForEmployee(effectiveRule, employee, shifts) || null;
         }
 
         const checkIn = normalizeTime(
@@ -2033,6 +2055,8 @@ export async function importAttendanceExcel(
       success: skipped === 0,
       partialSuccess: imported > 0 && skipped > 0,
       format: "daily-row",
+      sheetName,
+      firstSheet: true,
       message:
         skipped > 0
           ? `Imported ${imported} record(s); ${skipped} row(s) skipped.`
@@ -2150,20 +2174,29 @@ export async function saveAttendanceSettings(
   res
 ) {
   try {
-    let settings =
-      await AttendanceSetting.findOne({});
+    const body = { ...req.body };
+    const normalizeSavedRule = (rule) => {
+      if (!rule || typeof rule !== "object") return rule;
+      const shiftIds = normalizeRuleShiftIds(rule);
+      return { ...rule, shiftIds, shiftId: shiftIds[0] || null };
+    };
+
+    if (body.saturday) body.saturday = normalizeSavedRule(body.saturday);
+    if (body.days && typeof body.days === "object") {
+      body.days = Object.fromEntries(
+        Object.entries(body.days).map(([key, rule]) => [key, normalizeSavedRule(rule)])
+      );
+    }
+    if (Array.isArray(body.dateOverrides)) {
+      body.dateOverrides = body.dateOverrides.map(normalizeSavedRule);
+    }
+
+    let settings = await AttendanceSetting.findOne({});
 
     if (!settings) {
-      settings =
-        await AttendanceSetting.create(
-          req.body
-        );
+      settings = await AttendanceSetting.create(body);
     } else {
-      Object.assign(
-        settings,
-        req.body
-      );
-
+      Object.assign(settings, body);
       await settings.save();
     }
 
