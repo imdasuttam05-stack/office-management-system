@@ -369,7 +369,7 @@ export default function Attendance() {
       setError("");
       setMessage("Uploading Excel...");
 
-      const r = await hrApi.uploadAttendance(file);
+      const r = await hrApi.uploadAttendance(file, selectedMonth);
 
       const imported = Number(r.imported || 0);
       const skipped = Number(r.skipped || 0);
