@@ -726,6 +726,87 @@ export async function getAttendance(req, res) {
         allShifts.map((shift) => [String(shift._id), shift])
       );
 
+      /*
+       * IMPORTANT:
+       * Recalculate OT / Cutting when attendance is READ.
+       *
+       * Older attendance records may contain wrong overtimeHours values
+       * from a previous calculation bug. The UI must never trust that
+       * stale stored value.
+       *
+       * Rule:
+       *   actual < target  -> Cutting = target - actual, OT = 0
+       *   actual > target  -> OT = actual - target, Cutting = 0
+       *   actual = target   -> OT = 0, Cutting = 0
+       *
+       * Target comes from date/day rule's requiredWorkMinutes when set;
+       * otherwise from the effective shift duration minus break minutes.
+       */
+      if (attendanceSettings) {
+        for (const record of attendance) {
+          if (!record || record.status !== "Present") continue;
+
+          const recordDate = record.date;
+          const employee = record.employeeId;
+          const effectiveRule = getEffectiveAttendanceRule(
+            attendanceSettings,
+            recordDate
+          );
+
+          const effectiveShiftId =
+            effectiveRule.shiftId ||
+            record.shiftId?._id ||
+            employee?.shiftId ||
+            null;
+
+          const effectiveShift =
+            effectiveShiftId
+              ? (
+                  shiftById.get(String(effectiveShiftId)) ||
+                  allShifts.find(
+                    (s) => String(s._id) === String(effectiveShiftId)
+                  ) ||
+                  null
+                )
+              : null;
+
+          const requiredWorkMinutes =
+            Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
+              ? Number(effectiveRule.requiredWorkMinutes)
+              : null;
+
+          const adjustment = calculateTimeAdjustments(
+            record.checkIn,
+            record.checkOut,
+            effectiveShift,
+            requiredWorkMinutes,
+            effectiveRule.overtimeAllowed !== false
+          );
+
+          // Convert Mongoose document to plain object before replacing
+          // the calculated fields so old/stale DB values cannot leak out.
+          const plain = record.toObject
+            ? record.toObject()
+            : record;
+
+          plain.overtimeHours = adjustment.overtimeHours;
+          plain.cuttingMinutes = adjustment.cuttingMinutes;
+
+          // Keep the effective shift visible in the attendance table.
+          if (effectiveShift) {
+            plain.shiftId = effectiveShift._id;
+            plain.shiftName = effectiveShift.name || plain.shiftName || "";
+          }
+
+          record.__computed = plain;
+        }
+      }
+
+      // Replace recalculated records in the response array.
+      attendance = attendance.map(
+        (record) => record?.__computed || record
+      );
+
       const virtualStatusForDate = (d) => {
         const key = dateKey(d);
         const effectiveRule = getEffectiveAttendanceRule(
@@ -977,7 +1058,8 @@ export async function saveAttendance(req, res) {
       normalizeTime(checkOut);
 
     const requiredWorkMinutes =
-      Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
+      Number.isFinite(Number(effectiveRule.requiredWorkMinutes)) &&
+      Number(effectiveRule.requiredWorkMinutes) >= 0
         ? Number(effectiveRule.requiredWorkMinutes)
         : null;
 
@@ -1865,7 +1947,8 @@ export async function importAttendanceExcel(
         }
 
         const requiredWorkMinutes =
-          Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
+          Number.isFinite(Number(effectiveRule.requiredWorkMinutes)) &&
+          Number(effectiveRule.requiredWorkMinutes) >= 0
             ? Number(effectiveRule.requiredWorkMinutes)
             : null;
 
