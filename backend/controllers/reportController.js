@@ -295,7 +295,9 @@ async function buildAttendanceRows(req) {
         shiftName: shift?.name || a?.shiftName || "",
         hours: Math.round((adj.actualMinutes / 60) * 100) / 100,
         overtimeHours: adj.overtimeHours,
+        overtimeApproved: Boolean(a?.overtimeApproved),
         cuttingMinutes: adj.cuttingMinutes,
+        cuttingApproved: Boolean(a?.cuttingApproved),
         ruleSource: rule.source,
         ruleType: rule.type,
         note,
@@ -497,20 +499,24 @@ async function ensureSalaryRecordsForPeriod(req, month, year, employees) {
       : 0;
 
     let overtimeHours = 0;
+    let overtimeApprovedHours = 0;
     let cuttingMinutes = 0;
+    let cuttingApprovedMinutes = 0;
     for (const row of rows) {
       if (row.status === "Present") {
         overtimeHours += n(row.overtimeHours);
         cuttingMinutes += n(row.cuttingMinutes);
+        if (row.overtimeApproved) overtimeApprovedHours += n(row.overtimeHours);
+        if (row.cuttingApproved) cuttingApprovedMinutes += n(row.cuttingMinutes);
       }
     }
 
     const overtimeRate =
       n(req.body?.overtimeRate) ||
       (basic > 0 ? (basic / 26 / 8) * 1.5 : 0);
-    const overtimeAmount = overtimeHours * overtimeRate;
+    const overtimeAmount = overtimeApprovedHours * overtimeRate;
     const cuttingRate = basic > 0 ? basic / 26 / 8 : 0;
-    const cuttingAmount = (cuttingMinutes / 60) * cuttingRate;
+    const cuttingAmount = (cuttingApprovedMinutes / 60) * cuttingRate;
 
     const unpaidDays = Math.max(0, scheduledWorkingDays - paidScheduledDays);
     const unpaidDeduction = scheduledWorkingDays > 0
@@ -538,10 +544,13 @@ async function ensureSalaryRecordsForPeriod(req, month, year, employees) {
           basicSalary: basic,
           attendancePay,
           allowances: n(employee.hra) + n(employee.conveyance) + n(employee.otherAllowance),
+          // Keep actual OT/Fine for audit, but only approved values affect salary.
           overtimeHours,
+          overtimeApprovedHours,
           overtimeAmount,
           overtimeApprovedAmount: overtimeAmount,
           cuttingMinutes,
+          cuttingApprovedMinutes,
           cuttingAmount,
           grossSalary,
           deductions,
@@ -675,18 +684,19 @@ export async function getSalarySlip(req, res) {
     const basic = roundMoney(salary.basicSalary || employee.basicSalary);
     const hra = roundMoney(employee.hra);
     const conveyance = roundMoney(employee.conveyance);
-    const gross = roundMoney(salary.grossSalary || (basic + hra + conveyance + employee.otherAllowance));
-    const others = roundMoney(gross - basic - hra - conveyance);
+    const totalGross = roundMoney(salary.grossSalary || (basic + hra + conveyance + employee.otherAllowance));
+    const overtimeAmount = roundMoney(salary.overtimeAmount || salary.overtimeApprovedAmount);
+    const baseGross = roundMoney(Math.max(0, totalGross - overtimeAmount));
+    const others = roundMoney(baseGross - basic - hra - conveyance);
 
     const pfBase = employee.pfApplicable ? Math.min(basic, employee.pfWageCeiling || 15000) : 0;
     const pf = employee.pfApplicable ? roundMoney(employee.pfAmount || (pfBase * n(employee.pfRate || 12)) / 100) : 0;
     const esi = employee.esiApplicable ? roundMoney(employee.esiAmount || (Math.min(gross, employee.esiWageCeiling || 21000) * n(employee.esiRate || 0.75)) / 100) : 0;
     const professionalTax = roundMoney(employee.professionalTax);
     const cutting = roundMoney(salary.cuttingAmount);
-    const otherSalaryDeduction = Math.max(0, roundMoney(n(salary.deductions) - n(salary.cuttingAmount))) + roundMoney(employee.otherDeduction);
-    const otherDeduction = roundMoney(otherSalaryDeduction);
+    const otherDeduction = Math.max(0, roundMoney(n(salary.deductions) - cutting));
     const totalDeductions = roundMoney(pf + esi + professionalTax + cutting + otherDeduction);
-    const netPayable = roundMoney(Math.max(0, gross - totalDeductions));
+    const netPayable = roundMoney(Math.max(0, totalGross - totalDeductions));
 
     const slip = {
       salaryId: String(salary._id),
@@ -716,15 +726,21 @@ export async function getSalarySlip(req, res) {
         pf,
         esi,
         professionalTax,
-        other: roundMoney(otherDeduction + cutting),
+        cutting,
+        other: otherDeduction,
       },
       totals: {
-        earnings: gross,
+        baseEarnings: baseGross,
+        earnings: totalGross,
         deductions: totalDeductions,
         netPayable,
         overtimeHours: roundMoney(salary.overtimeHours),
-        overtimeAmount: roundMoney(salary.overtimeAmount || salary.overtimeApprovedAmount),
+        overtimeApprovedHours: roundMoney(salary.overtimeApprovedHours),
+        overtimeApproved: overtimeAmount > 0,
+        overtimeAmount,
         cuttingMinutes: n(salary.cuttingMinutes),
+        cuttingApprovedMinutes: n(salary.cuttingApprovedMinutes),
+        cuttingApproved: cutting > 0,
         cuttingAmount: cutting,
       },
       inWords: `Rupees ${toWords(netPayable)} Only`,
