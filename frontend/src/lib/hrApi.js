@@ -62,6 +62,45 @@ async function request(path, options = {}) {
   }
 }
 
+async function downloadFile(path, filename) {
+  const token = getToken();
+  try {
+    const response = await axios({
+      url: `${API_URL}/api/payroll${path}`,
+      method: "GET",
+      responseType: "blob",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      withCredentials: true,
+    });
+
+    const blob = new Blob([response.data], {
+      type: response.headers?.["content-type"] ||
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    if (error?.response?.data instanceof Blob) {
+      try {
+        const txt = await error.response.data.text();
+        const parsed = JSON.parse(txt);
+        throw new Error(parsed?.message || "Export failed.");
+      } catch (inner) {
+        if (inner instanceof Error && inner.message !== "Export failed.") throw inner;
+      }
+    }
+    throw new Error(error?.message || "Export failed.");
+  }
+}
+
 export const hrApi = {
   // =========================
   // EMPLOYEES
@@ -280,7 +319,7 @@ export const hrApi = {
     }),
 
   // =========================
-  // SALARY
+  // SALARY / REPORTS
   // =========================
 
   salaries: (q = "") =>
@@ -294,4 +333,22 @@ export const hrApi = {
 
   salarySlip: (id) =>
     request(`/salaries/${id}/slip`),
+
+  attendanceReport: (q = "") =>
+    request(`/reports/attendance${q}`),
+
+  exportAttendanceReport: (q = "", filename = "attendance-report.xlsx") =>
+    downloadFile(`/reports/attendance.xlsx${q}`, filename),
+
+  salaryReport: (q = "") =>
+    request(`/reports/salary${q}`),
+
+  exportSalaryReport: (q = "", filename = "salary-report.xlsx") =>
+    downloadFile(`/reports/salary.xlsx${q}`, filename),
+
+  detailedSalarySlip: (id) =>
+    request(`/reports/salary-slip/${id}`),
+
+  exportSalarySlip: (id, filename = `salary-slip-${id}.xlsx`) =>
+    downloadFile(`/reports/salary-slip/${id}.xlsx`, filename),
 };
