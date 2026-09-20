@@ -326,7 +326,7 @@ export const hrApi = {
     request(`/salaries${q}`),
 
   generateSalary: (body) =>
-    request("/salaries/generate", {
+    request("/salary/generate", {
       method: "POST",
       body: JSON.stringify(body),
     }),
