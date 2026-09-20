@@ -197,10 +197,38 @@ function SalaryReports() {
     return `?${p.toString()}`;
   }, [month, year, company, employeeIds]);
 
-  async function load() {
-    try { const r = await hrApi.salaryReport(query); setRows(r.salaries || []); } catch(e) { setError(e.message); }
+  async function load({ ensureGenerated = true } = {}) {
+    try {
+      setError("");
+      let r = await hrApi.salaryReport(query);
+      let salaries = Array.isArray(r.salaries) ? r.salaries : [];
+
+      // The payroll report should not remain empty merely because Salary
+      // documents have not been generated yet. When the selected month has
+      // no (or incomplete) payroll records, generate them for the selected
+      // company/staff and fetch the report again.
+      if (ensureGenerated) {
+        const candidateCount = options.employees.filter((e) => !company || e.companyName === company).length;
+        const expectedCount = employeeIds.length || candidateCount;
+        if (expectedCount > 0 && salaries.length < expectedCount) {
+          await hrApi.generateSalary({
+            month,
+            year,
+            companyName: company || undefined,
+            employeeIds: employeeIds.length ? employeeIds : undefined,
+          });
+          r = await hrApi.salaryReport(query);
+          salaries = Array.isArray(r.salaries) ? r.salaries : [];
+        }
+      }
+
+      setRows(salaries);
+    } catch(e) {
+      setError(e.message);
+    }
   }
-  useEffect(()=>{load()},[query]);
+
+  useEffect(()=>{load({ ensureGenerated: true })},[query, options.employees.length]);
 
   async function openSlip(id) {
     try { const r = await hrApi.detailedSalarySlip(id); setSlip(r.slip); } catch(e) { setError(e.message); }
