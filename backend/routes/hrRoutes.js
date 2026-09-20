@@ -46,6 +46,15 @@ import {
   getEmployeeLetters,
 } from "../controllers/employeeCommunicationController.js";
 
+import {
+  getAttendanceReport,
+  exportAttendanceReportExcel,
+  getSalaryReport,
+  exportSalaryReportExcel,
+  getSalarySlip as getDetailedSalarySlip,
+  exportSalarySlipExcel,
+} from "../controllers/reportController.js";
+
 const router = express.Router();
 
 /* =========================================================
@@ -361,6 +370,21 @@ router.post(
   approvePayrollAdjustments
 );
 
+
+/* =========================================================
+   REPORTS / EXPORTS
+========================================================= */
+router.get("/reports/attendance", getAttendanceReport);
+router.get("/reports/attendance.xlsx", exportAttendanceReportExcel);
+router.get("/reports/salary", getSalaryReport);
+router.get("/reports/salary.xlsx", exportSalaryReportExcel);
+
+// Detailed salary slip with employee/statutory information.
+router.get("/reports/salary-slip/:id", getDetailedSalarySlip);
+router.get("/reports/salary-slip/:id.xlsx", exportSalarySlipExcel);
+
+// Canonical salary slip API used by the frontend. Keep the old route too.
+router.get("/salaries/:id/slip", getDetailedSalarySlip);
 
 /* =========================================================
    EXPORT
