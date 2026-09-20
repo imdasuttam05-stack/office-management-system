@@ -196,6 +196,11 @@ router.post(
   saveAttendanceSettings
 );
 
+router.put(
+  "/attendance-settings",
+  saveAttendanceSettings
+);
+
 
 // /api/payroll/attendance/settings
 router.get(
@@ -204,6 +209,11 @@ router.get(
 );
 
 router.post(
+  "/attendance/settings",
+  saveAttendanceSettings
+);
+
+router.put(
   "/attendance/settings",
   saveAttendanceSettings
 );
