@@ -145,12 +145,16 @@ export const hrApi = {
       body: JSON.stringify(body),
     }),
 
-  uploadAttendance: async (file) => {
+  uploadAttendance: async (file, monthYear = "") => {
     const token = getToken();
 
     const form = new FormData();
 
     form.append("file", file);
+
+    if (monthYear) {
+      form.append("monthYear", monthYear);
+    }
 
     try {
       const response = await axios.post(
