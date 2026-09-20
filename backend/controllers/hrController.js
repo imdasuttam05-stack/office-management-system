@@ -617,6 +617,68 @@ export async function getAttendance(req, res) {
             name: 1,
           });
 
+      // Missing dates are rendered virtually. A configured holiday or
+      // weekly-off day must never appear as Absent just because there is
+      // no attendance document for that date.
+      const [attendanceSettings, holidays] =
+        await Promise.all([
+          AttendanceSetting.findOne({}),
+          Holiday.find({}),
+        ]);
+
+      const holidayMap = new Map();
+
+      for (const holiday of holidays) {
+        holidayMap.set(
+          dateKey(holiday.date),
+          holiday
+        );
+      }
+
+      const dayKeys = [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+      ];
+
+      const virtualStatusForDate = (d) => {
+        const key = dateKey(d);
+
+        // Imported/maintained holidays are treated as non-working days
+        // in the attendance/payroll view, as requested.
+        if (holidayMap.has(key)) {
+          return {
+            status: "Week Off",
+            note: `Holiday: ${holidayMap.get(key).name || "Holiday"}`,
+          };
+        }
+
+        if (attendanceSettings) {
+          const dayIndex = d.getUTCDay();
+          const dayKey = dayKeys[dayIndex];
+          const rule =
+            dayIndex === 6
+              ? attendanceSettings.saturday
+              : attendanceSettings.days?.[dayKey];
+
+          if (rule?.type === "Week Off") {
+            return {
+              status: "Week Off",
+              note: "Weekly Off",
+            };
+          }
+        }
+
+        return {
+          status: "Absent",
+          note: "",
+        };
+      };
+
       const fromDate = from
         ? new Date(
             `${from}T00:00:00.000Z`
@@ -650,6 +712,9 @@ export async function getAttendance(req, res) {
               continue;
             }
 
+            const virtual =
+              virtualStatusForDate(d);
+
             attendance.push({
               _id: `virtual-${emp._id}-${dateKey(
                 d
@@ -659,7 +724,7 @@ export async function getAttendance(req, res) {
 
               date: new Date(d),
 
-              status: "Absent",
+              status: virtual.status,
 
               checkIn: "",
               checkOut: "",
@@ -669,13 +734,13 @@ export async function getAttendance(req, res) {
                 emp.location ||
                 "",
 
-              shiftId: null,
+              shiftId: emp.shiftId || null,
               shiftName: "",
 
               overtimeHours: 0,
               cuttingMinutes: 0,
 
-              note: "",
+              note: virtual.note,
 
               virtual: true,
             });
@@ -898,95 +963,74 @@ export async function importAttendanceExcel(
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message:
-          "Please upload an Excel or CSV file.",
+        message: "Please upload an Excel or CSV file.",
       });
     }
 
-    const workbook =
-      xlsx.read(req.file.buffer, {
-        type: "buffer",
-        cellDates: true,
-      });
+    const workbook = xlsx.read(req.file.buffer, {
+      type: "buffer",
+      cellDates: true,
+    });
 
-    const sheetName =
-      workbook.SheetNames[0];
+    const sheetName = workbook.SheetNames[0];
 
     if (!sheetName) {
       return res.status(400).json({
         success: false,
-        message:
-          "Excel file has no worksheet.",
+        message: "Excel file has no worksheet.",
       });
     }
 
-    const sheet =
-      workbook.Sheets[sheetName];
+    const sheet = workbook.Sheets[sheetName];
+    const matrix = xlsx.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+      raw: true,
+      blankrows: true,
+    });
 
-    const data =
-      xlsx.utils.sheet_to_json(sheet, {
-        defval: "",
-        raw: true,
-      });
+    const rows = Array.isArray(matrix) ? matrix : [];
 
-    if (!data.length) {
+    if (!rows.length) {
       return res.status(400).json({
         success: false,
-        message:
-          "Excel file contains no attendance rows.",
+        message: "Excel file contains no attendance data.",
       });
     }
 
-    function getValue(row, names) {
-      for (const name of names) {
-        if (
-          Object.prototype.hasOwnProperty.call(
-            row,
-            name
-          )
-        ) {
-          return row[name];
-        }
-      }
+    const normalizeHeader = (v) =>
+      clean(v)
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
-      const keys = Object.keys(row);
+    const getCell = (row, index) =>
+      Array.isArray(row) ? row[index] ?? "" : "";
 
-      for (const name of names) {
-        const found = keys.find(
-          (key) =>
-            key.trim().toLowerCase() ===
-            name.trim().toLowerCase()
-        );
+    const employees = await Employee.find({});
+    const shifts = await Shift.find({});
 
-        if (found) {
-          return row[found];
-        }
-      }
-
-      return "";
-    }
-
-    const employees =
-      await Employee.find({});
-
-    const employeeMap = new Map();
+    const employeeCodeMap = new Map();
+    const employeeNameMap = new Map();
 
     for (const employee of employees) {
       if (employee.employeeCode) {
-        employeeMap.set(
-          normalizeLookupKey(
-            employee.employeeCode
-          ),
+        employeeCodeMap.set(
+          normalizeLookupKey(employee.employeeCode),
+          employee
+        );
+      }
+
+      if (employee.name) {
+        employeeNameMap.set(
+          normalizeLookupKey(employee.name),
           employee
         );
       }
     }
 
-    const shifts =
-      await Shift.find({});
-
     const shiftMap = new Map();
-
     for (const shift of shifts) {
       if (shift.name) {
         shiftMap.set(
@@ -996,104 +1040,534 @@ export async function importAttendanceExcel(
       }
     }
 
-    let imported = 0;
-    let skipped = 0;
+    const resolveEmployee = (candidates) => {
+      for (const candidate of candidates) {
+        const value = clean(candidate);
+        if (!value) continue;
 
-    const errors = [];
+        const byCode = employeeCodeMap.get(
+          normalizeLookupKey(value)
+        );
+        if (byCode) return byCode;
 
-    for (
-      let index = 0;
-      index < data.length;
-      index++
-    ) {
-      const row = data[index];
+        const byName = employeeNameMap.get(
+          normalizeLookupKey(value)
+        );
+        if (byName) return byName;
+      }
 
-      const excelRow = index + 2;
+      return null;
+    };
 
-      try {
-        const employeeCode =
-          clean(
-            getValue(row, [
-              "Employee Code",
-              "EmployeeCode",
-              "Employee code",
-              "Emp Code",
-              "EmpCode",
-              "Code",
-            ])
-          );
+    const monthlyStatus = (value) => {
+      const raw = clean(value).toUpperCase();
 
-        const rawDate =
-          getValue(row, [
-            "Date",
-            "Attendance Date",
-            "attendanceDate",
-          ]);
+      if (!raw || raw === "-") return "";
 
-        const rawStatus =
-          clean(
-            getValue(row, [
-              "Status",
-              "Attendance Status",
-            ])
-          );
+      if (/^\d*P$/.test(raw) || raw === "PRESENT") {
+        return "Present";
+      }
 
-        const rawCheckIn =
-          getValue(row, [
-            "Check In",
-            "CheckIn",
-            "In",
-            "Start Time",
-            "Start",
-          ]);
+      if (raw === "A" || raw === "ABSENT") {
+        return "Absent";
+      }
 
-        const rawCheckOut =
-          getValue(row, [
-            "Check Out",
-            "CheckOut",
-            "Out",
-            "End Time",
-            "End",
-          ]);
+      if (
+        raw === "HD" ||
+        raw === "HALF DAY" ||
+        raw === "HALFDAY"
+      ) {
+        return "Half Day";
+      }
 
-        const workLocation =
-          clean(
-            getValue(row, [
-              "Work Location",
-              "Location",
-              "WorkLocation",
-            ])
-          );
+      if (raw === "L" || raw === "LEAVE") {
+        return "Leave";
+      }
 
-        const shiftName =
-          clean(
-            getValue(row, [
-              "Shift Name",
-              "Shift",
-              "ShiftName",
-            ])
-          );
+      if (raw === "H" || raw === "HOLIDAY") {
+        return "Holiday";
+      }
 
-        const note =
-          clean(
-            getValue(row, [
-              "Note",
-              "Notes",
-              "Employee Note",
-              "Remarks",
-            ])
-          );
+      if (raw === "WO" || raw === "W/O" || raw === "WEEK OFF") {
+        return "Week Off";
+      }
 
-        if (!employeeCode) {
-          throw new Error(
-            "Employee Code is missing."
-          );
+      return null;
+    };
+
+    const monthlyLabels = new Set([
+      "IN",
+      "OUT",
+      "WH",
+      "OT",
+      "F",
+    ]);
+
+    const looksLikeMonthlyReport = rows.some((row) => {
+      if (!Array.isArray(row)) return false;
+      const first = clean(row[0]).toUpperCase();
+      return monthlyLabels.has(first);
+    });
+
+    /* =========================================================
+       FORMAT 1: MONTHLY MULTI-STAFF MATRIX
+
+       Example:
+       Employee | Monthly Regular | Attendance State | 1P | WO | ...
+       IN       | 09:54           | -                | ...
+       OUT      | 17:00           | -                | ...
+       WH       | 07:06           | -                | ...
+       OT       | -               | -                | ...
+       F        | -               | -                | ...
+
+       Only working-day statuses are written to Attendance.
+       WO is not written as an attendance document.
+       H creates a Holiday master record so the app displays it
+       as a non-working day rather than Absent.
+    ========================================================= */
+    if (looksLikeMonthlyReport) {
+      const monthYear = clean(
+        req.body?.monthYear ||
+          req.body?.month ||
+          req.body?.attendanceMonth
+      );
+
+      let year = Number(req.body?.year);
+      let month = Number(req.body?.monthNumber);
+
+      if (!year || !month) {
+        const m = monthYear.match(/^(\d{4})[-/](\d{1,2})$/);
+        if (m) {
+          year = Number(m[1]);
+          month = Number(m[2]);
+        }
+      }
+
+      if (!year || !month || month < 1 || month > 12) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Monthly Excel format detected. Please select the attendance month in the Attendance page before uploading.",
+          imported: 0,
+          skipped: 0,
+          total: 0,
+          errors: [],
+        });
+      }
+
+      const monthDays = new Date(
+        Date.UTC(year, month, 0)
+      ).getUTCDate();
+
+      const blocks = [];
+      let current = null;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i] || [];
+        const first = clean(row[0]).toUpperCase();
+
+        if (monthlyLabels.has(first)) {
+          if (current) {
+            current.detailRows[first] = row;
+          }
+          continue;
         }
 
-        const employee =
-          employeeMap.get(
-            normalizeLookupKey(employeeCode)
-          );
+        const nonEmpty = row.some((v) => clean(v));
+        if (!nonEmpty) continue;
+
+        const third = normalizeHeader(row[2]);
+        const statusCells = row
+          .slice(3, 3 + monthDays)
+          .map(monthlyStatus);
+
+        const looksLikeEmployeeHeader =
+          third === "attendance state" ||
+          statusCells.some((x) => x !== null && x !== "") ||
+          !!resolveEmployee(row.slice(0, 3));
+
+        if (looksLikeEmployeeHeader) {
+          current = {
+            header: row,
+            detailRows: {},
+            sourceRow: i + 1,
+          };
+          blocks.push(current);
+        }
+      }
+
+      if (!blocks.length) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Monthly Excel format detected, but no employee blocks were found.",
+          imported: 0,
+          skipped: 0,
+          total: 0,
+          errors: [],
+        });
+      }
+
+      let imported = 0;
+      let skipped = 0;
+      let ignoredNonWorking = 0;
+      const errors = [];
+      let holidayCount = 0;
+      const touchedWorkingDays = new Set();
+
+      for (const block of blocks) {
+        try {
+          const header = block.header || [];
+          const employee = resolveEmployee(header.slice(0, 3));
+
+          if (!employee) {
+            throw new Error(
+              `Employee "${clean(header[0])}" not found in Employee Master.`
+            );
+          }
+
+          let shift = null;
+          const headerShiftCandidate = header.find((value) => {
+            const normalized = normalizeLookupKey(value);
+            return normalized && shiftMap.has(normalized);
+          });
+
+          if (headerShiftCandidate) {
+            shift = shiftMap.get(
+              normalizeLookupKey(headerShiftCandidate)
+            );
+          }
+
+          if (!shift && employee.shiftId) {
+            shift =
+              shifts.find(
+                (s) => String(s._id) === String(employee.shiftId)
+              ) || null;
+          }
+
+          const inRow = block.detailRows.IN || [];
+          const outRow = block.detailRows.OUT || [];
+          const whRow = block.detailRows.WH || [];
+          const otRow = block.detailRows.OT || [];
+          const fRow = block.detailRows.F || [];
+
+          for (let day = 1; day <= monthDays; day++) {
+            const col = 2 + day; // day 1 starts at column index 3
+            const rawStatus = getCell(header, col);
+            const status = monthlyStatus(rawStatus);
+
+            if (status === "") {
+              continue;
+            }
+
+            if (!status) {
+              skipped++;
+              errors.push({
+                row: block.sourceRow,
+                message:
+                  `Invalid monthly status "${clean(rawStatus)}" for ${employee.employeeCode} on ${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}.`,
+              });
+              continue;
+            }
+
+            const attendanceDate = new Date(
+              Date.UTC(year, month - 1, day)
+            );
+
+            if (status === "Week Off") {
+              ignoredNonWorking++;
+              continue;
+            }
+
+            if (status === "Holiday") {
+              await Holiday.findOneAndUpdate(
+                { date: attendanceDate },
+                {
+                  $setOnInsert: {
+                    date: attendanceDate,
+                    name: "Imported Holiday",
+                    type: "Company",
+                  },
+                },
+                { upsert: true, new: true }
+              );
+              holidayCount++;
+              ignoredNonWorking++;
+              continue;
+            }
+
+            touchedWorkingDays.add(dateKey(attendanceDate));
+
+            const rawCheckIn = getCell(inRow, col);
+            const rawCheckOut = getCell(outRow, col);
+            const rawOT = getCell(otRow, col);
+            const rawF = getCell(fRow, col);
+
+            const checkIn = normalizeTime(rawCheckIn);
+            const checkOut = normalizeTime(rawCheckOut);
+
+            let calculated = {
+              overtimeHours: 0,
+              cuttingMinutes: 0,
+            };
+
+            if (status === "Present" && checkIn && checkOut) {
+              calculated = calculateTimeAdjustments(
+                checkIn,
+                checkOut,
+                shift
+              );
+            }
+
+            const explicitOTMinutes = timeToMinutes(rawOT);
+            const overtimeHours =
+              explicitOTMinutes !== null
+                ? Math.round((explicitOTMinutes / 60) * 100) / 100
+                : calculated.overtimeHours;
+
+            // The source report's F row is retained in Note only. It is not
+            // guessed as a financial Cutting amount.
+            const noteParts = [
+              "Monthly Excel Import",
+            ];
+
+            const rawWH = clean(getCell(whRow, col));
+            if (rawWH && rawWH !== "-") {
+              noteParts.push(`WH: ${rawWH}`);
+            }
+
+            if (clean(rawF) && clean(rawF) !== "-") {
+              noteParts.push(`F: ${clean(rawF)}`);
+            }
+
+            await Attendance.findOneAndUpdate(
+              {
+                employeeId: employee._id,
+                date: attendanceDate,
+              },
+              {
+                $set: {
+                  employeeId: employee._id,
+                  date: attendanceDate,
+                  status,
+                  checkIn,
+                  checkOut,
+                  workLocation:
+                    employee.workLocation ||
+                    employee.location ||
+                    "",
+                  shiftId: shift?._id || null,
+                  shiftName: shift?.name || "",
+                  overtimeHours,
+                  cuttingMinutes: calculated.cuttingMinutes,
+                  overtimeApproved: false,
+                  overtimeApprovedBy: null,
+                  overtimeApprovedAt: null,
+                  cuttingApproved: false,
+                  cuttingApprovedBy: null,
+                  cuttingApprovedAt: null,
+                  note: noteParts.join(" | "),
+                },
+              },
+              {
+                upsert: true,
+                new: true,
+                setDefaultsOnInsert: true,
+              }
+            );
+
+            imported++;
+          }
+        } catch (blockError) {
+          skipped++;
+          errors.push({
+            row: block.sourceRow,
+            message: blockError.message,
+          });
+        }
+      }
+
+      if (imported === 0 && skipped > 0) {
+        return res.status(400).json({
+          success: false,
+          imported,
+          skipped,
+          ignoredNonWorking,
+          holidayCount,
+          total: touchedWorkingDays.size,
+          errors,
+          message:
+            `No working-day attendance records were imported. ${skipped} row/block error(s) found.`,
+        });
+      }
+
+      return res.json({
+        success: skipped === 0,
+        partialSuccess: imported > 0 && skipped > 0,
+        format: "monthly-multi-staff",
+        message:
+          skipped > 0
+            ? `Imported ${imported} working-day record(s); ${skipped} error(s) found. WO/H non-working days skipped.`
+            : `Successfully imported ${imported} working-day record(s). WO/H non-working days skipped.`,
+        imported,
+        skipped,
+        ignoredNonWorking,
+        holidayCount,
+        totalWorkingDates: touchedWorkingDays.size,
+        errors,
+      });
+    }
+
+    /* =========================================================
+       FORMAT 2: DAILY MULTI-STAFF / ROW-PER-DAY
+       Existing format remains supported.
+    ========================================================= */
+
+    let headerIndex = -1;
+    let header = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const normalized = row.map(normalizeHeader);
+
+      const hasEmployeeCode = normalized.some((x) =>
+        [
+          "employee code",
+          "employeecode",
+          "emp code",
+          "empcode",
+          "code",
+        ].includes(x)
+      );
+
+      const hasDate = normalized.some((x) =>
+        ["date", "attendance date", "attendancedate"].includes(x)
+      );
+
+      if (hasEmployeeCode && hasDate) {
+        headerIndex = i;
+        header = row;
+        break;
+      }
+    }
+
+    if (headerIndex === -1) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Could not identify the Excel format. Use the daily attendance template or the monthly multi-staff attendance format.",
+        imported: 0,
+        skipped: 0,
+        total: 0,
+        errors: [],
+      });
+    }
+
+    const headerMap = new Map();
+    header.forEach((value, index) => {
+      headerMap.set(normalizeHeader(value), index);
+    });
+
+    const findIndex = (names) => {
+      for (const name of names) {
+        const index = headerMap.get(normalizeHeader(name));
+        if (index !== undefined) return index;
+      }
+      return -1;
+    };
+
+    const employeeCodeIndex = findIndex([
+      "Employee Code",
+      "EmployeeCode",
+      "Emp Code",
+      "EmpCode",
+      "Code",
+    ]);
+
+    const dateIndex = findIndex([
+      "Date",
+      "Attendance Date",
+      "attendanceDate",
+    ]);
+
+    const statusIndex = findIndex([
+      "Status",
+      "Attendance Status",
+    ]);
+
+    const checkInIndex = findIndex([
+      "Check In",
+      "CheckIn",
+      "In",
+      "Start Time",
+      "Start",
+    ]);
+
+    const checkOutIndex = findIndex([
+      "Check Out",
+      "CheckOut",
+      "Out",
+      "End Time",
+      "End",
+    ]);
+
+    const workLocationIndex = findIndex([
+      "Work Location",
+      "Location",
+      "WorkLocation",
+    ]);
+
+    const shiftNameIndex = findIndex([
+      "Shift Name",
+      "Shift",
+      "ShiftName",
+    ]);
+
+    const noteIndex = findIndex([
+      "Note",
+      "Notes",
+      "Employee Note",
+      "Remarks",
+    ]);
+
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+
+    const statusMap = {
+      p: "Present",
+      "1p": "Present",
+      present: "Present",
+      a: "Absent",
+      absent: "Absent",
+      hd: "Half Day",
+      "half day": "Half Day",
+      halfday: "Half Day",
+      l: "Leave",
+      leave: "Leave",
+      h: "Holiday",
+      holiday: "Holiday",
+      wo: "Week Off",
+      "w/o": "Week Off",
+      "week off": "Week Off",
+      weekoff: "Week Off",
+    };
+
+    for (let i = headerIndex + 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      if (!row.some((v) => clean(v))) continue;
+
+      const excelRow = i + 1;
+
+      try {
+        const employeeCode = clean(getCell(row, employeeCodeIndex));
+        const employee = employeeCodeMap.get(
+          normalizeLookupKey(employeeCode)
+        );
+
+        if (!employeeCode) {
+          throw new Error("Employee Code is missing.");
+        }
 
         if (!employee) {
           throw new Error(
@@ -1101,12 +1575,9 @@ export async function importAttendanceExcel(
           );
         }
 
-        /*
-          IMPORTANT:
-          Parse Excel date safely.
-        */
-        const parsedDate =
-          parseAttendanceDate(rawDate);
+        const parsedDate = parseAttendanceDate(
+          getCell(row, dateIndex)
+        );
 
         if (!parsedDate) {
           throw new Error(
@@ -1114,92 +1585,34 @@ export async function importAttendanceExcel(
           );
         }
 
-        /* -----------------------------------------
-           STATUS
-        ----------------------------------------- */
-
-        let status = rawStatus;
-
-        const statusMap = {
-          p: "Present",
-          present: "Present",
-
-          a: "Absent",
-          absent: "Absent",
-
-          hd: "Half Day",
-          "half day": "Half Day",
-          halfday: "Half Day",
-
-          l: "Leave",
-          leave: "Leave",
-
-          h: "Holiday",
-          holiday: "Holiday",
-
-          wo: "Week Off",
-          "week off": "Week Off",
-          weekoff: "Week Off",
-        };
-
+        let status = clean(getCell(row, statusIndex));
         status =
-          statusMap[
-            status.toLowerCase()
-          ] || status;
+          statusMap[status.toLowerCase()] || status;
 
-        const validStatuses = [
-          "Present",
-          "Absent",
-          "Half Day",
-          "Leave",
-          "Holiday",
-          "Week Off",
-        ];
-
-        if (
-          !validStatuses.includes(status)
-        ) {
-          throw new Error(
-            `Invalid Status "${rawStatus}".`
-          );
+        if (!Object.values(statusMap).includes(status)) {
+          throw new Error(`Invalid Status "${status}".`);
         }
 
-        /* -----------------------------------------
-           SHIFT
-        ----------------------------------------- */
+        // Daily imports preserve existing behavior: Week Off/Holiday are
+        // valid but do not require punches.
+        const shiftName = clean(getCell(row, shiftNameIndex));
+        let shift = shiftName
+          ? shiftMap.get(normalizeLookupKey(shiftName)) || null
+          : null;
 
-        let shift = null;
-
-        if (shiftName) {
-          shift =
-            shiftMap.get(
-              normalizeLookupKey(shiftName)
-            ) || null;
-
-          // Excel import should not fail only because the text label
-          // differs slightly from the master shift name.
-          if (!shift && employee.shiftId) {
-            shift =
-              shifts.find(
-                (s) => String(s._id) === String(employee.shiftId)
-              ) || null;
-          }
-        } else if (employee.shiftId) {
+        if (!shift && employee.shiftId) {
           shift =
             shifts.find(
               (s) => String(s._id) === String(employee.shiftId)
             ) || null;
         }
 
-        /* -----------------------------------------
-           TIME
-        ----------------------------------------- */
-
-        const checkIn =
-          normalizeTime(rawCheckIn);
-
-        const checkOut =
-          normalizeTime(rawCheckOut);
+        const checkIn = normalizeTime(
+          getCell(row, checkInIndex)
+        );
+        const checkOut = normalizeTime(
+          getCell(row, checkOutIndex)
+        );
 
         if (
           status === "Present" &&
@@ -1212,70 +1625,43 @@ export async function importAttendanceExcel(
 
         const adjustment =
           status === "Present"
-            ? calculateTimeAdjustments(
-                checkIn,
-                checkOut,
-                shift
-              )
+            ? calculateTimeAdjustments(checkIn, checkOut, shift)
             : {
                 overtimeHours: 0,
                 cuttingMinutes: 0,
               };
 
         const finalLocation =
-          workLocation ||
+          clean(getCell(row, workLocationIndex)) ||
           employee.workLocation ||
           employee.location ||
           "";
 
-        /*
-          UPSERT
-        */
+        const note = clean(getCell(row, noteIndex));
 
         await Attendance.findOneAndUpdate(
           {
-            employeeId:
-              employee._id,
-
+            employeeId: employee._id,
             date: parsedDate,
           },
           {
             $set: {
-              employeeId:
-                employee._id,
-
+              employeeId: employee._id,
               date: parsedDate,
-
               status,
-
               checkIn,
               checkOut,
-
-              workLocation:
-                finalLocation,
-
-              shiftId:
-                shift?._id || null,
-
-              shiftName:
-                shift?.name ||
-                shiftName ||
-                "",
-
-              overtimeHours:
-                adjustment.overtimeHours,
-
-              cuttingMinutes:
-                adjustment.cuttingMinutes,
-
+              workLocation: finalLocation,
+              shiftId: shift?._id || null,
+              shiftName: shift?.name || shiftName || "",
+              overtimeHours: adjustment.overtimeHours,
+              cuttingMinutes: adjustment.cuttingMinutes,
               overtimeApproved: false,
               overtimeApprovedBy: null,
               overtimeApprovedAt: null,
-
               cuttingApproved: false,
               cuttingApprovedBy: null,
               cuttingApprovedAt: null,
-
               note,
             },
           },
@@ -1289,7 +1675,6 @@ export async function importAttendanceExcel(
         imported++;
       } catch (rowError) {
         skipped++;
-
         errors.push({
           row: excelRow,
           message: rowError.message,
@@ -1297,41 +1682,36 @@ export async function importAttendanceExcel(
       }
     }
 
-    // Do not report a completely failed import as a successful upload.
     if (imported === 0 && skipped > 0) {
       return res.status(400).json({
         success: false,
         imported,
         skipped,
-        total: data.length,
+        total: rows.length - headerIndex - 1,
         errors,
-        message: `No attendance records were imported. ${skipped} row(s) were skipped.`,
+        message:
+          `No attendance records were imported. ${skipped} row(s) were skipped.`,
       });
     }
 
-    res.json({
+    return res.json({
       success: skipped === 0,
       partialSuccess: imported > 0 && skipped > 0,
-
+      format: "daily-row",
       message:
         skipped > 0
           ? `Imported ${imported} record(s); ${skipped} row(s) skipped.`
           : `Successfully imported ${imported} record(s).`,
-
       imported,
       skipped,
-      total: data.length,
+      total: rows.length - headerIndex - 1,
       errors,
     });
   } catch (error) {
-    console.error(
-      "importAttendanceExcel:",
-      error
-    );
+    console.error("importAttendanceExcel:", error);
 
     res.status(500).json({
       success: false,
-
       message:
         error.message ||
         "Attendance Excel import failed.",
