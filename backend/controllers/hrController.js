@@ -357,55 +357,141 @@ function dateKey(date) {
 }
 
 /* =========================================================
+   EFFECTIVE ATTENDANCE RULE
+========================================================= */
+
+const attendanceDayKeys = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
+
+function getEffectiveAttendanceRule(settings, date) {
+  const key = dateKey(date);
+
+  const overrides = Array.isArray(settings?.dateOverrides)
+    ? settings.dateOverrides
+    : [];
+
+  const override = overrides.find(
+    (item) => dateKey(item?.date) === key
+  );
+
+  if (override) {
+    return {
+      type: override.type || "Working",
+      shiftId: override.shiftId || null,
+      overtimeAllowed: override.overtimeAllowed !== false,
+      requiredWorkMinutes:
+        Number.isFinite(Number(override.requiredWorkMinutes))
+          ? Number(override.requiredWorkMinutes)
+          : null,
+      note: override.note || "",
+      source: "date",
+    };
+  }
+
+  if (settings) {
+    const d = new Date(`${key}T00:00:00.000Z`);
+    const dayIndex = d.getUTCDay();
+    const dayKey = attendanceDayKeys[dayIndex];
+    const rule =
+      dayIndex === 6
+        ? settings.saturday
+        : settings.days?.[dayKey];
+
+    if (rule) {
+      return {
+        type: rule.type || "Working",
+        shiftId: rule.shiftId || settings.defaultShiftId || null,
+        overtimeAllowed: rule.overtimeAllowed !== false,
+        requiredWorkMinutes:
+          Number.isFinite(Number(rule.requiredWorkMinutes))
+            ? Number(rule.requiredWorkMinutes)
+            : null,
+        note: "",
+        source: dayIndex === 6 ? "saturday" : dayKey,
+      };
+    }
+  }
+
+  return {
+    type: "Working",
+    shiftId: settings?.defaultShiftId || null,
+    overtimeAllowed: true,
+    requiredWorkMinutes: null,
+    note: "",
+    source: "default",
+  };
+}
+
+/* =========================================================
    TIME ADJUSTMENT
 ========================================================= */
 
 function calculateTimeAdjustments(
   checkIn,
   checkOut,
-  shift
+  shift,
+  requiredWorkMinutes = null,
+  overtimeAllowed = true
 ) {
   const cin = timeToMinutes(checkIn);
   const cout = timeToMinutes(checkOut);
 
-  if (
-    cin === null ||
-    cout === null ||
-    !shift
-  ) {
+  if (cin === null || cout === null) {
     return {
       overtimeHours: 0,
       cuttingMinutes: 0,
     };
   }
 
-  const scheduledStart =
-    timeToMinutes(shift.startTime);
+  let scheduled = null;
 
-  const scheduledEnd =
-    timeToMinutes(shift.endTime);
+  // A rule/date can explicitly define total required work time
+  // (for example 5 hours or 4 hours) without depending on shift clock times.
+  if (Number.isFinite(Number(requiredWorkMinutes))) {
+    scheduled = Math.max(0, Number(requiredWorkMinutes));
+  } else {
+    if (!shift) {
+      return {
+        overtimeHours: 0,
+        cuttingMinutes: 0,
+      };
+    }
 
-  if (
-    scheduledStart === null ||
-    scheduledEnd === null
-  ) {
-    return {
-      overtimeHours: 0,
-      cuttingMinutes: 0,
-    };
+    const scheduledStart =
+      timeToMinutes(shift.startTime);
+
+    const scheduledEnd =
+      timeToMinutes(shift.endTime);
+
+    if (
+      scheduledStart === null ||
+      scheduledEnd === null
+    ) {
+      return {
+        overtimeHours: 0,
+        cuttingMinutes: 0,
+      };
+    }
+
+    scheduled = scheduledEnd - scheduledStart;
+
+    if (scheduled < 0) {
+      scheduled += 1440;
+    }
+
+    scheduled = Math.max(
+      0,
+      scheduled - n(shift.breakMinutes)
+    );
   }
 
-  let scheduled =
-    scheduledEnd - scheduledStart;
-
-  if (scheduled < 0) {
-    scheduled += 1440;
-  }
-
-  scheduled = Math.max(
-    0,
-    scheduled - n(shift.breakMinutes)
-  );
 
   let actual = cout - cin;
 
@@ -417,7 +503,7 @@ function calculateTimeAdjustments(
 
   return {
     overtimeHours:
-      delta > 0
+      delta > 0 && overtimeAllowed !== false
         ? Math.round((delta / 60) * 100) / 100
         : 0,
 
@@ -620,10 +706,11 @@ export async function getAttendance(req, res) {
       // Missing dates are rendered virtually. A configured holiday or
       // weekly-off day must never appear as Absent just because there is
       // no attendance document for that date.
-      const [attendanceSettings, holidays] =
+      const [attendanceSettings, holidays, allShifts] =
         await Promise.all([
           AttendanceSetting.findOne({}),
           Holiday.find({}),
+          Shift.find({}),
         ]);
 
       const holidayMap = new Map();
@@ -635,47 +722,59 @@ export async function getAttendance(req, res) {
         );
       }
 
-      const dayKeys = [
-        "sunday",
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-      ];
+      const shiftById = new Map(
+        allShifts.map((shift) => [String(shift._id), shift])
+      );
 
       const virtualStatusForDate = (d) => {
         const key = dateKey(d);
+        const effectiveRule = getEffectiveAttendanceRule(
+          attendanceSettings,
+          d
+        );
 
-        // Imported/maintained holidays are treated as non-working days
-        // in the attendance/payroll view, as requested.
+        // Holiday master has highest priority. It is shown as Week Off
+        // in this attendance view and is never treated as Absent.
         if (holidayMap.has(key)) {
           return {
             status: "Week Off",
             note: `Holiday: ${holidayMap.get(key).name || "Holiday"}`,
+            shiftId: effectiveRule.shiftId || null,
+            shiftName: effectiveRule.shiftId
+              ? shiftById.get(String(effectiveRule.shiftId))?.name || ""
+              : "",
           };
         }
 
-        if (attendanceSettings) {
-          const dayIndex = d.getUTCDay();
-          const dayKey = dayKeys[dayIndex];
-          const rule =
-            dayIndex === 6
-              ? attendanceSettings.saturday
-              : attendanceSettings.days?.[dayKey];
+        if (effectiveRule.type === "Week Off") {
+          return {
+            status: "Week Off",
+            note: effectiveRule.note || "Weekly Off",
+            shiftId: effectiveRule.shiftId || null,
+            shiftName: effectiveRule.shiftId
+              ? shiftById.get(String(effectiveRule.shiftId))?.name || ""
+              : "",
+          };
+        }
 
-          if (rule?.type === "Week Off") {
-            return {
-              status: "Week Off",
-              note: "Weekly Off",
-            };
-          }
+        if (effectiveRule.type === "Half Day") {
+          return {
+            status: "Half Day",
+            note: effectiveRule.note || "Half Day rule",
+            shiftId: effectiveRule.shiftId || null,
+            shiftName: effectiveRule.shiftId
+              ? shiftById.get(String(effectiveRule.shiftId))?.name || ""
+              : "",
+          };
         }
 
         return {
           status: "Absent",
-          note: "",
+          note: effectiveRule.note || "",
+          shiftId: effectiveRule.shiftId || null,
+          shiftName: effectiveRule.shiftId
+            ? shiftById.get(String(effectiveRule.shiftId))?.name || ""
+            : "",
         };
       };
 
@@ -734,8 +833,12 @@ export async function getAttendance(req, res) {
                 emp.location ||
                 "",
 
-              shiftId: emp.shiftId || null,
-              shiftName: "",
+              shiftId: virtual.shiftId || emp.shiftId || null,
+              shiftName:
+                virtual.shiftName ||
+                (virtual.shiftId
+                  ? shiftById.get(String(virtual.shiftId))?.name || ""
+                  : ""),
 
               overtimeHours: 0,
               cuttingMinutes: 0,
@@ -847,11 +950,24 @@ export async function saveAttendance(req, res) {
       });
     }
 
+    const attendanceSettings =
+      await AttendanceSetting.findOne({});
+
+    const effectiveRule = getEffectiveAttendanceRule(
+      attendanceSettings,
+      parsedAttendanceDate
+    );
+
     let shift = null;
 
-    if (shiftId) {
-      shift =
-        await Shift.findById(shiftId);
+    const effectiveShiftId =
+      shiftId ||
+      effectiveRule.shiftId ||
+      employee.shiftId ||
+      null;
+
+    if (effectiveShiftId) {
+      shift = await Shift.findById(effectiveShiftId);
     }
 
     const normalizedCheckIn =
@@ -860,12 +976,19 @@ export async function saveAttendance(req, res) {
     const normalizedCheckOut =
       normalizeTime(checkOut);
 
+    const requiredWorkMinutes =
+      Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
+        ? Number(effectiveRule.requiredWorkMinutes)
+        : null;
+
     const adjustment =
       status === "Present"
         ? calculateTimeAdjustments(
             normalizedCheckIn,
             normalizedCheckOut,
-            shift
+            shift,
+            requiredWorkMinutes,
+            effectiveRule.overtimeAllowed !== false
           )
         : {
             overtimeHours: 0,
@@ -1010,6 +1133,11 @@ export async function importAttendanceExcel(
 
     const employees = await Employee.find({});
     const shifts = await Shift.find({});
+    const attendanceSettings = await AttendanceSetting.findOne({});
+    const holidayDocs = await Holiday.find({});
+    const holidayMap = new Map(
+      holidayDocs.map((holiday) => [dateKey(holiday.date), holiday])
+    );
 
     const employeeCodeMap = new Map();
     const employeeNameMap = new Map();
@@ -1243,20 +1371,20 @@ export async function importAttendanceExcel(
             );
           }
 
-          let shift = null;
+          let baseShift = null;
           const headerShiftCandidate = header.find((value) => {
             const normalized = normalizeLookupKey(value);
             return normalized && shiftMap.has(normalized);
           });
 
           if (headerShiftCandidate) {
-            shift = shiftMap.get(
+            baseShift = shiftMap.get(
               normalizeLookupKey(headerShiftCandidate)
             );
           }
 
-          if (!shift && employee.shiftId) {
-            shift =
+          if (!baseShift && employee.shiftId) {
+            baseShift =
               shifts.find(
                 (s) => String(s._id) === String(employee.shiftId)
               ) || null;
@@ -1314,6 +1442,44 @@ export async function importAttendanceExcel(
               Date.UTC(year, month - 1, day)
             );
 
+            const dayKey = dateKey(attendanceDate);
+            const effectiveRule = getEffectiveAttendanceRule(
+              attendanceSettings,
+              attendanceDate
+            );
+
+            // Holiday master / weekly-off rule is applied automatically when
+            // Excel has no explicit attendance state for that day.
+            if (
+              status === "" &&
+              !checkIn &&
+              !checkOut &&
+              (holidayMap.has(dayKey) ||
+                effectiveRule.type === "Week Off")
+            ) {
+              ignoredNonWorking++;
+              continue;
+            }
+
+            // An app-level Half Day date rule becomes Half Day when the Excel
+            // only contains IN/OUT and does not explicitly provide a status.
+            if (status === "" && checkIn && checkOut) {
+              if (holidayMap.has(dayKey)) {
+                ignoredNonWorking++;
+                continue;
+              }
+
+              if (effectiveRule.type === "Week Off") {
+                ignoredNonWorking++;
+                continue;
+              }
+
+              status =
+                effectiveRule.type === "Half Day"
+                  ? "Half Day"
+                  : "Present";
+            }
+
             if (status === "Week Off") {
               ignoredNonWorking++;
               continue;
@@ -1341,6 +1507,15 @@ export async function importAttendanceExcel(
             const rawOT = getCell(otRow, col);
             const rawF = getCell(fRow, col);
 
+            const dayShift =
+              effectiveRule.shiftId
+                ? shiftMap.get(String(effectiveRule.shiftId)) ||
+                  shifts.find(
+                    (s) => String(s._id) === String(effectiveRule.shiftId)
+                  ) ||
+                  baseShift
+                : baseShift;
+
             let calculated = {
               overtimeHours: 0,
               cuttingMinutes: 0,
@@ -1357,18 +1532,27 @@ export async function importAttendanceExcel(
             }
 
             if (status === "Present" && checkIn && checkOut) {
+              const requiredWorkMinutes =
+                Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
+                  ? Number(effectiveRule.requiredWorkMinutes)
+                  : null;
+
               calculated = calculateTimeAdjustments(
                 checkIn,
                 checkOut,
-                shift
+                dayShift,
+                requiredWorkMinutes,
+                effectiveRule.overtimeAllowed !== false
               );
             }
 
             const explicitOTMinutes = timeToMinutes(rawOT);
             const overtimeHours =
-              explicitOTMinutes !== null
-                ? Math.round((explicitOTMinutes / 60) * 100) / 100
-                : calculated.overtimeHours;
+              effectiveRule.overtimeAllowed === false
+                ? 0
+                : explicitOTMinutes !== null
+                  ? Math.round((explicitOTMinutes / 60) * 100) / 100
+                  : calculated.overtimeHours;
 
             // The source report's F row is retained in Note only. It is not
             // guessed as a financial Cutting amount.
@@ -1401,8 +1585,8 @@ export async function importAttendanceExcel(
                     employee.workLocation ||
                     employee.location ||
                     "",
-                  shiftId: shift?._id || null,
-                  shiftName: shift?.name || "",
+                  shiftId: dayShift?._id || null,
+                  shiftName: dayShift?.name || "",
                   overtimeHours,
                   cuttingMinutes: calculated.cuttingMinutes,
                   overtimeApproved: false,
@@ -1641,9 +1825,21 @@ export async function importAttendanceExcel(
         // Daily imports preserve existing behavior: Week Off/Holiday are
         // valid but do not require punches.
         const shiftName = clean(getCell(row, shiftNameIndex));
+        const effectiveRule = getEffectiveAttendanceRule(
+          attendanceSettings,
+          parsedDate
+        );
+
         let shift = shiftName
           ? shiftMap.get(normalizeLookupKey(shiftName)) || null
           : null;
+
+        if (!shift && effectiveRule.shiftId) {
+          shift =
+            shifts.find(
+              (s) => String(s._id) === String(effectiveRule.shiftId)
+            ) || null;
+        }
 
         if (!shift && employee.shiftId) {
           shift =
@@ -1668,9 +1864,20 @@ export async function importAttendanceExcel(
           );
         }
 
+        const requiredWorkMinutes =
+          Number.isFinite(Number(effectiveRule.requiredWorkMinutes))
+            ? Number(effectiveRule.requiredWorkMinutes)
+            : null;
+
         const adjustment =
           status === "Present"
-            ? calculateTimeAdjustments(checkIn, checkOut, shift)
+            ? calculateTimeAdjustments(
+                checkIn,
+                checkOut,
+                shift,
+                requiredWorkMinutes,
+                effectiveRule.overtimeAllowed !== false
+              )
             : {
                 overtimeHours: 0,
                 cuttingMinutes: 0,
