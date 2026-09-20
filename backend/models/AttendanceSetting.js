@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 const dayRule = new mongoose.Schema({
   type: { type: String, enum: ["Working", "Half Day", "Week Off"], default: "Working" },
   shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift", default: null },
+  shiftIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Shift" }],
   overtimeAllowed: { type: Boolean, default: true },
   // Target paid/work duration for overtime and cutting calculations.
   // null = derive from the selected shift duration (minus break).
@@ -28,6 +29,7 @@ const schema = new mongoose.Schema({
     date: { type: String, required: true }, // YYYY-MM-DD
     type: { type: String, enum: ["Working", "Half Day", "Week Off"], default: "Working" },
     shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift", default: null },
+    shiftIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Shift" }],
     overtimeAllowed: { type: Boolean, default: true },
     requiredWorkMinutes: { type: Number, min: 0, default: null },
     note: { type: String, default: "" }
