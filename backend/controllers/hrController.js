@@ -1166,6 +1166,7 @@ export async function importAttendanceExcel(
         const row = rows[i] || [];
         const first = clean(row[0]).toUpperCase();
 
+        // Detail rows belong to the latest employee block.
         if (monthlyLabels.has(first)) {
           if (current) {
             current.detailRows[first] = row;
@@ -1173,22 +1174,38 @@ export async function importAttendanceExcel(
           continue;
         }
 
+        // Some attendance sheets keep "Attendance State" on its own
+        // row, followed by IN / OUT. Attach it to the current employee
+        // instead of treating it as a new employee block.
+        if (first === "ATTENDANCE STATE") {
+          if (current) {
+            current.statusRow = row;
+          }
+          continue;
+        }
+
         const nonEmpty = row.some((v) => clean(v));
         if (!nonEmpty) continue;
 
+        // Employee identity can be in the first 1-3 cells.
+        // The importer supports both:
+        //   1) identity + day statuses on the same row
+        //   2) identity row, then an "Attendance State" row
+        const employeeCandidate = resolveEmployee(row.slice(0, 3));
         const third = normalizeHeader(row[2]);
         const statusCells = row
           .slice(3, 3 + monthDays)
           .map(monthlyStatus);
 
         const looksLikeEmployeeHeader =
-          third === "attendance state" ||
+          !!employeeCandidate ||
           statusCells.some((x) => x !== null && x !== "") ||
-          !!resolveEmployee(row.slice(0, 3));
+          third === "monthly regular";
 
         if (looksLikeEmployeeHeader) {
           current = {
             header: row,
+            statusRow: null,
             detailRows: {},
             sourceRow: i + 1,
           };
@@ -1253,9 +1270,32 @@ export async function importAttendanceExcel(
 
           for (let day = 1; day <= monthDays; day++) {
             const col = 2 + day; // day 1 starts at column index 3
-            const rawStatus = getCell(header, col);
-            const status = monthlyStatus(rawStatus);
 
+            // Support both monthly layouts:
+            // A) status values on the employee row
+            // B) a separate "Attendance State" row
+            const statusSourceRow = block.statusRow || header;
+            const rawStatus = getCell(statusSourceRow, col);
+            let status = monthlyStatus(rawStatus);
+
+            const rawCheckIn = getCell(inRow, col);
+            const rawCheckOut = getCell(outRow, col);
+
+            const checkIn = normalizeTime(rawCheckIn);
+            const checkOut = normalizeTime(rawCheckOut);
+
+            // USER RULE:
+            // If status is blank and both IN + OUT exist, this is Present.
+            // If status is A/HD/L, keep the explicit status.
+            // Sunday/weekly-off/holiday are NOT supplied in Excel; the app
+            // determines them from Attendance Settings and Holiday Master.
+            if (status === "" && checkIn && checkOut) {
+              status = "Present";
+            }
+
+            // Completely blank day: do not create an attendance document.
+            // getAttendance() will later render a configured weekly off,
+            // holiday, or working-day absence virtually.
             if (status === "") {
               continue;
             }
@@ -1298,18 +1338,23 @@ export async function importAttendanceExcel(
 
             touchedWorkingDays.add(dateKey(attendanceDate));
 
-            const rawCheckIn = getCell(inRow, col);
-            const rawCheckOut = getCell(outRow, col);
             const rawOT = getCell(otRow, col);
             const rawF = getCell(fRow, col);
-
-            const checkIn = normalizeTime(rawCheckIn);
-            const checkOut = normalizeTime(rawCheckOut);
 
             let calculated = {
               overtimeHours: 0,
               cuttingMinutes: 0,
             };
+
+            if (status === "Present" && (!checkIn || !checkOut)) {
+              skipped++;
+              errors.push({
+                row: block.sourceRow,
+                message:
+                  `Present attendance for ${employee.employeeCode} on ${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} needs both IN and OUT times.`,
+              });
+              continue;
+            }
 
             if (status === "Present" && checkIn && checkOut) {
               calculated = calculateTimeAdjustments(
