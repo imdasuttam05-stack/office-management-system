@@ -53,6 +53,7 @@ import {
   exportSalaryReportExcel,
   getSalarySlip as getDetailedSalarySlip,
   exportSalarySlipExcel,
+  sendSalarySlipEmail,
 } from "../controllers/reportController.js";
 
 const router = express.Router();
@@ -388,6 +389,7 @@ router.get("/reports/salary.xlsx", exportSalaryReportExcel);
 // Detailed salary slip with employee/statutory information.
 router.get("/reports/salary-slip/:id", getDetailedSalarySlip);
 router.get("/reports/salary-slip/:id.xlsx", exportSalarySlipExcel);
+router.post("/reports/salary-slip/:id/email", sendSalarySlipEmail);
 
 // Canonical salary slip API used by the frontend. Keep the old route too.
 router.get("/salaries/:id/slip", getDetailedSalarySlip);
