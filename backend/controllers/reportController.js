@@ -940,17 +940,29 @@ export async function sendSalarySlipEmail(req, res) {
         </div>
       </div>`;
 
-    await sendEmployeeEmail({
+    const delivery = await sendEmployeeEmail({
       to,
       subject,
       html,
       text: `${companyName}\nSalary Slip - ${monthLabel}\nEmployee: ${employee.name}\nEmployee ID: ${employee.employeeCode}\nNet Payable: ${moneyHtml(netPayable)}${meta.length ? `\n${meta.map((x) => x.replace(/<[^>]+>/g, "")).join("\n")}` : ""}`,
     });
 
-    return res.json({ success: true, message: `Salary slip sent to ${to}.`, email: to });
+    return res.json({
+      success: true,
+      message: `Salary slip sent successfully to ${to}.`,
+      email: to,
+      provider: delivery?.provider || null,
+      messageId: delivery?.messageId || null,
+      accepted: delivery?.accepted || [],
+      rejected: delivery?.rejected || [],
+    });
   } catch (error) {
-    console.error("sendSalarySlipEmail:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("sendSalarySlipEmail:", error?.stack || error);
+    return res.status(502).json({
+      success: false,
+      code: error?.code || "EMAIL_SEND_FAILED",
+      message: error?.message || "Unable to send salary slip email.",
+    });
   }
 }
 
