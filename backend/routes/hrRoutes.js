@@ -1,5 +1,6 @@
 import express from "express";
 import multer from "multer";
+import { getConfiguredMailProvider } from "../services/mailService.js";
 
 import {
   getEmployees,
@@ -211,6 +212,29 @@ router.put(
   saveAttendanceSettings
 );
 
+
+
+router.get("/email/status", (req, res) => {
+  const provider = getConfiguredMailProvider();
+  const configured = provider === "smtp" || provider === "smtp-gmail" || provider === "gmail"
+    ? Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+    : Boolean(process.env.RESEND_API_KEY);
+
+  return res.json({
+    success: true,
+    provider,
+    configured,
+    smtp: provider === "smtp" || provider === "smtp-gmail" || provider === "gmail"
+      ? {
+          host: process.env.SMTP_HOST || "",
+          port: Number(process.env.SMTP_PORT || 465),
+          secure: String(process.env.SMTP_SECURE ?? "true").toLowerCase() === "true",
+          user: process.env.SMTP_USER || "",
+          from: process.env.SMTP_FROM || "",
+        }
+      : null,
+  });
+});
 
 // /api/payroll/attendance/settings
 router.get(
