@@ -12,6 +12,7 @@ import expenseRoutes from "./routes/expenseRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
 import hrRoutes from "./routes/hrRoutes.js";
 import securityRoutes from "./routes/securityRoutes.js";
+import inventoryRoutes from "./routes/inventoryRoutes.js";
 
 import {
   ensureBootstrapAdmin,
@@ -357,6 +358,15 @@ app.use(
 app.use(
   "/api/expenses",
   expenseRoutes
+);
+
+/* =========================================================
+   INVENTORY / PURCHASE / MANUFACTURING / SALES / GST
+========================================================= */
+
+app.use(
+  "/api/inventory",
+  inventoryRoutes
 );
 
 /* =========================================================
