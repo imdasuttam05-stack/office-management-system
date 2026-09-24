@@ -109,6 +109,9 @@ export default function App() {
               element={<RawMaterialPurchase />}
             />
 
+            {/* Inventory Masters
+                Location / Supplier / Product */}
+
             <Route
               path="/inventory/masters"
               element={<InventoryMasters />}
