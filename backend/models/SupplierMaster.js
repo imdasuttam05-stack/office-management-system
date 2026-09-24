@@ -1,0 +1,13 @@
+import mongoose from "mongoose";
+const schema = new mongoose.Schema({
+  companyId:{type:mongoose.Schema.Types.ObjectId,ref:"Company",default:null,index:true},
+  name:{type:String,required:true,trim:true,maxlength:180},
+  gstin:{type:String,trim:true,uppercase:true,default:"",maxlength:20},
+  state:{type:String,trim:true,default:"",maxlength:80},
+  phone:{type:String,trim:true,default:"",maxlength:30},
+  address:{type:String,trim:true,default:"",maxlength:500},
+  active:{type:Boolean,default:true,index:true},
+  createdBy:{type:mongoose.Schema.Types.ObjectId,ref:"User",required:true}
+},{timestamps:true});
+schema.index({companyId:1,name:1},{unique:true});
+export default mongoose.model("SupplierMaster",schema);
