@@ -461,6 +461,25 @@ export default function Dashboard() {
             <button
               type="button"
               className="side-item"
+              onClick={() => goTo("/inventory/raw-material-purchase")}
+            >
+              <Icon>▣</Icon>
+              <span className="side-label">Raw Material Purchase</span>
+            </button>
+
+            <button type="button" className="side-item" onClick={() => goTo("/inventory")}>
+              <Icon>▦</Icon><span className="side-label">Inventory / Manufacturing</span>
+            </button>
+            <button type="button" className="side-item" onClick={() => goTo("/sales")}>
+              <Icon>↗</Icon><span className="side-label">Sales</span>
+            </button>
+            <button type="button" className="side-item" onClick={() => goTo("/gst")}>
+              <Icon>GST</Icon><span className="side-label">GST / Tax</span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
               onClick={() =>
                 goTo("/approvals")
               }
