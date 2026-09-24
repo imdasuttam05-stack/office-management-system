@@ -24,15 +24,27 @@ import Reports from "./pages/Reports.jsx";
 startSessionManager();
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
-const RawMaterialPurchase = lazy(() => import("./pages/RawMaterialPurchase.jsx"));
-const Manufacturing = lazy(() => import("./pages/Manufacturing.jsx"));
+
+const RawMaterialPurchase = lazy(
+  () => import("./pages/RawMaterialPurchase.jsx")
+);
+
+const Manufacturing = lazy(
+  () => import("./pages/Manufacturing.jsx")
+);
+
+const InventoryMasters = lazy(
+  () => import("./pages/InventoryMasters.jsx")
+);
 
 function LoadingScreen() {
   return (
     <div className="app-loading">
       <div className="loading-card">
         <div className="loading-spinner" />
+
         <h3>Office Management</h3>
+
         <p>Loading...</p>
       </div>
     </div>
@@ -44,52 +56,225 @@ export default function App() {
     <BrowserRouter>
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-          <Route path="/login" element={<Login />} />
+          {/* =====================================================
+              ROOT
+          ===================================================== */}
+
+          <Route
+            path="/"
+            element={
+              <Navigate
+                to="/dashboard"
+                replace
+              />
+            }
+          />
+
+          {/* =====================================================
+              LOGIN
+          ===================================================== */}
+
+          <Route
+            path="/login"
+            element={<Login />}
+          />
+
+          {/* =====================================================
+              PROTECTED ROUTES
+          ===================================================== */}
 
           <Route element={<ProtectedRoute />}>
-            {/* Existing modules */}
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/expenses" element={<Expense />} />
-            <Route path="/inventory/raw-material-purchase" element={<RawMaterialPurchase />} />
-            <Route path="/inventory" element={<Manufacturing />} />
-            <Route path="/manufacturing" element={<Manufacturing />} />
-            <Route path="/sales" element={<Manufacturing />} />
-            <Route path="/gst" element={<Manufacturing />} />
 
-            {/* HR MODULE */}
-            <Route path="/employees" element={<Employees />} />
-            <Route path="/attendance" element={<Attendance />} />
-            <Route path="/leave" element={<LeaveManagement />} />
-            <Route path="/holidays" element={<HolidayCalendar />} />
-            <Route path="/shifts" element={<ShiftManagement />} />
+            {/* Dashboard */}
 
-            {/* Salary / Payroll: all dashboard salary links open the same working page */}
-            <Route path="/salary" element={<Salary />} />
-            <Route path="/payroll/approvals" element={<PayrollApprovals />} />
-            <Route path="/reports/payroll" element={<Reports />} />
-            <Route path="/salary/slips" element={<Reports />} />
-            <Route path="/payroll" element={<Salary />} />
+            <Route
+              path="/dashboard"
+              element={<Dashboard />}
+            />
+
+            {/* Expenses */}
+
+            <Route
+              path="/expenses"
+              element={<Expense />}
+            />
+
+            {/* =================================================
+                INVENTORY
+            ================================================= */}
+
+            <Route
+              path="/inventory/raw-material-purchase"
+              element={<RawMaterialPurchase />}
+            />
+
+            <Route
+              path="/inventory/masters"
+              element={<InventoryMasters />}
+            />
+
+            <Route
+              path="/inventory"
+              element={<Manufacturing />}
+            />
+
+            <Route
+              path="/manufacturing"
+              element={<Manufacturing />}
+            />
+
+            <Route
+              path="/sales"
+              element={<Manufacturing />}
+            />
+
+            <Route
+              path="/gst"
+              element={<Manufacturing />}
+            />
+
+            {/* =================================================
+                HR MODULE
+            ================================================= */}
+
+            <Route
+              path="/employees"
+              element={<Employees />}
+            />
+
+            <Route
+              path="/attendance"
+              element={<Attendance />}
+            />
+
+            <Route
+              path="/leave"
+              element={<LeaveManagement />}
+            />
+
+            <Route
+              path="/holidays"
+              element={<HolidayCalendar />}
+            />
+
+            <Route
+              path="/shifts"
+              element={<ShiftManagement />}
+            />
+
+            {/* =================================================
+                SALARY / PAYROLL
+            ================================================= */}
+
+            <Route
+              path="/salary"
+              element={<Salary />}
+            />
+
+            <Route
+              path="/payroll/approvals"
+              element={<PayrollApprovals />}
+            />
+
+            <Route
+              path="/reports/payroll"
+              element={<Reports />}
+            />
+
+            <Route
+              path="/salary/slips"
+              element={<Reports />}
+            />
+
+            <Route
+              path="/payroll"
+              element={<Salary />}
+            />
+
           </Route>
 
-          {/* Admin only */}
-          <Route element={<ProtectedRoute allowedRoles={["Admin"]} />}>
-            <Route path="/users" element={<Users />} />
+          {/* =====================================================
+              ADMIN ONLY
+          ===================================================== */}
+
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={["Admin"]}
+              />
+            }
+          >
+            <Route
+              path="/users"
+              element={<Users />}
+            />
           </Route>
 
-          {/* These pages are not implemented yet; keep the user inside the app */}
-          <Route path="/approvals" element={<Navigate to="/payroll/approvals" replace />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/reports/attendance" element={<Reports />} />
-          <Route path="/reports/leave" element={<Reports />} />
-          <Route path="/reports/salary" element={<Reports />} />
-          
-          <Route path="/security" element={<Navigate to="/dashboard" replace />} />
+          {/* =====================================================
+              OTHER ROUTES
+          ===================================================== */}
 
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route
+            path="/approvals"
+            element={
+              <Navigate
+                to="/payroll/approvals"
+                replace
+              />
+            }
+          />
+
+          <Route
+            path="/reports"
+            element={<Reports />}
+          />
+
+          <Route
+            path="/reports/attendance"
+            element={<Reports />}
+          />
+
+          <Route
+            path="/reports/leave"
+            element={<Reports />}
+          />
+
+          <Route
+            path="/reports/salary"
+            element={<Reports />}
+          />
+
+          <Route
+            path="/security"
+            element={
+              <Navigate
+                to="/dashboard"
+                replace
+              />
+            }
+          />
+
+          {/* =====================================================
+              FALLBACK
+          ===================================================== */}
+
+          <Route
+            path="*"
+            element={
+              <Navigate
+                to="/dashboard"
+                replace
+              />
+            }
+          />
+
         </Routes>
       </Suspense>
+
+      {/* =========================================================
+          LOADING CSS
+      ========================================================= */}
 
       <style>{`
         .app-loading {
@@ -100,6 +285,7 @@ export default function App() {
           background: #f5f7fb;
           font-family: Arial, sans-serif;
         }
+
         .loading-card {
           width: 280px;
           padding: 30px 25px;
@@ -108,6 +294,7 @@ export default function App() {
           text-align: center;
           box-shadow: 0 10px 35px rgba(0,0,0,.08);
         }
+
         .loading-spinner {
           width: 38px;
           height: 38px;
@@ -117,13 +304,29 @@ export default function App() {
           border-radius: 50%;
           animation: officeAppSpin .8s linear infinite;
         }
-        .loading-card h3 { margin: 0; color: #172b4d; }
-        .loading-card p { margin: 7px 0 0; color: #667085; font-size: 13px; }
+
+        .loading-card h3 {
+          margin: 0;
+          color: #172b4d;
+        }
+
+        .loading-card p {
+          margin: 7px 0 0;
+          color: #667085;
+          font-size: 13px;
+        }
+
         @keyframes officeAppSpin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
+          from {
+            transform: rotate(0deg);
+          }
+
+          to {
+            transform: rotate(360deg);
+          }
         }
       `}</style>
+
     </BrowserRouter>
   );
 }
