@@ -1,27 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
 
-const API_URL =
+const API_URL = (
   import.meta.env.VITE_API_URL ||
-  "https://office-management-system-ikx8.onrender.com";
-
-/* =========================================================
-   AUTH HELPERS
-========================================================= */
-
-function getStoredUser() {
-  try {
-    const raw =
-      localStorage.getItem("user") ||
-      localStorage.getItem("currentUser");
-
-    if (!raw) return null;
-
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
+  "https://office-management-system-ikx8.onrender.com"
+).replace(/\/+$/, "");
 
 function getToken() {
   return (
@@ -31,1381 +13,1017 @@ function getToken() {
   );
 }
 
-/* =========================================================
-   ICON
-========================================================= */
-
-function Icon({ children }) {
-  return (
-    <span className="side-icon">
-      {children}
-    </span>
-  );
+function getHeaders() {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${getToken()}`,
+  };
 }
 
-/* =========================================================
-   DASHBOARD
-========================================================= */
+export default function InventoryMasters() {
+  const [locations, setLocations] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [items, setItems] = useState([]);
 
-export default function Dashboard() {
-  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState("");
 
-  const sidebarRef = useRef(null);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
 
-  const [sidebarOpen, setSidebarOpen] =
-    useState(false);
+  const [locationForm, setLocationForm] = useState({
+    name: "",
+    code: "",
+    address: "",
+  });
 
-  const [user, setUser] = useState(
-    getStoredUser()
-  );
+  const [supplierForm, setSupplierForm] = useState({
+    name: "",
+    gstin: "",
+    state: "",
+    phone: "",
+    address: "",
+  });
 
-  const [expenseTotal, setExpenseTotal] =
-    useState(0);
+  const [itemForm, setItemForm] = useState({
+    name: "",
+    code: "",
+    itemType: "RAW_MATERIAL",
+    unit: "KG",
+    hsn: "",
+    defaultGstRate: "",
+    defaultBarcode: "",
+  });
 
-  const [pendingApproval, setPendingApproval] =
-    useState(0);
+  /* =========================================================
+     LOAD MASTERS
+  ========================================================= */
 
-  const [employeeCount, setEmployeeCount] =
-    useState(0);
-
-  const [activeEmployeeCount, setActiveEmployeeCount] =
-    useState(0);
-
-  const [pendingTasks, setPendingTasks] =
-    useState(0);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  /* =======================================================
-     USER
-  ======================================================= */
-
-  useEffect(() => {
-    const storedUser = getStoredUser();
-
-    if (storedUser) {
-      setUser(storedUser);
-    }
-  }, []);
-
-  /* =======================================================
-     CLOSE SIDEBAR ON OUTSIDE CLICK
-  ======================================================= */
-
-  useEffect(() => {
-    function handleOutsideClick(event) {
-      if (!sidebarOpen) return;
-
-      const sidebar =
-        sidebarRef.current;
-
-      const menuButton =
-        document.querySelector(
-          ".dashboard-menu-btn"
-        );
-
-      if (
-        sidebar &&
-        !sidebar.contains(
-          event.target
-        ) &&
-        !menuButton?.contains(
-          event.target
-        )
-      ) {
-        setSidebarOpen(false);
-      }
-    }
-
-    document.addEventListener(
-      "mousedown",
-      handleOutsideClick
-    );
-
-    return () => {
-      document.removeEventListener(
-        "mousedown",
-        handleOutsideClick
-      );
-    };
-  }, [sidebarOpen]);
-
-  /* =======================================================
-     ESC CLOSE
-  ======================================================= */
-
-  useEffect(() => {
-    function handleEscape(event) {
-      if (event.key === "Escape") {
-        setSidebarOpen(false);
-      }
-    }
-
-    document.addEventListener(
-      "keydown",
-      handleEscape
-    );
-
-    return () => {
-      document.removeEventListener(
-        "keydown",
-        handleEscape
-      );
-    };
-  }, []);
-
-  /* =======================================================
-     LOAD DASHBOARD DATA
-  ======================================================= */
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadDashboard() {
+  async function loadMasters() {
+    try {
       setLoading(true);
+      setError("");
 
-      const token = getToken();
+      const response = await fetch(
+        `${API_URL}/api/inventory/raw-material-masters`,
+        {
+          method: "GET",
+          headers: getHeaders(),
+        }
+      );
 
-      if (!token) {
-        setLoading(false);
-        return;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message || "Failed to load inventory masters"
+        );
       }
 
-      try {
-        const [response, employeeResponse] = await Promise.all([
-          fetch(`${API_URL}/api/expenses`, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }),
-          fetch(`${API_URL}/api/payroll/employees`, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }),
-        ]);
+      setLocations(
+        Array.isArray(data?.locations)
+          ? data.locations
+          : []
+      );
 
-        if (employeeResponse.ok) {
-          const employeeData = await employeeResponse.json();
-          const employees = Array.isArray(employeeData)
-            ? employeeData
-            : Array.isArray(employeeData?.employees)
-            ? employeeData.employees
-            : Array.isArray(employeeData?.data)
-            ? employeeData.data
-            : [];
-          if (!cancelled) {
-            setEmployeeCount(employees.length);
-            setActiveEmployeeCount(
-              employees.filter((employee) =>
-                employee?.isActive !== false &&
-                employee?.active !== false
-              ).length
-            );
-          }
-        }
+      setSuppliers(
+        Array.isArray(data?.suppliers)
+          ? data.suppliers
+          : []
+      );
 
-        /* Expenses */
-        const expenseResponse = response;
+      setItems(
+        Array.isArray(data?.items)
+          ? data.items
+          : []
+      );
+    } catch (err) {
+      console.error("Inventory masters load error:", err);
 
-        if (expenseResponse.status === 401) {
-          return;
-        }
-
-        if (!expenseResponse.ok) {
-          throw new Error("Failed to load expenses");
-        }
-
-        const data = await expenseResponse.json();
-
-        if (cancelled) return;
-
-        const expenses =
-          Array.isArray(data)
-            ? data
-            : Array.isArray(
-                data?.expenses
-              )
-            ? data.expenses
-            : Array.isArray(
-                data?.data
-              )
-            ? data.data
-            : [];
-
-        let total = 0;
-        let pending = 0;
-
-        expenses.forEach(
-          (expense) => {
-            const amount =
-              Number(
-                expense?.amount
-              ) || 0;
-
-            total += amount;
-
-            const status =
-              String(
-                expense?.status ||
-                  expense?.approvalStatus ||
-                  ""
-              ).toLowerCase();
-
-            if (
-              status === "pending" ||
-              status === "pending approval"
-            ) {
-              pending += 1;
-            }
-          }
-        );
-
-        setExpenseTotal(total);
-        setPendingApproval(pending);
-      } catch (error) {
-        console.error(
-          "Dashboard expense error:",
-          error
-        );
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
+      setError(
+        err?.message ||
+          "Failed to load inventory masters"
+      );
+    } finally {
+      setLoading(false);
     }
+  }
 
-    loadDashboard();
-
-    return () => {
-      cancelled = true;
-    };
+  useEffect(() => {
+    loadMasters();
   }, []);
 
-  /* =======================================================
-     USER NAME / ROLE
-  ======================================================= */
+  /* =========================================================
+     CLEAR MESSAGE
+  ========================================================= */
 
-  const userName =
-    user?.name ||
-    user?.fullName ||
-    user?.username ||
-    "User";
-
-  const userRole =
-    user?.role ||
-    "Employee";
-
-  const isAdmin =
-    String(userRole).toLowerCase() ===
-    "admin";
-
-  /* =======================================================
-     NAVIGATION
-  ======================================================= */
-
-  function goTo(path) {
-    setSidebarOpen(false);
-    navigate(path);
+  function clearMessages() {
+    setSuccess("");
+    setError("");
   }
 
-  /* =======================================================
-     LOGOUT
-  ======================================================= */
+  /* =========================================================
+     CREATE LOCATION
+  ========================================================= */
 
-  function handleLogout() {
-    localStorage.removeItem(
-      "token"
-    );
+  async function createLocation(event) {
+    event.preventDefault();
 
-    localStorage.removeItem(
-      "accessToken"
-    );
+    clearMessages();
 
-    localStorage.removeItem(
-      "refreshToken"
-    );
+    if (!locationForm.name.trim()) {
+      setError("Location name is required");
+      return;
+    }
 
-    localStorage.removeItem(
-      "user"
-    );
+    try {
+      setSaving("location");
 
-    localStorage.removeItem(
-      "currentUser"
-    );
+      const response = await fetch(
+        `${API_URL}/api/inventory/masters/locations`,
+        {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify({
+            name: locationForm.name.trim(),
+            code: locationForm.code.trim(),
+            address: locationForm.address.trim(),
+          }),
+        }
+      );
 
-    navigate(
-      "/login",
-      {
-        replace: true,
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+            "Failed to create location"
+        );
       }
-    );
+
+      setSuccess(
+        data?.message ||
+          "Location created successfully"
+      );
+
+      setLocationForm({
+        name: "",
+        code: "",
+        address: "",
+      });
+
+      await loadMasters();
+    } catch (err) {
+      console.error("Create location error:", err);
+
+      setError(
+        err?.message ||
+          "Failed to create location"
+      );
+    } finally {
+      setSaving("");
+    }
   }
 
-  /* =======================================================
-     FORMAT MONEY
-  ======================================================= */
+  /* =========================================================
+     CREATE SUPPLIER
+  ========================================================= */
 
-  function formatMoney(value) {
-    return new Intl.NumberFormat(
-      "en-IN",
-      {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 0,
+  async function createSupplier(event) {
+    event.preventDefault();
+
+    clearMessages();
+
+    if (!supplierForm.name.trim()) {
+      setError("Supplier name is required");
+      return;
+    }
+
+    try {
+      setSaving("supplier");
+
+      const response = await fetch(
+        `${API_URL}/api/inventory/masters/suppliers`,
+        {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify({
+            name: supplierForm.name.trim(),
+            gstin: supplierForm.gstin.trim(),
+            state: supplierForm.state.trim(),
+            phone: supplierForm.phone.trim(),
+            address: supplierForm.address.trim(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+            "Failed to create supplier"
+        );
       }
-    ).format(value || 0);
+
+      setSuccess(
+        data?.message ||
+          "Supplier created successfully"
+      );
+
+      setSupplierForm({
+        name: "",
+        gstin: "",
+        state: "",
+        phone: "",
+        address: "",
+      });
+
+      await loadMasters();
+    } catch (err) {
+      console.error("Create supplier error:", err);
+
+      setError(
+        err?.message ||
+          "Failed to create supplier"
+      );
+    } finally {
+      setSaving("");
+    }
   }
 
-  /* =======================================================
+  /* =========================================================
+     CREATE PRODUCT / ITEM
+  ========================================================= */
+
+  async function createItem(event) {
+    event.preventDefault();
+
+    clearMessages();
+
+    if (!itemForm.name.trim()) {
+      setError("Product / Item name is required");
+      return;
+    }
+
+    try {
+      setSaving("item");
+
+      const response = await fetch(
+        `${API_URL}/api/inventory/masters/items`,
+        {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify({
+            name: itemForm.name.trim(),
+            code: itemForm.code.trim(),
+            itemType: itemForm.itemType,
+            unit: itemForm.unit.trim(),
+            hsn: itemForm.hsn.trim(),
+            defaultGstRate:
+              itemForm.defaultGstRate === ""
+                ? undefined
+                : Number(itemForm.defaultGstRate),
+            defaultBarcode:
+              itemForm.defaultBarcode.trim(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+            "Failed to create product"
+        );
+      }
+
+      setSuccess(
+        data?.message ||
+          "Product created successfully"
+      );
+
+      setItemForm({
+        name: "",
+        code: "",
+        itemType: "RAW_MATERIAL",
+        unit: "KG",
+        hsn: "",
+        defaultGstRate: "",
+        defaultBarcode: "",
+      });
+
+      await loadMasters();
+    } catch (err) {
+      console.error("Create item error:", err);
+
+      setError(
+        err?.message ||
+          "Failed to create product"
+      );
+    } finally {
+      setSaving("");
+    }
+  }
+
+  /* =========================================================
      RENDER
-  ======================================================= */
+  ========================================================= */
 
   return (
-    <div className="dashboard">
+    <div className="inventory-masters-page">
 
-      {/* ===================================================
-          SIDEBAR OVERLAY
-      =================================================== */}
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
 
-      {sidebarOpen && (
-        <div
-          className="sidebar-overlay"
-          onClick={() =>
-            setSidebarOpen(false)
-          }
-        />
+      <div className="page-header">
+
+        <div>
+          <div className="page-kicker">
+            INVENTORY
+          </div>
+
+          <h1>
+            Inventory Masters
+          </h1>
+
+          <p>
+            Create and manage Location, Supplier
+            and Product / Item masters.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="refresh-btn"
+          onClick={loadMasters}
+          disabled={loading}
+        >
+          ↻ Refresh
+        </button>
+
+      </div>
+
+      {/* =====================================================
+          MESSAGES
+      ===================================================== */}
+
+      {success && (
+        <div className="success-message">
+          ✓ {success}
+        </div>
       )}
 
-      {/* ===================================================
-          SIDEBAR
-      =================================================== */}
-
-      <aside
-        ref={sidebarRef}
-        className={`sidebar ${
-          sidebarOpen
-            ? "sidebar-open"
-            : ""
-        }`}
-      >
-        {/* Sidebar Header */}
-
-        <div className="sidebar-top">
-          <div>
-            <div className="sidebar-brand">
-              Office Management
-            </div>
-
-            <div className="sidebar-subtitle">
-              Business Management System
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="sidebar-close"
-            onClick={() =>
-              setSidebarOpen(false)
-            }
-            aria-label="Close menu"
-          >
-            ×
-          </button>
+      {error && (
+        <div className="error-message">
+          ⚠ {error}
         </div>
+      )}
 
-        {/* =================================================
-            MAIN
-        ================================================= */}
+      {/* =====================================================
+          MASTER CARDS
+      ===================================================== */}
 
-        <div className="sidebar-section">
-          <div className="sidebar-heading">
-            MAIN
-          </div>
+      <div className="master-grid">
 
-          <div className="sidebar-nav">
+        {/* ===================================================
+            LOCATION
+        =================================================== */}
 
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/dashboard")
-              }
-            >
-              <Icon>⌂</Icon>
+        <section className="master-card">
 
-              <span className="side-label">
-                Dashboard
-              </span>
-            </button>
+          <div className="master-card-header">
 
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/expenses")
-              }
-            >
-              <Icon>₹</Icon>
-
-              <span className="side-label">
-                Expenses
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() => goTo("/inventory/raw-material-purchase")}
-            >
-              <Icon>▣</Icon>
-              <span className="side-label">Raw Material Purchase</span>
-            </button>
-
-            <button type="button" className="side-item" onClick={() => goTo("/inventory")}>
-              <Icon>▦</Icon><span className="side-label">Inventory / Manufacturing</span>
-            </button>
-            <button type="button" className="side-item" onClick={() => goTo("/sales")}>
-              <Icon>↗</Icon><span className="side-label">Sales</span>
-            </button>
-            <button type="button" className="side-item" onClick={() => goTo("/gst")}>
-              <Icon>GST</Icon><span className="side-label">GST / Tax</span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/approvals")
-              }
-            >
-              <Icon>✓</Icon>
-
-              <span className="side-label">
-                Approvals
-              </span>
-            </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            HR MANAGEMENT
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            HR MANAGEMENT
-          </div>
-
-          <div className="sidebar-nav">
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/employees")
-              }
-            >
-              <Icon>♟</Icon>
-
-              <span className="side-label">
-                Employees
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/attendance")
-              }
-            >
-              <Icon>✓</Icon>
-
-              <span className="side-label">
-                Attendance
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/leave")
-              }
-            >
-              <Icon>📄</Icon>
-
-              <span className="side-label">
-                Leave Management
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/holidays")
-              }
-            >
-              <Icon>▦</Icon>
-
-              <span className="side-label">
-                Holiday Calendar
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/shifts")
-              }
-            >
-              <Icon>◷</Icon>
-
-              <span className="side-label">
-                Shift Management
-              </span>
-            </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            REPORTS
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            REPORTS
-          </div>
-
-          <div className="sidebar-nav">
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo(
-                  "/reports/attendance"
-                )
-              }
-            >
-              <Icon>▦</Icon>
-
-              <span className="side-label">
-                Attendance Reports
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo(
-                  "/reports/leave"
-                )
-              }
-            >
-              <Icon>▤</Icon>
-
-              <span className="side-label">
-                Leave Reports
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo(
-                  "/reports/salary"
-                )
-              }
-            >
-              <Icon>₹</Icon>
-
-              <span className="side-label">
-                Salary Reports
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/reports")
-              }
-            >
-              <Icon>▥</Icon>
-
-              <span className="side-label">
-                Business Reports
-              </span>
-            </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            PAYROLL
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            PAYROLL
-          </div>
-
-          <div className="sidebar-nav">
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/salary")
-              }
-            >
-              <Icon>₹</Icon>
-
-              <span className="side-label">
-                Salary Management
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/salary/slips")
-              }
-            >
-              <Icon>▤</Icon>
-
-              <span className="side-label">
-                Salary Slips
-              </span>
-            </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            ADMINISTRATION
-        ================================================= */}
-
-        <div className="sidebar-section">
-
-          <div className="sidebar-heading">
-            ADMINISTRATION
-          </div>
-
-          <div className="sidebar-nav">
-
-            {isAdmin && (
-              <button
-                type="button"
-                className="side-item admin-item"
-                onClick={() =>
-                  goTo("/users")
-                }
-              >
-                <Icon>♟</Icon>
-
-                <span className="side-label">
-                  User Management
-                </span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() =>
-                goTo("/security")
-              }
-            >
-              <Icon>🔒</Icon>
-
-              <span className="side-label">
-                Security
-              </span>
-            </button>
-
-          </div>
-        </div>
-
-        {/* =================================================
-            SIDEBAR LOGOUT
-        ================================================= */}
-
-        <div className="sidebar-bottom">
-
-          <button
-            type="button"
-            className="side-logout"
-            onClick={handleLogout}
-          >
-            <Icon>↪</Icon>
-
-            <span>
-              Logout
-            </span>
-          </button>
-
-        </div>
-      </aside>
-
-      {/* ===================================================
-          HEADER
-      =================================================== */}
-
-      <header className="dashboard-header">
-
-        <div className="header-left">
-
-          <button
-            type="button"
-            className="dashboard-menu-btn"
-            onClick={() =>
-              setSidebarOpen(true)
-            }
-            aria-label="Open menu"
-          >
-            <span />
-            <span />
-            <span />
-          </button>
-
-          <div>
-            <h1>
-              Office Management
-            </h1>
-
-            <p>
-              Business Management System
-            </p>
-          </div>
-
-        </div>
-
-        <div className="user-section">
-
-          <div className="user-info">
-            <strong>
-              {userName}
-            </strong>
-
-            <span>
-              {userRole}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            className="logout-btn"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
-
-        </div>
-
-      </header>
-
-      {/* ===================================================
-          CONTENT
-      =================================================== */}
-
-      <main className="dashboard-content">
-
-        {/* Welcome */}
-
-        <section className="welcome-card">
-
-          <div>
-
-            <div className="welcome-small">
-              OFFICE MANAGEMENT
+            <div className="master-icon">
+              📍
             </div>
-
-            <h2>
-              Welcome back,{" "}
-              {userName} 👋
-            </h2>
-
-            <p>
-              Manage your office,
-              employees, attendance,
-              leave and salary from
-              one place.
-            </p>
-
-          </div>
-
-          <div className="role-area">
-
-            <span className="role-label">
-              CURRENT ROLE
-            </span>
-
-            <span className="role-badge">
-              {userRole}
-            </span>
-
-          </div>
-
-        </section>
-
-        {/* =================================================
-            STATS
-        ================================================= */}
-
-        <section className="stats-grid">
-
-          <div className="stat-card">
-
-            <div className="stat-icon">
-              ₹
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Total Expenses
-              </span>
-
-              <strong>
-                {loading
-                  ? "..."
-                  : formatMoney(
-                      expenseTotal
-                    )}
-              </strong>
-
-              <small>
-                Current records
-              </small>
-
-            </div>
-
-          </div>
-
-          <div className="stat-card">
-
-            <div className="stat-icon">
-              ✓
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Pending Approval
-              </span>
-
-              <strong>
-                {pendingApproval}
-              </strong>
-
-              <small>
-                Waiting for action
-              </small>
-
-            </div>
-
-          </div>
-
-          <div
-            className="stat-card clickable"
-            onClick={() =>
-              goTo("/employees")
-            }
-          >
-
-            <div className="stat-icon">
-              ♟
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Total Employees
-              </span>
-
-              <strong>
-                {employeeCount}
-              </strong>
-
-              <small>
-                {activeEmployeeCount} Active employees
-              </small>
-
-            </div>
-
-          </div>
-
-          <div className="stat-card">
-
-            <div className="stat-icon">
-              !
-            </div>
-
-            <div className="stat-content">
-
-              <span>
-                Pending Tasks
-              </span>
-
-              <strong>
-                {pendingTasks}
-              </strong>
-
-              <small>
-                Requires attention
-              </small>
-
-            </div>
-
-          </div>
-
-        </section>
-
-        {/* =================================================
-            QUICK ACCESS
-        ================================================= */}
-
-        <section className="modules-section">
-
-          <div className="section-header">
 
             <div>
-
-              <div className="section-kicker">
-                QUICK ACCESS
-              </div>
-
               <h2>
-                Office Modules
+                Location / Godown
               </h2>
 
               <p>
-                Quickly access the most
-                important sections.
+                Create warehouse or godown locations.
               </p>
-
             </div>
+
+          </div>
+
+          <form onSubmit={createLocation}>
+
+            <label>
+              Location Name
+              <span>*</span>
+            </label>
+
+            <input
+              type="text"
+              value={locationForm.name}
+              onChange={(event) =>
+                setLocationForm({
+                  ...locationForm,
+                  name: event.target.value,
+                })
+              }
+              placeholder="Example: Kolkata Warehouse"
+            />
+
+            <label>
+              Location Code
+            </label>
+
+            <input
+              type="text"
+              value={locationForm.code}
+              onChange={(event) =>
+                setLocationForm({
+                  ...locationForm,
+                  code: event.target.value,
+                })
+              }
+              placeholder="Example: KOL-01"
+            />
+
+            <label>
+              Address
+            </label>
+
+            <textarea
+              rows="3"
+              value={locationForm.address}
+              onChange={(event) =>
+                setLocationForm({
+                  ...locationForm,
+                  address: event.target.value,
+                })
+              }
+              placeholder="Location address"
+            />
 
             <button
-              type="button"
-              className="open-menu-link"
-              onClick={() =>
-                setSidebarOpen(true)
-              }
+              type="submit"
+              className="primary-btn"
+              disabled={saving === "location"}
             >
-              ☰ Open Menu
+              {saving === "location"
+                ? "Saving..."
+                : "+ Create Location"}
             </button>
 
-          </div>
+          </form>
 
-          <div className="modules-grid">
-
-            {/* Expenses */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/expenses")
-              }
-            >
-              <div className="module-icon expense">
-                ₹
-              </div>
-
-              <div>
-                <h3>
-                  Expenses
-                </h3>
-
-                <p>
-                  Manage office expenses
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Approvals */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/approvals")
-              }
-            >
-              <div className="module-icon attendance">
-                ✓
-              </div>
-
-              <div>
-                <h3>
-                  Approvals
-                </h3>
-
-                <p>
-                  Review pending approvals
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Employees */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/employees")
-              }
-            >
-              <div className="module-icon employees">
-                ♟
-              </div>
-
-              <div>
-                <h3>
-                  Employees
-                </h3>
-
-                <p>
-                  Manage employees
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Attendance */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/attendance")
-              }
-            >
-              <div className="module-icon attendance">
-                ✓
-              </div>
-
-              <div>
-                <h3>
-                  Attendance
-                </h3>
-
-                <p>
-                  Daily and monthly attendance
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Shift Management */}
-
-            <div
-              className="module-card clickable"
-              onClick={() => goTo("/shifts")}
-            >
-              <div className="module-icon shift">
-                ◷
-              </div>
-
-              <div>
-                <h3>Shift Management</h3>
-                <p>Create and manage staff shifts</p>
-              </div>
-
-              <span className="card-arrow">→</span>
-            </div>
-
-            {/* Leave */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/leave")
-              }
-            >
-              <div className="module-icon leave">
-                📄
-              </div>
-
-              <div>
-                <h3>
-                  Leave Management
-                </h3>
-
-                <p>
-                  Manage employee leaves
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Holidays */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/holidays")
-              }
-            >
-              <div className="module-icon holiday">
-                ▦
-              </div>
-
-              <div>
-                <h3>
-                  Holiday Calendar
-                </h3>
-
-                <p>
-                  Manage office holidays
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Salary */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/salary")
-              }
-            >
-              <div className="module-icon payroll">
-                ₹
-              </div>
-
-              <div>
-                <h3>
-                  Salary Management
-                </h3>
-
-                <p>
-                  Salary, additions & deductions
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Salary Slip */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/salary/slips")
-              }
-            >
-              <div className="module-icon payroll">
-                ▤
-              </div>
-
-              <div>
-                <h3>
-                  Salary Slips
-                </h3>
-
-                <p>
-                  Create and view salary slips
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-            {/* Reports */}
-
-            <div
-              className="module-card clickable"
-              onClick={() =>
-                goTo("/reports")
-              }
-            >
-              <div className="module-icon expense">
-                ▥
-              </div>
-
-              <div>
-                <h3>
-                  Reports
-                </h3>
-
-                <p>
-                  View business reports
-                </p>
-              </div>
-
-              <span className="card-arrow">
-                →
-              </span>
-            </div>
-
-          </div>
         </section>
 
-        {/* =================================================
-            ATTENDANCE / HR PREVIEW
-        ================================================= */}
+        {/* ===================================================
+            SUPPLIER
+        =================================================== */}
 
-        <section className="attendance-preview">
+        <section className="master-card">
 
-          <div className="attendance-preview-header">
+          <div className="master-card-header">
+
+            <div className="master-icon supplier">
+              🏢
+            </div>
 
             <div>
-
-              <div className="section-kicker">
-                HR OVERVIEW
-              </div>
-
               <h2>
-                Attendance & Payroll
+                Supplier Master
               </h2>
 
+              <p>
+                Create raw material suppliers.
+              </p>
             </div>
+
+          </div>
+
+          <form onSubmit={createSupplier}>
+
+            <label>
+              Supplier Name
+              <span>*</span>
+            </label>
+
+            <input
+              type="text"
+              value={supplierForm.name}
+              onChange={(event) =>
+                setSupplierForm({
+                  ...supplierForm,
+                  name: event.target.value,
+                })
+              }
+              placeholder="Supplier name"
+            />
+
+            <label>
+              GSTIN
+            </label>
+
+            <input
+              type="text"
+              value={supplierForm.gstin}
+              onChange={(event) =>
+                setSupplierForm({
+                  ...supplierForm,
+                  gstin:
+                    event.target.value.toUpperCase(),
+                })
+              }
+              placeholder="GSTIN"
+            />
+
+            <label>
+              State
+            </label>
+
+            <input
+              type="text"
+              value={supplierForm.state}
+              onChange={(event) =>
+                setSupplierForm({
+                  ...supplierForm,
+                  state: event.target.value,
+                })
+              }
+              placeholder="West Bengal"
+            />
+
+            <label>
+              Phone
+            </label>
+
+            <input
+              type="text"
+              value={supplierForm.phone}
+              onChange={(event) =>
+                setSupplierForm({
+                  ...supplierForm,
+                  phone: event.target.value,
+                })
+              }
+              placeholder="Phone number"
+            />
+
+            <label>
+              Address
+            </label>
+
+            <textarea
+              rows="3"
+              value={supplierForm.address}
+              onChange={(event) =>
+                setSupplierForm({
+                  ...supplierForm,
+                  address: event.target.value,
+                })
+              }
+              placeholder="Supplier address"
+            />
 
             <button
-              type="button"
-              className="preview-badge preview-link"
-              onClick={() => goTo("/attendance")}
+              type="submit"
+              className="primary-btn"
+              disabled={saving === "supplier"}
             >
-              Open Attendance
+              {saving === "supplier"
+                ? "Saving..."
+                : "+ Create Supplier"}
             </button>
 
-          </div>
-
-          <div className="attendance-preview-grid">
-
-            <div className="preview-box">
-
-              <div className="preview-icon present">
-                ✓
-              </div>
-
-              <div>
-                <strong>
-                  Attendance
-                </strong>
-
-                <span>
-                  Daily / Monthly
-                </span>
-              </div>
-
-            </div>
-
-            <div className="preview-box">
-
-              <div className="preview-icon leave">
-                📄
-              </div>
-
-              <div>
-                <strong>
-                  Leave
-                </strong>
-
-                <span>
-                  Paid / Unpaid
-                </span>
-              </div>
-
-            </div>
-
-            <div className="preview-box">
-
-              <div className="preview-icon holiday">
-                ▦
-              </div>
-
-              <div>
-                <strong>
-                  Holidays
-                </strong>
-
-                <span>
-                  Company calendar
-                </span>
-              </div>
-
-            </div>
-
-            <div
-              className="preview-box preview-clickable"
-              onClick={() => goTo("/shifts")}
-            >
-              <div className="preview-icon shift">◷</div>
-              <div>
-                <strong>Shift Management</strong>
-                <span>Staff shift setup</span>
-              </div>
-            </div>
-
-            <div className="preview-box">
-
-              <div className="preview-icon salary">
-                ₹
-              </div>
-
-              <div>
-                <strong>
-                  Salary
-                </strong>
-
-                <span>
-                  Additions & deductions
-                </span>
-              </div>
-
-            </div>
-
-          </div>
+          </form>
 
         </section>
 
-      </main>
+        {/* ===================================================
+            PRODUCT / ITEM
+        =================================================== */}
 
-      {/* ===================================================
+        <section className="master-card">
+
+          <div className="master-card-header">
+
+            <div className="master-icon product">
+              📦
+            </div>
+
+            <div>
+              <h2>
+                Product / Item Master
+              </h2>
+
+              <p>
+                Create raw material, grade and
+                finished goods.
+              </p>
+            </div>
+
+          </div>
+
+          <form onSubmit={createItem}>
+
+            <label>
+              Product / Item Name
+              <span>*</span>
+            </label>
+
+            <input
+              type="text"
+              value={itemForm.name}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  name: event.target.value,
+                })
+              }
+              placeholder="Example: Raw Rice"
+            />
+
+            <label>
+              Item Code
+            </label>
+
+            <input
+              type="text"
+              value={itemForm.code}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  code: event.target.value,
+                })
+              }
+              placeholder="Example: RM-001"
+            />
+
+            <label>
+              Item Type
+            </label>
+
+            <select
+              value={itemForm.itemType}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  itemType: event.target.value,
+                })
+              }
+            >
+              <option value="RAW_MATERIAL">
+                Raw Material
+              </option>
+
+              <option value="GRADE">
+                Grade
+              </option>
+
+              <option value="FINISHED_GOODS">
+                Finished Goods
+              </option>
+            </select>
+
+            <label>
+              Unit
+            </label>
+
+            <input
+              type="text"
+              value={itemForm.unit}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  unit: event.target.value,
+                })
+              }
+              placeholder="KG"
+            />
+
+            <label>
+              HSN
+            </label>
+
+            <input
+              type="text"
+              value={itemForm.hsn}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  hsn: event.target.value,
+                })
+              }
+              placeholder="HSN Code"
+            />
+
+            <label>
+              Default GST %
+            </label>
+
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={itemForm.defaultGstRate}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  defaultGstRate:
+                    event.target.value,
+                })
+              }
+              placeholder="0"
+            />
+
+            <label>
+              Default Barcode
+            </label>
+
+            <input
+              type="text"
+              value={itemForm.defaultBarcode}
+              onChange={(event) =>
+                setItemForm({
+                  ...itemForm,
+                  defaultBarcode:
+                    event.target.value,
+                })
+              }
+              placeholder="Barcode"
+            />
+
+            <button
+              type="submit"
+              className="primary-btn"
+              disabled={saving === "item"}
+            >
+              {saving === "item"
+                ? "Saving..."
+                : "+ Create Product"}
+            </button>
+
+          </form>
+
+        </section>
+
+      </div>
+
+      {/* =====================================================
+          EXISTING MASTERS
+      ===================================================== */}
+
+      <section className="existing-section">
+
+        <div className="existing-header">
+          <div>
+            <div className="page-kicker">
+              MASTER LIST
+            </div>
+
+            <h2>
+              Existing Masters
+            </h2>
+          </div>
+
+          <span className="record-count">
+            {locations.length +
+              suppliers.length +
+              items.length}{" "}
+            Records
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="empty-state">
+            Loading masters...
+          </div>
+        ) : (
+          <div className="tables-grid">
+
+            {/* LOCATION LIST */}
+
+            <div className="table-card">
+
+              <h3>
+                📍 Locations
+              </h3>
+
+              {locations.length === 0 ? (
+                <div className="empty-state">
+                  No locations created.
+                </div>
+              ) : (
+                <div className="table-wrapper">
+
+                  <table>
+
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Code</th>
+                        <th>Address</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {locations.map(
+                        (location) => (
+                          <tr
+                            key={
+                              location._id ||
+                              location.id
+                            }
+                          >
+                            <td>
+                              {location.name ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {location.code ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {location.address ||
+                                "-"}
+                            </td>
+                          </tr>
+                        )
+                      )}
+                    </tbody>
+
+                  </table>
+
+                </div>
+              )}
+
+            </div>
+
+            {/* SUPPLIER LIST */}
+
+            <div className="table-card">
+
+              <h3>
+                🏢 Suppliers
+              </h3>
+
+              {suppliers.length === 0 ? (
+                <div className="empty-state">
+                  No suppliers created.
+                </div>
+              ) : (
+                <div className="table-wrapper">
+
+                  <table>
+
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>GSTIN</th>
+                        <th>State</th>
+                        <th>Phone</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {suppliers.map(
+                        (supplier) => (
+                          <tr
+                            key={
+                              supplier._id ||
+                              supplier.id
+                            }
+                          >
+                            <td>
+                              {supplier.name ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {supplier.gstin ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {supplier.state ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {supplier.phone ||
+                                "-"}
+                            </td>
+                          </tr>
+                        )
+                      )}
+                    </tbody>
+
+                  </table>
+
+                </div>
+              )}
+
+            </div>
+
+            {/* PRODUCT LIST */}
+
+            <div className="table-card table-card-full">
+
+              <h3>
+                📦 Products / Items
+              </h3>
+
+              {items.length === 0 ? (
+                <div className="empty-state">
+                  No products created.
+                </div>
+              ) : (
+                <div className="table-wrapper">
+
+                  <table>
+
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Code</th>
+                        <th>Type</th>
+                        <th>Unit</th>
+                        <th>HSN</th>
+                        <th>GST %</th>
+                        <th>Barcode</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {items.map(
+                        (item) => (
+                          <tr
+                            key={
+                              item._id ||
+                              item.id
+                            }
+                          >
+                            <td>
+                              {item.name ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {item.code ||
+                                item.itemCode ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {item.itemType ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {item.unit ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {item.hsn ||
+                                "-"}
+                            </td>
+
+                            <td>
+                              {item.defaultGstRate ??
+                                item.gstRate ??
+                                0}
+                              %
+                            </td>
+
+                            <td>
+                              {item.defaultBarcode ||
+                                item.barcode ||
+                                "-"}
+                            </td>
+                          </tr>
+                        )
+                      )}
+                    </tbody>
+
+                  </table>
+
+                </div>
+              )}
+
+            </div>
+
+          </div>
+        )}
+
+      </section>
+
+      {/* =====================================================
           STYLES
-      =================================================== */}
+      ===================================================== */}
 
       <style>{`
 
@@ -1413,1244 +1031,327 @@ export default function Dashboard() {
           box-sizing: border-box;
         }
 
-        body {
-          margin: 0;
+        .inventory-masters-page {
+          min-height: 100vh;
+          background: #f5f7fb;
+          padding: 28px;
           font-family:
             Arial,
             Helvetica,
             sans-serif;
-          background: #f5f7fb;
           color: #172b4d;
         }
 
-        button {
+        .page-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 20px;
+          margin-bottom: 22px;
+        }
+
+        .page-kicker {
+          color: #98a2b3;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 1px;
+        }
+
+        .page-header h1 {
+          margin: 5px 0 4px;
+          font-size: 26px;
+          color: #173b68;
+        }
+
+        .page-header p {
+          margin: 0;
+          color: #667085;
+          font-size: 12px;
+        }
+
+        .refresh-btn {
+          border: 1px solid #d0d5dd;
+          background: #ffffff;
+          color: #245a96;
+          border-radius: 9px;
+          padding: 10px 15px;
+          cursor: pointer;
+          font-weight: 700;
+        }
+
+        .refresh-btn:disabled {
+          opacity: .6;
+          cursor: not-allowed;
+        }
+
+        .success-message,
+        .error-message {
+          border-radius: 9px;
+          padding: 12px 15px;
+          margin-bottom: 16px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .success-message {
+          background: #ecfdf3;
+          color: #027a48;
+          border: 1px solid #abefc6;
+        }
+
+        .error-message {
+          background: #fef3f2;
+          color: #b42318;
+          border: 1px solid #fecdca;
+        }
+
+        .master-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(3, minmax(0, 1fr));
+          gap: 18px;
+          align-items: start;
+        }
+
+        .master-card {
+          background: #ffffff;
+          border: 1px solid #e4e7ec;
+          border-radius: 14px;
+          padding: 20px;
+          box-shadow:
+            0 3px 12px
+            rgba(16, 24, 40, .04);
+        }
+
+        .master-card-header {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          margin-bottom: 18px;
+        }
+
+        .master-icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #eef4fb;
+          font-size: 19px;
+        }
+
+        .master-icon.supplier {
+          background: #f2f4ff;
+        }
+
+        .master-icon.product {
+          background: #ecfdf3;
+        }
+
+        .master-card h2 {
+          margin: 0;
+          font-size: 16px;
+          color: #173b68;
+        }
+
+        .master-card-header p {
+          margin: 4px 0 0;
+          color: #98a2b3;
+          font-size: 10px;
+        }
+
+        .master-card form {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .master-card label {
+          margin-bottom: 5px;
+          color: #344054;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .master-card label span {
+          color: #d92d20;
+          margin-left: 3px;
+        }
+
+        .master-card input,
+        .master-card select,
+        .master-card textarea {
+          width: 100%;
+          border: 1px solid #d0d5dd;
+          border-radius: 8px;
+          background: #ffffff;
+          color: #172b4d;
+          padding: 10px 11px;
+          margin-bottom: 13px;
+          outline: none;
+          font-size: 12px;
           font-family: inherit;
         }
 
-        /* ================================
-           DASHBOARD
-        ================================= */
-
-        .dashboard {
-          min-height: 100vh;
-          background: #f5f7fb;
+        .master-card textarea {
+          resize: vertical;
         }
 
-        /* ================================
-           HEADER
-        ================================= */
-
-        .dashboard-header {
-          height: 74px;
-
-          background: #ffffff;
-
-          border-bottom:
-            1px solid #e4e7ec;
-
-          display: flex;
-
-          align-items: center;
-
-          justify-content:
-            space-between;
-
-          padding:
-            0 28px;
-
-          position: sticky;
-
-          top: 0;
-
-          z-index: 20;
+        .master-card input:focus,
+        .master-card select:focus,
+        .master-card textarea:focus {
+          border-color: #245a96;
+          box-shadow:
+            0 0 0 3px
+            rgba(36, 90, 150, .08);
         }
 
-        .header-left {
-          display: flex;
-
-          align-items: center;
-
-          gap: 14px;
-        }
-
-        .dashboard-menu-btn {
-          width: 40px;
-          height: 40px;
-
-          border:
-            1px solid #d0d5dd;
-
+        .primary-btn {
+          width: 100%;
+          border: none;
           border-radius: 9px;
-
-          background: #ffffff;
-
-          display: flex;
-
-          flex-direction: column;
-
-          justify-content: center;
-
-          align-items: center;
-
-          gap: 4px;
-
+          padding: 11px 14px;
+          background: #245a96;
+          color: #ffffff;
+          font-size: 12px;
+          font-weight: 700;
           cursor: pointer;
+          margin-top: 3px;
         }
 
-        .dashboard-menu-btn span {
-          width: 17px;
-          height: 2px;
-
-          border-radius: 3px;
-
+        .primary-btn:hover {
           background: #173b68;
         }
 
-        .dashboard-header h1 {
-          margin: 0;
-
-          font-size: 20px;
-
-          color: #173b68;
+        .primary-btn:disabled {
+          opacity: .65;
+          cursor: not-allowed;
         }
 
-        .dashboard-header p {
-          margin:
-            3px 0 0;
-
-          color: #667085;
-
-          font-size: 11px;
+        .existing-section {
+          margin-top: 22px;
+          background: #ffffff;
+          border: 1px solid #e4e7ec;
+          border-radius: 14px;
+          padding: 20px;
         }
 
-        .user-section {
+        .existing-header {
           display: flex;
-
           align-items: center;
+          justify-content: space-between;
+          margin-bottom: 16px;
+        }
 
+        .existing-header h2 {
+          margin: 4px 0 0;
+          font-size: 18px;
+        }
+
+        .record-count {
+          background: #eef4fb;
+          color: #245a96;
+          padding: 7px 11px;
+          border-radius: 20px;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .tables-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(2, minmax(0, 1fr));
           gap: 16px;
         }
 
-        .user-info {
-          display: flex;
-
-          flex-direction: column;
-
-          align-items: flex-end;
-        }
-
-        .user-info strong {
-          font-size: 13px;
-        }
-
-        .user-info span {
-          margin-top: 3px;
-
-          color: #245a96;
-
-          font-size: 11px;
-        }
-
-        .logout-btn {
-          border: none;
-
-          background: #eef3f8;
-
-          color: #245a96;
-
-          padding:
-            9px 15px;
-
-          border-radius: 8px;
-
-          font-weight: 700;
-
-          cursor: pointer;
-        }
-
-        /* ================================
-           SIDEBAR OVERLAY
-        ================================= */
-
-        .sidebar-overlay {
-          position: fixed;
-
-          inset: 0;
-
-          background:
-            rgba(
-              15,
-              23,
-              42,
-              .35
-            );
-
-          z-index: 40;
-        }
-
-        /* ================================
-           SIDEBAR
-        ================================= */
-
-        .sidebar {
-          position: fixed;
-
-          top: 0;
-          left: 0;
-          bottom: 0;
-
-          width: 282px;
-
+        .table-card {
+          border: 1px solid #eaecf0;
+          border-radius: 11px;
+          overflow: hidden;
           background: #ffffff;
-
-          box-shadow:
-            10px 0 32px
-            rgba(
-              15,
-              23,
-              42,
-              .15
-            );
-
-          transform:
-            translateX(-105%);
-
-          transition:
-            transform .23s ease;
-
-          z-index: 50;
-
-          display: flex;
-
-          flex-direction: column;
-
-          padding:
-            12px;
-
-          overflow-y: auto;
-
-          overflow-x: hidden;
-
-          scrollbar-width: thin;
-
-          scrollbar-color:
-            #d0d5dd
-            transparent;
         }
 
-        .sidebar.sidebar-open {
-          transform:
-            translateX(0);
+        .table-card-full {
+          grid-column: 1 / -1;
         }
 
-        .sidebar::-webkit-scrollbar {
-          width: 5px;
-        }
-
-        .sidebar::-webkit-scrollbar-thumb {
-          background:
-            #d0d5dd;
-
-          border-radius:
-            10px;
-        }
-
-        /* ================================
-           SIDEBAR TOP
-        ================================= */
-
-        .sidebar-top {
-          min-height: 58px;
-
-          display: flex;
-
-          align-items: center;
-
-          justify-content:
-            space-between;
-
-          padding:
-            3px 7px 12px;
-
-          border-bottom:
-            1px solid #eaecf0;
-
-          flex-shrink: 0;
-        }
-
-        .sidebar-brand {
-          color: #173b68;
-
-          font-size: 16px;
-
-          font-weight: 800;
-        }
-
-        .sidebar-subtitle {
-          color: #98a2b3;
-
-          font-size: 9px;
-
-          margin-top: 3px;
-        }
-
-        .sidebar-close {
-          width: 32px;
-          height: 32px;
-
-          border: none;
-
-          border-radius: 8px;
-
-          background:
-            #f2f4f7;
-
-          color: #344054;
-
-          font-size: 21px;
-
-          cursor: pointer;
-        }
-
-        /* ================================
-           SIDEBAR SECTION
-        ================================= */
-
-        .sidebar-section {
-          margin-top: 13px;
-        }
-
-        .sidebar-heading {
-          padding:
-            0 7px 6px;
-
-          font-size: 9px;
-
-          font-weight: 800;
-
-          letter-spacing: .9px;
-
-          color: #98a2b3;
-        }
-
-        .sidebar-nav {
-          display: grid;
-
-          gap: 2px;
-        }
-
-        .side-item {
-          width: 100%;
-
-          min-height: 39px;
-
-          border: none;
-
-          background:
-            transparent;
-
-          color: #667085;
-
-          padding:
-            6px 7px;
-
-          border-radius: 9px;
-
-          display: flex;
-
-          align-items: center;
-
-          gap: 9px;
-
-          text-align: left;
-
+        .table-card h3 {
+          margin: 0;
+          padding: 13px 15px;
+          background: #f8fafc;
+          border-bottom: 1px solid #eaecf0;
           font-size: 12px;
-
-          font-weight: 600;
-
-          cursor: pointer;
-
-          transition:
-            background .15s ease,
-            color .15s ease;
+          color: #173b68;
         }
 
-        .side-item:hover {
-          background:
-            #eef4fb;
-
-          color:
-            #173b68;
+        .table-wrapper {
+          overflow-x: auto;
         }
 
-        .side-icon {
-          width: 30px;
-          height: 30px;
-
-          border-radius: 8px;
-
-          background:
-            #f3f7fc;
-
-          color:
-            #245a96;
-
-          display: flex;
-
-          align-items: center;
-
-          justify-content: center;
-
-          flex-shrink: 0;
-
-          font-size: 13px;
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 520px;
         }
 
-        .side-label {
-          flex: 1;
-
+        th {
+          background: #f8fafc;
+          color: #667085;
+          font-size: 10px;
+          font-weight: 800;
+          text-align: left;
+          padding: 10px 12px;
+          border-bottom: 1px solid #eaecf0;
           white-space: nowrap;
         }
 
-        .admin-item {
-          background:
-            #f8fbff;
+        td {
+          color: #344054;
+          font-size: 10px;
+          padding: 10px 12px;
+          border-bottom: 1px solid #f2f4f7;
+          vertical-align: top;
         }
 
-        /* ================================
-           SIDEBAR BOTTOM
-        ================================= */
-
-        .sidebar-bottom {
-          margin-top: 14px;
-
-          padding-top: 10px;
-
-          border-top:
-            1px solid #eaecf0;
-
-          flex-shrink: 0;
+        tbody tr:last-child td {
+          border-bottom: none;
         }
 
-        .side-logout {
-          width: 100%;
-
-          min-height: 40px;
-
-          border: none;
-
-          border-radius: 9px;
-
-          background:
-            #fef3f2;
-
-          color:
-            #b42318;
-
-          display: flex;
-
-          align-items: center;
-
-          gap: 9px;
-
-          padding:
-            7px;
-
-          font-size: 12px;
-
-          font-weight: 700;
-
-          cursor: pointer;
-        }
-
-        .side-logout .side-icon {
-          color: #b42318;
-
-          background:
-            #ffffff;
-        }
-
-        /* ================================
-           CONTENT
-        ================================= */
-
-        .dashboard-content {
-          max-width: 1400px;
-
-          margin:
-            0 auto;
-
-          padding:
-            30px 28px;
-        }
-
-        /* ================================
-           WELCOME
-        ================================= */
-
-        .welcome-card {
-          background:
-            linear-gradient(
-              135deg,
-              #245a96,
-              #174579
-            );
-
-          color: #ffffff;
-
-          border-radius:
-            17px;
-
-          padding:
-            27px;
-
-          display: flex;
-
-          justify-content:
-            space-between;
-
-          align-items:
-            center;
-        }
-
-        .welcome-small {
-          font-size: 9px;
-
-          font-weight: 800;
-
-          letter-spacing:
-            1px;
-
-          opacity: .7;
-
-          margin-bottom:
-            7px;
-        }
-
-        .welcome-card h2 {
-          margin: 0;
-
-          font-size: 23px;
-        }
-
-        .welcome-card p {
-          margin:
-            7px 0 0;
-
-          font-size: 12px;
-
-          opacity: .9;
-        }
-
-        .role-area {
-          text-align: right;
-        }
-
-        .role-label {
-          display: block;
-
-          font-size: 9px;
-
-          opacity: .7;
-
-          margin-bottom: 5px;
-        }
-
-        .role-badge {
-          display: inline-block;
-
-          padding:
-            7px 13px;
-
-          border-radius:
-            18px;
-
-          background:
-            rgba(
-              255,
-              255,
-              255,
-              .15
-            );
-
+        .empty-state {
+          padding: 25px;
+          text-align: center;
+          color: #98a2b3;
           font-size: 11px;
-
-          font-weight: 700;
         }
-
-        /* ================================
-           STATS
-        ================================= */
-
-        .stats-grid {
-          display: grid;
-
-          grid-template-columns:
-            repeat(4, 1fr);
-
-          gap:
-            16px;
-
-          margin-top:
-            20px;
-        }
-
-        .stat-card {
-          background:
-            #ffffff;
-
-          border:
-            1px solid #e4e7ec;
-
-          border-radius:
-            13px;
-
-          padding:
-            17px;
-
-          display: flex;
-
-          align-items:
-            center;
-
-          gap:
-            12px;
-        }
-
-        .stat-card.clickable {
-          cursor: pointer;
-
-          transition:
-            transform .18s ease,
-            box-shadow .18s ease;
-        }
-
-        .stat-card.clickable:hover {
-          transform:
-            translateY(-2px);
-
-          box-shadow:
-            0 8px 20px
-            rgba(
-              36,
-              90,
-              150,
-              .08
-            );
-        }
-
-        .stat-icon {
-          width: 42px;
-          height: 42px;
-
-          border-radius:
-            10px;
-
-          background:
-            #eef4fb;
-
-          color:
-            #245a96;
-
-          display: flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          font-weight:
-            800;
-
-          flex-shrink: 0;
-        }
-
-        .stat-content span {
-          display: block;
-
-          color:
-            #667085;
-
-          font-size:
-            11px;
-        }
-
-        .stat-content strong {
-          display: block;
-
-          margin-top:
-            3px;
-
-          color:
-            #173b68;
-
-          font-size:
-            21px;
-        }
-
-        .stat-content small {
-          display: block;
-
-          margin-top:
-            3px;
-
-          color:
-            #98a2b3;
-
-          font-size:
-            9px;
-        }
-
-        /* ================================
-           MODULES
-        ================================= */
-
-        .modules-section {
-          margin-top:
-            28px;
-        }
-
-        .section-header {
-          display: flex;
-
-          align-items:
-            flex-end;
-
-          justify-content:
-            space-between;
-
-          margin-bottom:
-            14px;
-        }
-
-        .section-kicker {
-          color:
-            #98a2b3;
-
-          font-size:
-            9px;
-
-          font-weight:
-            800;
-
-          letter-spacing:
-            1px;
-        }
-
-        .section-header h2 {
-          margin:
-            4px 0 3px;
-
-          font-size:
-            18px;
-        }
-
-        .section-header p {
-          margin: 0;
-
-          color:
-            #667085;
-
-          font-size:
-            11px;
-        }
-
-        .open-menu-link {
-          border:
-            1px solid #d0d5dd;
-
-          background:
-            #ffffff;
-
-          color:
-            #245a96;
-
-          padding:
-            8px 11px;
-
-          border-radius:
-            8px;
-
-          font-size:
-            10px;
-
-          font-weight:
-            700;
-
-          cursor:
-            pointer;
-        }
-
-        .modules-grid {
-          display: grid;
-
-          grid-template-columns:
-            repeat(3, 1fr);
-
-          gap:
-            14px;
-        }
-
-        .module-card {
-          background:
-            #ffffff;
-
-          border:
-            1px solid #e4e7ec;
-
-          border-radius:
-            13px;
-
-          min-height:
-            88px;
-
-          padding:
-            16px;
-
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          gap:
-            12px;
-        }
-
-        .module-card.clickable {
-          cursor:
-            pointer;
-
-          transition:
-            transform .18s ease,
-            box-shadow .18s ease;
-        }
-
-        .module-card.clickable:hover {
-          transform:
-            translateY(-2px);
-
-          box-shadow:
-            0 8px 22px
-            rgba(
-              36,
-              90,
-              150,
-              .08
-            );
-        }
-
-        .module-icon {
-          width:
-            43px;
-
-          height:
-            43px;
-
-          border-radius:
-            10px;
-
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          flex-shrink:
-            0;
-
-          font-weight:
-            800;
-        }
-
-        .module-icon.expense {
-          background:
-            #eef4fb;
-
-          color:
-            #245a96;
-        }
-
-        .module-icon.attendance {
-          background:
-            #ecfdf3;
-
-          color:
-            #027a48;
-        }
-
-        .module-icon.leave {
-          background:
-            #fffaeb;
-
-          color:
-            #b54708;
-        }
-
-        .module-icon.holiday {
-          background:
-            #fdf2fa;
-
-          color:
-            #c11574;
-        }
-
-        .module-icon.payroll {
-          background:
-            #f2f4ff;
-
-          color:
-            #5148a8;
-        }
-
-        .module-icon.employees {
-          background:
-            #eef4fb;
-
-          color:
-            #245a96;
-        }
-
-        .module-card h3 {
-          margin:
-            0;
-
-          font-size:
-            13px;
-        }
-
-        .module-card p {
-          margin:
-            4px 0 0;
-
-          color:
-            #667085;
-
-          font-size:
-            10px;
-        }
-
-        .card-arrow {
-          margin-left:
-            auto;
-
-          color:
-            #98a2b3;
-
-          font-size:
-            15px;
-        }
-
-        /* ================================
-           HR PREVIEW
-        ================================= */
-
-        .attendance-preview {
-          margin-top:
-            20px;
-
-          background:
-            #ffffff;
-
-          border:
-            1px solid #e4e7ec;
-
-          border-radius:
-            14px;
-
-          padding:
-            20px;
-        }
-
-        .attendance-preview-header {
-          display:
-            flex;
-
-          justify-content:
-            space-between;
-
-          align-items:
-            center;
-        }
-
-        .attendance-preview-header h2 {
-          margin:
-            4px 0 0;
-
-          font-size:
-            17px;
-        }
-
-        .preview-badge {
-          padding:
-            4px 8px;
-
-          border-radius:
-            8px;
-
-          background:
-            #f2f4f7;
-
-          color:
-            #667085;
-
-          font-size:
-            8px;
-
-          font-weight:
-            700;
-        }
-
-        .attendance-preview-grid {
-          display:
-            grid;
-
-          grid-template-columns:
-            repeat(4, 1fr);
-
-          gap:
-            12px;
-
-          margin-top:
-            16px;
-        }
-
-        .preview-box {
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          gap:
-            9px;
-
-          border:
-            1px solid #eaecf0;
-
-          border-radius:
-            10px;
-
-          padding:
-            11px;
-        }
-
-        .preview-icon {
-          width:
-            34px;
-
-          height:
-            34px;
-
-          border-radius:
-            8px;
-
-          display:
-            flex;
-
-          align-items:
-            center;
-
-          justify-content:
-            center;
-
-          flex-shrink:
-            0;
-        }
-
-        .preview-icon.present {
-          background:
-            #ecfdf3;
-
-          color:
-            #027a48;
-        }
-
-        .preview-icon.leave {
-          background:
-            #fffaeb;
-
-          color:
-            #b54708;
-        }
-
-        .preview-icon.holiday {
-          background:
-            #fdf2fa;
-
-          color:
-            #c11574;
-        }
-
-        .preview-icon.salary {
-          background:
-            #f2f4ff;
-
-          color:
-            #5148a8;
-        }
-
-        .preview-link {
-          border: none;
-          cursor: pointer;
-          background: #eef4fb;
-          color: #245a96;
-        }
-
-        .preview-clickable {
-          cursor: pointer;
-          transition: transform .18s ease, box-shadow .18s ease;
-        }
-
-        .preview-clickable:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 6px 16px rgba(36,90,150,.08);
-        }
-
-        .preview-icon.shift,
-        .module-icon.shift {
-          background: #eef4fb;
-          color: #245a96;
-        }
-
-        .preview-box strong {
-          display:
-            block;
-
-          font-size:
-            11px;
-        }
-
-        .preview-box span {
-          display:
-            block;
-
-          margin-top:
-            3px;
-
-          color:
-            #98a2b3;
-
-          font-size:
-            9px;
-        }
-
-        /* ================================
-           RESPONSIVE
-        ================================= */
 
         @media (max-width: 1100px) {
-
-          .stats-grid {
+          .master-grid {
             grid-template-columns:
-              repeat(2, 1fr);
-          }
-
-          .modules-grid {
-            grid-template-columns:
-              repeat(2, 1fr);
-          }
-
-          .attendance-preview-grid {
-            grid-template-columns:
-              repeat(2, 1fr);
+              repeat(2, minmax(0, 1fr));
           }
         }
 
-        @media (max-width: 650px) {
-
-          .dashboard-header {
-            height:
-              64px;
-
-            padding:
-              0 14px;
+        @media (max-width: 750px) {
+          .inventory-masters-page {
+            padding: 16px;
           }
 
-          .dashboard-header h1 {
-            font-size:
-              16px;
+          .page-header {
+            flex-direction: column;
           }
 
-          .dashboard-header p {
-            font-size:
-              9px;
+          .master-grid,
+          .tables-grid {
+            grid-template-columns: 1fr;
           }
 
-          .user-info {
-            display:
-              none;
-          }
-
-          .logout-btn {
-            padding:
-              8px 10px;
-
-            font-size:
-              10px;
-          }
-
-          .dashboard-content {
-            padding:
-              18px 14px;
-          }
-
-          .welcome-card {
-            flex-direction:
-              column;
-
-            align-items:
-              flex-start;
-
-            gap:
-              14px;
-
-            padding:
-              21px;
-          }
-
-          .welcome-card h2 {
-            font-size:
-              19px;
-          }
-
-          .role-area {
-            text-align:
-              left;
-          }
-
-          .stats-grid,
-          .modules-grid,
-          .attendance-preview-grid {
-            grid-template-columns:
-              1fr;
-          }
-
-          .section-header {
-            flex-direction:
-              column;
-
-            align-items:
-              flex-start;
-
-            gap:
-              10px;
-          }
-
-          .sidebar {
-            width:
-              min(
-                88vw,
-                300px
-              );
+          .table-card-full {
+            grid-column: auto;
           }
         }
 
       `}</style>
+
     </div>
   );
 }
