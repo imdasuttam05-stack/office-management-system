@@ -24,6 +24,8 @@ import Reports from "./pages/Reports.jsx";
 startSessionManager();
 
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const RawMaterialPurchase = lazy(() => import("./pages/RawMaterialPurchase.jsx"));
+const Manufacturing = lazy(() => import("./pages/Manufacturing.jsx"));
 
 function LoadingScreen() {
   return (
@@ -50,6 +52,11 @@ export default function App() {
             {/* Existing modules */}
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/expenses" element={<Expense />} />
+            <Route path="/inventory/raw-material-purchase" element={<RawMaterialPurchase />} />
+            <Route path="/inventory" element={<Manufacturing />} />
+            <Route path="/manufacturing" element={<Manufacturing />} />
+            <Route path="/sales" element={<Manufacturing />} />
+            <Route path="/gst" element={<Manufacturing />} />
 
             {/* HR MODULE */}
             <Route path="/employees" element={<Employees />} />
