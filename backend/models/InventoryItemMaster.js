@@ -6,7 +6,7 @@ const schema = new mongoose.Schema({
   hsn:{type:String,trim:true,default:"",maxlength:30},
   unit:{type:String,trim:true,default:"KG",maxlength:30},
   defaultGstRate:{type:Number,min:0,max:100,default:0},
-  defaultBarcode:{type:String,trim:true,default:"",maxlength:120},
+  defaultBarcode:{type:String,trim:true,default:"",maxlength:120},purchaseLedgerId:{type:mongoose.Schema.Types.ObjectId,ref:"Ledger",default:null},salesLedgerId:{type:mongoose.Schema.Types.ObjectId,ref:"Ledger",default:null},
   active:{type:Boolean,default:true,index:true},
   createdBy:{type:mongoose.Schema.Types.ObjectId,ref:"User",required:true}
 },{timestamps:true});
