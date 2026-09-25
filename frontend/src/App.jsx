@@ -395,17 +395,3 @@ export default function App() {
     </BrowserRouter>
   );
 }
-```
-
-### Inventory routes now
-
-```text
-/inventory
-/inventory/masters
-/inventory/raw-material-purchase
-/manufacturing
-/sales
-/gst
-```
-
-So **Inventory** and **Inventory Master** are completely separate pages, while still working inside the same Inventory module.
