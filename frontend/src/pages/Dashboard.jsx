@@ -461,6 +461,15 @@ export default function Dashboard() {
             <button
               type="button"
               className="side-item"
+              onClick={() => goTo("/accounting")}
+            >
+              <Icon>₹</Icon>
+              <span className="side-label">Accounts</span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
               onClick={() => goTo("/inventory/raw-material-purchase")}
             >
               <Icon>▣</Icon>
