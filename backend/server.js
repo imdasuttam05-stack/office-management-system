@@ -13,6 +13,8 @@ import ocrRoutes from "./routes/ocrRoutes.js";
 import hrRoutes from "./routes/hrRoutes.js";
 import securityRoutes from "./routes/securityRoutes.js";
 import inventoryRoutes from "./routes/inventoryRoutes.js";
+import accountingRoutes from "./routes/accountingRoutes.js";
+import { ensureAccountingCatalog } from "./services/accountingCatalog.js";
 
 import {
   ensureBootstrapAdmin,
@@ -149,6 +151,7 @@ await connectDB();
 
 await ensureSecurityCatalog();
 await ensureBootstrapAdmin();
+await ensureAccountingCatalog();
 
 /* =========================================================
    APP SETTINGS
@@ -367,6 +370,15 @@ app.use(
 app.use(
   "/api/inventory",
   inventoryRoutes
+);
+
+/* =========================================================
+   ACCOUNTING
+========================================================= */
+
+app.use(
+  "/api/accounting",
+  accountingRoutes
 );
 
 /* =========================================================
