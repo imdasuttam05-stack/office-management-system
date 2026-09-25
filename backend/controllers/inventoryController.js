@@ -143,6 +143,23 @@ export async function getGstReport(req,res){try{const filter={};if(req.user?.com
 
 
 
+
+export async function createCustomerMaster(req,res){
+ try{
+  const b=req.body||{};
+  const companyId=req.user?.companyId||null;
+  const name=clean(b.name);
+  if(!name)return res.status(400).json({success:false,message:"Customer / Party name is required."});
+  const existing=await CustomerMaster.findOne({companyId,name,active:true});
+  if(existing)return res.status(409).json({success:false,message:"Customer / Party already exists."});
+  const row=await CustomerMaster.create({companyId,name,gstin:clean(b.gstin).toUpperCase(),gstStatus:clean(b.gstStatus),state:clean(b.state),district:clean(b.district),pin:clean(b.pin),phone:clean(b.phone),address:clean(b.address),createdBy:req.user._id});
+  const ledger=await ensureLedger({name,groupName:"Sundry Debtors",nature:"Asset",req,gstin:row.gstin,address:row.address,phone:row.phone});
+  row.ledgerId=ledger._id;
+  await row.save();
+  return res.status(201).json({success:true,message:"Customer / Party created and ledger mapped successfully.",item:row,ledger});
+ }catch(e){return res.status(400).json({success:false,message:e.code===11000?"Customer / Party already exists.":e.message})}
+}
+
 export async function updateCustomerMaster(req,res){
  try{
   const b=req.body||{};
