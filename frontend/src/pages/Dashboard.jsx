@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -49,6 +49,7 @@ function Icon({ children }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const sidebarRef = useRef(null);
 
@@ -314,6 +315,10 @@ export default function Dashboard() {
     navigate(path);
   }
 
+  function isActive(path) {
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  }
+
   /* =======================================================
      LOGOUT
   ======================================================= */
@@ -509,6 +514,30 @@ export default function Dashboard() {
               </span>
             </button>
 
+          </div>
+        </div>
+
+        {/* =================================================
+            ACCOUNTS
+        ================================================= */}
+
+        <div className="sidebar-section accounts-section">
+          <div className="sidebar-heading">ACCOUNTS</div>
+          <div className="accounts-panel">
+            <button
+              type="button"
+              className={`side-item account-main ${isActive("/accounting") ? "active" : ""}`}
+              onClick={() => goTo("/accounting")}
+            >
+              <Icon>₹</Icon>
+              <span className="side-label">Accounts</span>
+              <span className="account-arrow">→</span>
+            </button>
+            <div className="account-submenu">
+              <button type="button" onClick={() => goTo("/accounting")}>Groups &amp; Ledgers</button>
+              <button type="button" onClick={() => goTo("/accounting")}>Voucher Entry</button>
+              <button type="button" onClick={() => goTo("/accounting")}>Day Book</button>
+            </div>
           </div>
         </div>
 
@@ -1617,9 +1646,9 @@ export default function Dashboard() {
           left: 0;
           bottom: 0;
 
-          width: 282px;
+          width: 300px;
 
-          background: #ffffff;
+          background: linear-gradient(180deg, #ffffff 0%, #fbfdff 72%, #f6faff 100%);
 
           box-shadow:
             10px 0 32px
@@ -1643,7 +1672,7 @@ export default function Dashboard() {
           flex-direction: column;
 
           padding:
-            12px;
+            14px 12px 12px;
 
           overflow-y: auto;
 
@@ -1678,7 +1707,7 @@ export default function Dashboard() {
         ================================= */
 
         .sidebar-top {
-          min-height: 58px;
+          min-height: 72px;
 
           display: flex;
 
@@ -1691,7 +1720,9 @@ export default function Dashboard() {
             3px 7px 12px;
 
           border-bottom:
-            1px solid #eaecf0;
+            1px solid #e5edf6;
+          background: linear-gradient(135deg, #f7fbff, #ffffff);
+          border-radius: 14px;
 
           flex-shrink: 0;
         }
@@ -1699,9 +1730,9 @@ export default function Dashboard() {
         .sidebar-brand {
           color: #173b68;
 
-          font-size: 16px;
-
-          font-weight: 800;
+          font-size: 17px;
+          font-weight: 850;
+          letter-spacing: -.2px;
         }
 
         .sidebar-subtitle {
@@ -1735,16 +1766,15 @@ export default function Dashboard() {
         ================================= */
 
         .sidebar-section {
-          margin-top: 13px;
+          margin-top: 17px;
         }
 
         .sidebar-heading {
           padding:
             0 7px 6px;
 
-          font-size: 9px;
-
-          font-weight: 800;
+          font-size: 10px;
+          font-weight: 850;
 
           letter-spacing: .9px;
 
@@ -1760,7 +1790,7 @@ export default function Dashboard() {
         .side-item {
           width: 100%;
 
-          min-height: 39px;
+          min-height: 42px;
 
           border: none;
 
@@ -1770,9 +1800,9 @@ export default function Dashboard() {
           color: #667085;
 
           padding:
-            6px 7px;
+            6px 9px;
 
-          border-radius: 9px;
+          border-radius: 11px;
 
           display: flex;
 
@@ -1790,15 +1820,21 @@ export default function Dashboard() {
 
           transition:
             background .15s ease,
-            color .15s ease;
+            color .15s ease,
+            transform .15s ease,
+            box-shadow .15s ease;
         }
 
         .side-item:hover {
-          background:
-            #eef4fb;
+          background: #edf5ff;
+          color: #123f70;
+          transform: translateX(2px);
+        }
 
-          color:
-            #173b68;
+        .side-item.active {
+          background: linear-gradient(90deg, #e7f1ff 0%, #f3f8ff 100%);
+          color: #0f4c81;
+          box-shadow: inset 3px 0 0 #2474c6;
         }
 
         .side-icon {
@@ -1833,6 +1869,53 @@ export default function Dashboard() {
         .admin-item {
           background:
             #f8fbff;
+        }
+
+        .accounts-panel {
+          padding: 6px;
+          border: 1px solid #e4edf8;
+          border-radius: 14px;
+          background: linear-gradient(145deg, #f8fbff, #ffffff);
+          box-shadow: 0 5px 16px rgba(31, 84, 135, .06);
+        }
+
+        .account-main {
+          background: linear-gradient(135deg, #e9f3ff, #f7fbff);
+          font-weight: 750;
+        }
+
+        .account-arrow {
+          font-size: 14px;
+          opacity: .55;
+        }
+
+        .account-submenu {
+          display: grid;
+          gap: 2px;
+          padding: 5px 4px 2px 39px;
+        }
+
+        .account-submenu button {
+          border: 0;
+          background: transparent;
+          color: #738095;
+          text-align: left;
+          padding: 7px 8px;
+          border-radius: 8px;
+          font-size: 11px;
+          font-weight: 650;
+          cursor: pointer;
+        }
+
+        .account-submenu button::before {
+          content: "•";
+          margin-right: 7px;
+          color: #4b8ac7;
+        }
+
+        .account-submenu button:hover {
+          background: #eef5fc;
+          color: #164b7b;
         }
 
         /* ================================
