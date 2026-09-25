@@ -1,3 +1,4 @@
+```jsx
 import React, { lazy, Suspense } from "react";
 import {
   BrowserRouter,
@@ -23,38 +24,68 @@ import Reports from "./pages/Reports.jsx";
 
 startSessionManager();
 
-const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+/* =========================================================
+   LAZY LOADED PAGES
+========================================================= */
 
+const Dashboard = lazy(
+  () => import("./pages/Dashboard.jsx")
+);
+
+/* =========================================================
+   INVENTORY MODULE
+========================================================= */
+
+/* Main Inventory */
+const Inventory = lazy(
+  () => import("./pages/Inventory.jsx")
+);
+
+/* Inventory Master */
+const InventoryMasters = lazy(
+  () => import("./pages/InventoryMasters.jsx")
+);
+
+/* Raw Material Purchase */
 const RawMaterialPurchase = lazy(
   () => import("./pages/RawMaterialPurchase.jsx")
 );
 
+/* Manufacturing */
 const Manufacturing = lazy(
   () => import("./pages/Manufacturing.jsx")
 );
 
-const InventoryMasters = lazy(
-  () => import("./pages/InventoryMasters.jsx")
-);
+/* =========================================================
+   LOADING SCREEN
+========================================================= */
 
 function LoadingScreen() {
   return (
     <div className="app-loading">
       <div className="loading-card">
+
         <div className="loading-spinner" />
 
         <h3>Office Management</h3>
 
         <p>Loading...</p>
+
       </div>
     </div>
   );
 }
 
+/* =========================================================
+   APPLICATION
+========================================================= */
+
 export default function App() {
   return (
     <BrowserRouter>
+
       <Suspense fallback={<LoadingScreen />}>
+
         <Routes>
 
           {/* =====================================================
@@ -86,14 +117,18 @@ export default function App() {
 
           <Route element={<ProtectedRoute />}>
 
-            {/* Dashboard */}
+            {/* =================================================
+                DASHBOARD
+            ================================================= */}
 
             <Route
               path="/dashboard"
               element={<Dashboard />}
             />
 
-            {/* Expenses */}
+            {/* =================================================
+                EXPENSES
+            ================================================= */}
 
             <Route
               path="/expenses"
@@ -104,34 +139,37 @@ export default function App() {
                 INVENTORY
             ================================================= */}
 
+            {/* Main Inventory */}
             <Route
-              path="/inventory/raw-material-purchase"
-              element={<RawMaterialPurchase />}
+              path="/inventory"
+              element={<Inventory />}
             />
 
-            {/* Inventory Masters
-                Location / Supplier / Product */}
-
+            {/* Inventory Master */}
             <Route
               path="/inventory/masters"
               element={<InventoryMasters />}
             />
 
+            {/* Raw Material Purchase */}
             <Route
-              path="/inventory"
-              element={<Manufacturing />}
+              path="/inventory/raw-material-purchase"
+              element={<RawMaterialPurchase />}
             />
 
+            {/* Manufacturing */}
             <Route
               path="/manufacturing"
               element={<Manufacturing />}
             />
 
+            {/* Sales */}
             <Route
               path="/sales"
               element={<Manufacturing />}
             />
 
+            {/* GST */}
             <Route
               path="/gst"
               element={<Manufacturing />}
@@ -176,6 +214,11 @@ export default function App() {
             />
 
             <Route
+              path="/payroll"
+              element={<Salary />}
+            />
+
+            <Route
               path="/payroll/approvals"
               element={<PayrollApprovals />}
             />
@@ -188,11 +231,6 @@ export default function App() {
             <Route
               path="/salary/slips"
               element={<Reports />}
-            />
-
-            <Route
-              path="/payroll"
-              element={<Salary />}
             />
 
           </Route>
@@ -208,14 +246,16 @@ export default function App() {
               />
             }
           >
+
             <Route
               path="/users"
               element={<Users />}
             />
+
           </Route>
 
           {/* =====================================================
-              OTHER ROUTES
+              APPROVALS
           ===================================================== */}
 
           <Route
@@ -227,6 +267,10 @@ export default function App() {
               />
             }
           />
+
+          {/* =====================================================
+              REPORTS
+          ===================================================== */}
 
           <Route
             path="/reports"
@@ -247,6 +291,10 @@ export default function App() {
             path="/reports/salary"
             element={<Reports />}
           />
+
+          {/* =====================================================
+              SECURITY
+          ===================================================== */}
 
           <Route
             path="/security"
@@ -273,10 +321,11 @@ export default function App() {
           />
 
         </Routes>
+
       </Suspense>
 
       {/* =========================================================
-          LOADING CSS
+          LOADING SCREEN CSS
       ========================================================= */}
 
       <style>{`
@@ -292,10 +341,10 @@ export default function App() {
         .loading-card {
           width: 280px;
           padding: 30px 25px;
-          background: #fff;
+          background: #ffffff;
           border-radius: 16px;
           text-align: center;
-          box-shadow: 0 10px 35px rgba(0,0,0,.08);
+          box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
         }
 
         .loading-spinner {
@@ -305,7 +354,7 @@ export default function App() {
           border: 4px solid #e5e7eb;
           border-top-color: #245a96;
           border-radius: 50%;
-          animation: officeAppSpin .8s linear infinite;
+          animation: officeAppSpin 0.8s linear infinite;
         }
 
         .loading-card h3 {
@@ -333,3 +382,17 @@ export default function App() {
     </BrowserRouter>
   );
 }
+```
+
+### Inventory routes now
+
+```text
+/inventory
+/inventory/masters
+/inventory/raw-material-purchase
+/manufacturing
+/sales
+/gst
+```
+
+So **Inventory** and **Inventory Master** are completely separate pages, while still working inside the same Inventory module.
