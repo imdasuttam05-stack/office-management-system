@@ -8,10 +8,68 @@ export async function listGroups(req, res) {
 }
 
 export async function createGroup(req, res) {
-  const { name, parent = null, nature } = req.body;
-  if (!name || !nature) return res.status(400).json({ success: false, message: "Group name and nature are required." });
-  const group = await Group.create({ name, parent: parent || null, nature, createdBy: req.user._id });
-  res.status(201).json({ success: true, group });
+  try {
+    const name = String(req.body.name || "").trim();
+    const parent = req.body.parent || null;
+    const nature = String(req.body.nature || "").trim();
+
+    if (!name || !nature) {
+      return res.status(400).json({
+        success: false,
+        message: "Group name and nature are required."
+      });
+    }
+
+    if (parent) {
+      const parentGroup = await Group.findOne({ _id: parent, isActive: true });
+      if (!parentGroup) {
+        return res.status(400).json({
+          success: false,
+          message: "Selected parent group was not found."
+        });
+      }
+    }
+
+    const duplicate = await Group.findOne({
+      name,
+      parent,
+      isActive: true
+    });
+
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        message: "This group already exists under the selected parent."
+      });
+    }
+
+    const group = await Group.create({
+      name,
+      parent,
+      nature
+    });
+
+    const populated = await Group.findById(group._id)
+      .populate("parent", "name nature");
+
+    return res.status(201).json({
+      success: true,
+      message: "Group created successfully.",
+      group: populated
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "This group already exists under the selected parent."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to create group."
+    });
+  }
 }
 
 export async function listLedgers(req, res) {
