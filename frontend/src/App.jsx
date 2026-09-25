@@ -55,10 +55,7 @@ const Manufacturing = lazy(
   () => import("./pages/Manufacturing.jsx")
 );
 
-/* =========================================================
-   ACCOUNTING MODULE
-========================================================= */
-
+/* Accounting */
 const Accounting = lazy(
   () => import("./pages/Accounting.jsx")
 );
@@ -143,6 +140,15 @@ export default function App() {
             />
 
             {/* =================================================
+                ACCOUNTS
+            ================================================= */}
+
+            <Route
+              path="/accounting"
+              element={<Accounting />}
+            />
+
+            {/* =================================================
                 INVENTORY
             ================================================= */}
 
@@ -180,15 +186,6 @@ export default function App() {
             <Route
               path="/gst"
               element={<Manufacturing />}
-            />
-
-            {/* =================================================
-                ACCOUNTING
-            ================================================= */}
-
-            <Route
-              path="/accounting"
-              element={<Accounting />}
             />
 
             {/* =================================================
@@ -398,3 +395,17 @@ export default function App() {
     </BrowserRouter>
   );
 }
+```
+
+### Inventory routes now
+
+```text
+/inventory
+/inventory/masters
+/inventory/raw-material-purchase
+/manufacturing
+/sales
+/gst
+```
+
+So **Inventory** and **Inventory Master** are completely separate pages, while still working inside the same Inventory module.
