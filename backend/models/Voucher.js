@@ -17,6 +17,8 @@ const voucherSchema = new mongoose.Schema({
   lines: { type: [lineSchema], validate: v => v.length >= 2 },
   totalDebit: { type: Number, required: true },
   totalCredit: { type: Number, required: true },
+  sourceType: { type: String, default: "MANUAL", index: true },
+  sourceId: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });
 

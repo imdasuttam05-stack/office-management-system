@@ -31,6 +31,8 @@ const rawMaterialPurchaseSchema = new mongoose.Schema(
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null, index: true },
     location: { type: String, required: true, trim: true, maxlength: 120, index: true },
     supplierName: { type: String, required: true, trim: true, maxlength: 180, index: true },
+    supplierId: { type: mongoose.Schema.Types.ObjectId, ref: "SupplierMaster", default: null, index: true },
+    supplierLedgerId: { type: mongoose.Schema.Types.ObjectId, ref: "Ledger", default: null, index: true },
     supplierGSTIN: { type: String, trim: true, default: "", maxlength: 30 },
     supplierInvoiceNo: { type: String, trim: true, default: "", maxlength: 100 },
     supplierInvoiceDate: { type: Date, default: null },
