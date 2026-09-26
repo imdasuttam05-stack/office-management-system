@@ -3,6 +3,10 @@ import React, { useEffect, useMemo, useState } from "react";
 const API_URL = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
 const token = () => localStorage.getItem("token") || localStorage.getItem("accessToken") || "";
 
+const GST_STATE_CODES = {
+  "Andhra Pradesh":"37","Arunachal Pradesh":"12","Assam":"18","Bihar":"10","Chhattisgarh":"22","Goa":"30","Gujarat":"24","Haryana":"06","Himachal Pradesh":"02","Jharkhand":"20","Karnataka":"29","Kerala":"32","Madhya Pradesh":"23","Maharashtra":"27","Manipur":"14","Meghalaya":"17","Mizoram":"15","Nagaland":"13","Odisha":"21","Punjab":"03","Rajasthan":"08","Sikkim":"11","Tamil Nadu":"33","Telangana":"36","Tripura":"16","Uttar Pradesh":"09","Uttarakhand":"05","West Bengal":"19","Andaman and Nicobar Islands":"35","Chandigarh":"04","Dadra and Nagar Haveli and Daman and Diu":"26","Delhi":"07","Jammu and Kashmir":"01","Ladakh":"38","Lakshadweep":"31","Puducherry":"34"
+};
+
 const GROUPS = [
   "Capital Account",
   "Current Assets",
@@ -129,7 +133,11 @@ export default function AccountsMasters() {
   }
 
   function update(key, value) {
-    setForm(f => ({...f, [key]:value}));
+    setForm(f => {
+      const next = {...f, [key]:value};
+      if (type === "location" && key === "state") next.gstStateCode = GST_STATE_CODES[value] || "";
+      return next;
+    });
   }
 
   async function save() {
