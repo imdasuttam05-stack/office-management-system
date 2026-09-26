@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
@@ -49,7 +49,6 @@ function Icon({ children }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const location = useLocation();
 
   const sidebarRef = useRef(null);
 
@@ -67,9 +66,6 @@ export default function Dashboard() {
     useState(0);
 
   const [employeeCount, setEmployeeCount] =
-    useState(0);
-
-  const [activeEmployeeCount, setActiveEmployeeCount] =
     useState(0);
 
   const [pendingTasks, setPendingTasks] =
@@ -174,55 +170,31 @@ export default function Dashboard() {
       }
 
       try {
-        const [response, employeeResponse] = await Promise.all([
-          fetch(`${API_URL}/api/expenses`, {
+        const response = await fetch(
+          `${API_URL}/api/expenses`,
+          {
             method: "GET",
             headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
+              Authorization:
+                `Bearer ${token}`,
+              "Content-Type":
+                "application/json",
             },
-          }),
-          fetch(`${API_URL}/api/payroll/employees`, {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }),
-        ]);
-
-        if (employeeResponse.ok) {
-          const employeeData = await employeeResponse.json();
-          const employees = Array.isArray(employeeData)
-            ? employeeData
-            : Array.isArray(employeeData?.employees)
-            ? employeeData.employees
-            : Array.isArray(employeeData?.data)
-            ? employeeData.data
-            : [];
-          if (!cancelled) {
-            setEmployeeCount(employees.length);
-            setActiveEmployeeCount(
-              employees.filter((employee) =>
-                employee?.isActive !== false &&
-                employee?.active !== false
-              ).length
-            );
           }
-        }
+        );
 
-        /* Expenses */
-        const expenseResponse = response;
-
-        if (expenseResponse.status === 401) {
+        if (response.status === 401) {
           return;
         }
 
-        if (!expenseResponse.ok) {
-          throw new Error("Failed to load expenses");
+        if (!response.ok) {
+          throw new Error(
+            "Failed to load expenses"
+          );
         }
 
-        const data = await expenseResponse.json();
+        const data =
+          await response.json();
 
         if (cancelled) return;
 
@@ -313,10 +285,6 @@ export default function Dashboard() {
   function goTo(path) {
     setSidebarOpen(false);
     navigate(path);
-  }
-
-  function isActive(path) {
-    return location.pathname === path || location.pathname.startsWith(`${path}/`);
   }
 
   /* =======================================================
@@ -466,43 +434,6 @@ export default function Dashboard() {
             <button
               type="button"
               className="side-item"
-              onClick={() => goTo("/accounting")}
-            >
-              <Icon>₹</Icon>
-              <span className="side-label">Accounts</span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() => goTo("/inventory/raw-material-purchase")}
-            >
-              <Icon>▣</Icon>
-              <span className="side-label">Raw Material Purchase</span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() => goTo("/inventory/masters")}
-            >
-              <Icon>⚙</Icon>
-              <span className="side-label">Inventory Masters</span>
-            </button>
-
-            <button type="button" className="side-item" onClick={() => goTo("/inventory")}>
-              <Icon>▦</Icon><span className="side-label">Inventory / Manufacturing</span>
-            </button>
-            <button type="button" className="side-item" onClick={() => goTo("/sales")}>
-              <Icon>↗</Icon><span className="side-label">Sales</span>
-            </button>
-            <button type="button" className="side-item" onClick={() => goTo("/gst")}>
-              <Icon>GST</Icon><span className="side-label">GST / Tax</span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
               onClick={() =>
                 goTo("/approvals")
               }
@@ -521,23 +452,47 @@ export default function Dashboard() {
             ACCOUNTS
         ================================================= */}
 
-        <div className="sidebar-section accounts-section">
-          <div className="sidebar-heading">ACCOUNTS</div>
-          <div className="accounts-panel">
+        <div className="sidebar-section">
+          <div className="sidebar-heading">
+            ACCOUNTS
+          </div>
+
+          <div className="sidebar-nav">
             <button
               type="button"
-              className={`side-item account-main ${isActive("/accounting") ? "active" : ""}`}
-              onClick={() => goTo("/accounting")}
+              className="side-item"
+              onClick={() => goTo("/accounts/masters?tab=group")}
             >
-              <Icon>₹</Icon>
-              <span className="side-label">Accounts</span>
-              <span className="account-arrow">→</span>
+              <Icon>▤</Icon>
+              <span className="side-label">Groups</span>
             </button>
-            <div className="account-submenu">
-              <button type="button" onClick={() => goTo("/accounting")}>Groups &amp; Ledgers</button>
-              <button type="button" onClick={() => goTo("/accounting")}>Voucher Entry</button>
-              <button type="button" onClick={() => goTo("/accounting")}>Day Book</button>
-            </div>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() => goTo("/accounts/masters?tab=ledger")}
+            >
+              <Icon>▣</Icon>
+              <span className="side-label">Ledgers</span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() => goTo("/accounts/masters?tab=location")}
+            >
+              <Icon>⌖</Icon>
+              <span className="side-label">Location Master</span>
+            </button>
+
+            <button
+              type="button"
+              className="side-item"
+              onClick={() => goTo("/accounts/masters?tab=product")}
+            >
+              <Icon>▦</Icon>
+              <span className="side-label">Product Master</span>
+            </button>
           </div>
         </div>
 
@@ -993,7 +948,7 @@ export default function Dashboard() {
               </strong>
 
               <small>
-                {activeEmployeeCount} Active employees
+                Active employees
               </small>
 
             </div>
@@ -1173,24 +1128,6 @@ export default function Dashboard() {
               </span>
             </div>
 
-            {/* Shift Management */}
-
-            <div
-              className="module-card clickable"
-              onClick={() => goTo("/shifts")}
-            >
-              <div className="module-icon shift">
-                ◷
-              </div>
-
-              <div>
-                <h3>Shift Management</h3>
-                <p>Create and manage staff shifts</p>
-              </div>
-
-              <span className="card-arrow">→</span>
-            </div>
-
             {/* Leave */}
 
             <div
@@ -1349,13 +1286,9 @@ export default function Dashboard() {
 
             </div>
 
-            <button
-              type="button"
-              className="preview-badge preview-link"
-              onClick={() => goTo("/attendance")}
-            >
-              Open Attendance
-            </button>
+            <span className="preview-badge">
+              Coming Soon
+            </span>
 
           </div>
 
@@ -1413,17 +1346,6 @@ export default function Dashboard() {
                 </span>
               </div>
 
-            </div>
-
-            <div
-              className="preview-box preview-clickable"
-              onClick={() => goTo("/shifts")}
-            >
-              <div className="preview-icon shift">◷</div>
-              <div>
-                <strong>Shift Management</strong>
-                <span>Staff shift setup</span>
-              </div>
             </div>
 
             <div className="preview-box">
@@ -1646,9 +1568,9 @@ export default function Dashboard() {
           left: 0;
           bottom: 0;
 
-          width: 300px;
+          width: 282px;
 
-          background: linear-gradient(180deg, #ffffff 0%, #fbfdff 72%, #f6faff 100%);
+          background: #ffffff;
 
           box-shadow:
             10px 0 32px
@@ -1672,7 +1594,7 @@ export default function Dashboard() {
           flex-direction: column;
 
           padding:
-            14px 12px 12px;
+            12px;
 
           overflow-y: auto;
 
@@ -1707,7 +1629,7 @@ export default function Dashboard() {
         ================================= */
 
         .sidebar-top {
-          min-height: 72px;
+          min-height: 58px;
 
           display: flex;
 
@@ -1720,9 +1642,7 @@ export default function Dashboard() {
             3px 7px 12px;
 
           border-bottom:
-            1px solid #e5edf6;
-          background: linear-gradient(135deg, #f7fbff, #ffffff);
-          border-radius: 14px;
+            1px solid #eaecf0;
 
           flex-shrink: 0;
         }
@@ -1730,9 +1650,9 @@ export default function Dashboard() {
         .sidebar-brand {
           color: #173b68;
 
-          font-size: 17px;
-          font-weight: 850;
-          letter-spacing: -.2px;
+          font-size: 16px;
+
+          font-weight: 800;
         }
 
         .sidebar-subtitle {
@@ -1766,15 +1686,16 @@ export default function Dashboard() {
         ================================= */
 
         .sidebar-section {
-          margin-top: 17px;
+          margin-top: 13px;
         }
 
         .sidebar-heading {
           padding:
             0 7px 6px;
 
-          font-size: 10px;
-          font-weight: 850;
+          font-size: 9px;
+
+          font-weight: 800;
 
           letter-spacing: .9px;
 
@@ -1790,7 +1711,7 @@ export default function Dashboard() {
         .side-item {
           width: 100%;
 
-          min-height: 42px;
+          min-height: 39px;
 
           border: none;
 
@@ -1800,9 +1721,9 @@ export default function Dashboard() {
           color: #667085;
 
           padding:
-            6px 9px;
+            6px 7px;
 
-          border-radius: 11px;
+          border-radius: 9px;
 
           display: flex;
 
@@ -1820,21 +1741,15 @@ export default function Dashboard() {
 
           transition:
             background .15s ease,
-            color .15s ease,
-            transform .15s ease,
-            box-shadow .15s ease;
+            color .15s ease;
         }
 
         .side-item:hover {
-          background: #edf5ff;
-          color: #123f70;
-          transform: translateX(2px);
-        }
+          background:
+            #eef4fb;
 
-        .side-item.active {
-          background: linear-gradient(90deg, #e7f1ff 0%, #f3f8ff 100%);
-          color: #0f4c81;
-          box-shadow: inset 3px 0 0 #2474c6;
+          color:
+            #173b68;
         }
 
         .side-icon {
@@ -1869,53 +1784,6 @@ export default function Dashboard() {
         .admin-item {
           background:
             #f8fbff;
-        }
-
-        .accounts-panel {
-          padding: 6px;
-          border: 1px solid #e4edf8;
-          border-radius: 14px;
-          background: linear-gradient(145deg, #f8fbff, #ffffff);
-          box-shadow: 0 5px 16px rgba(31, 84, 135, .06);
-        }
-
-        .account-main {
-          background: linear-gradient(135deg, #e9f3ff, #f7fbff);
-          font-weight: 750;
-        }
-
-        .account-arrow {
-          font-size: 14px;
-          opacity: .55;
-        }
-
-        .account-submenu {
-          display: grid;
-          gap: 2px;
-          padding: 5px 4px 2px 39px;
-        }
-
-        .account-submenu button {
-          border: 0;
-          background: transparent;
-          color: #738095;
-          text-align: left;
-          padding: 7px 8px;
-          border-radius: 8px;
-          font-size: 11px;
-          font-weight: 650;
-          cursor: pointer;
-        }
-
-        .account-submenu button::before {
-          content: "•";
-          margin-right: 7px;
-          color: #4b8ac7;
-        }
-
-        .account-submenu button:hover {
-          background: #eef5fc;
-          color: #164b7b;
         }
 
         /* ================================
@@ -2593,29 +2461,6 @@ export default function Dashboard() {
 
           color:
             #5148a8;
-        }
-
-        .preview-link {
-          border: none;
-          cursor: pointer;
-          background: #eef4fb;
-          color: #245a96;
-        }
-
-        .preview-clickable {
-          cursor: pointer;
-          transition: transform .18s ease, box-shadow .18s ease;
-        }
-
-        .preview-clickable:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 6px 16px rgba(36,90,150,.08);
-        }
-
-        .preview-icon.shift,
-        .module-icon.shift {
-          background: #eef4fb;
-          color: #245a96;
         }
 
         .preview-box strong {
