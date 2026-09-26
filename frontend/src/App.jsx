@@ -9,8 +9,8 @@ import {
 import Login from "./pages/Login.jsx";
 import Expense from "./pages/Expense.jsx";
 import Users from "./pages/Users.jsx";
+import Payroll from "./pages/Payroll.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
-import { startSessionManager } from "./lib/sessionManager.js";
 
 import Employees from "./pages/Employees.jsx";
 import Attendance from "./pages/Attendance.jsx";
@@ -21,48 +21,35 @@ import ShiftManagement from "./pages/ShiftManagement.jsx";
 import PayrollApprovals from "./pages/PayrollApprovals.jsx";
 import Reports from "./pages/Reports.jsx";
 
-startSessionManager();
+import AccountsWorkspace from "./pages/AccountsWorkspace.jsx";
 
-/* =========================================================
-   LAZY LOADED PAGES
-========================================================= */
+import { startSessionManager } from "./lib/sessionManager.js";
+
+startSessionManager();
 
 const Dashboard = lazy(
   () => import("./pages/Dashboard.jsx")
 );
 
-/* =========================================================
-   INVENTORY MODULE
-========================================================= */
-
-/* Main Inventory */
-const Inventory = lazy(
-  () => import("./pages/Inventory.jsx")
-);
-
-/* Integrated Accounts Workspace */
-const AccountsWorkspace = lazy(
-  () => import("./pages/AccountsWorkspace.jsx")
-);
-
-/* Inventory Master */
-const InventoryMasters = lazy(
-  () => import("./pages/InventoryMasters.jsx")
-);
-
-/* Raw Material Purchase */
 const RawMaterialPurchase = lazy(
   () => import("./pages/RawMaterialPurchase.jsx")
 );
 
-/* Manufacturing */
 const Manufacturing = lazy(
   () => import("./pages/Manufacturing.jsx")
 );
 
-/* =========================================================
-   LOADING SCREEN
-========================================================= */
+const InventoryMasters = lazy(
+  () => import("./pages/InventoryMasters.jsx")
+);
+
+const Inventory = lazy(
+  () => import("./pages/Inventory.jsx")
+);
+
+const Accounting = lazy(
+  () => import("./pages/Accounting.jsx")
+);
 
 function LoadingScreen() {
   return (
@@ -71,18 +58,18 @@ function LoadingScreen() {
 
         <div className="loading-spinner" />
 
-        <h3>Office Management</h3>
+        <h3>
+          Office Management
+        </h3>
 
-        <p>Loading...</p>
+        <p>
+          Loading...
+        </p>
 
       </div>
     </div>
   );
 }
-
-/* =========================================================
-   APPLICATION
-========================================================= */
 
 export default function App() {
   return (
@@ -92,9 +79,9 @@ export default function App() {
 
         <Routes>
 
-          {/* =====================================================
+          {/* =========================
               ROOT
-          ===================================================== */}
+          ========================= */}
 
           <Route
             path="/"
@@ -106,120 +93,78 @@ export default function App() {
             }
           />
 
-          {/* =====================================================
+          {/* =========================
               LOGIN
-          ===================================================== */}
+          ========================= */}
 
           <Route
             path="/login"
             element={<Login />}
           />
 
-          {/* =====================================================
+          {/* =========================
               PROTECTED ROUTES
-          ===================================================== */}
+          ========================= */}
 
           <Route element={<ProtectedRoute />}>
 
-            {/* =================================================
-                DASHBOARD
-            ================================================= */}
+            {/* Dashboard */}
 
             <Route
               path="/dashboard"
               element={<Dashboard />}
             />
 
-            {/* =================================================
-                ACCOUNTS WORKSPACE
-            ================================================= */}
-
-            <Route
-              path="/accounts"
-              element={<AccountsWorkspace />}
-            />
-
-            {/* =================================================
-                EXPENSES
-            ================================================= */}
+            {/* Expenses */}
 
             <Route
               path="/expenses"
               element={<Expense />}
             />
 
-            {/* =================================================
-                INVENTORY
-            ================================================= */}
+            {/* Payroll */}
 
-            {/* Main Inventory */}
             <Route
-              path="/inventory"
-              element={<Inventory />}
+              path="/payroll"
+              element={<Payroll />}
             />
 
-            {/* Inventory Master */}
-            <Route
-              path="/inventory/masters"
-              element={<InventoryMasters />}
-            />
-
-            {/* Raw Material Purchase */}
-            <Route
-              path="/inventory/raw-material-purchase"
-              element={<RawMaterialPurchase />}
-            />
-
-            {/* Manufacturing */}
-            <Route
-              path="/manufacturing"
-              element={<Manufacturing />}
-            />
-
-            {/* Sales */}
-            <Route
-              path="/sales"
-              element={<Manufacturing />}
-            />
-
-            {/* GST */}
-            <Route
-              path="/gst"
-              element={<Manufacturing />}
-            />
-
-            {/* =================================================
-                HR MODULE
-            ================================================= */}
+            {/* Employees */}
 
             <Route
               path="/employees"
               element={<Employees />}
             />
 
+            {/* Attendance */}
+
             <Route
               path="/attendance"
               element={<Attendance />}
             />
+
+            {/* Leave */}
 
             <Route
               path="/leave"
               element={<LeaveManagement />}
             />
 
+            {/* Holidays */}
+
             <Route
               path="/holidays"
               element={<HolidayCalendar />}
             />
+
+            {/* Shifts */}
 
             <Route
               path="/shifts"
               element={<ShiftManagement />}
             />
 
-            {/* =================================================
-                SALARY / PAYROLL
-            ================================================= */}
+            {/* Salary */}
 
             <Route
               path="/salary"
@@ -227,13 +172,37 @@ export default function App() {
             />
 
             <Route
-              path="/payroll"
+              path="/salary/slips"
               element={<Salary />}
             />
+
+            {/* Payroll Approvals */}
 
             <Route
               path="/payroll/approvals"
               element={<PayrollApprovals />}
+            />
+
+            {/* Reports */}
+
+            <Route
+              path="/reports"
+              element={<Reports />}
+            />
+
+            <Route
+              path="/reports/attendance"
+              element={<Reports />}
+            />
+
+            <Route
+              path="/reports/leave"
+              element={<Reports />}
+            />
+
+            <Route
+              path="/reports/salary"
+              element={<Reports />}
             />
 
             <Route
@@ -241,16 +210,100 @@ export default function App() {
               element={<Reports />}
             />
 
+            {/* =========================
+                INVENTORY
+            ========================= */}
+
             <Route
-              path="/salary/slips"
-              element={<Reports />}
+              path="/inventory"
+              element={<Inventory />}
+            />
+
+            <Route
+              path="/inventory/masters"
+              element={<InventoryMasters />}
+            />
+
+            <Route
+              path="/inventory/raw-material-purchase"
+              element={<RawMaterialPurchase />}
+            />
+
+            {/* =========================
+                MANUFACTURING / SALES
+            ========================= */}
+
+            <Route
+              path="/manufacturing"
+              element={<Manufacturing />}
+            />
+
+            <Route
+              path="/sales"
+              element={<Manufacturing />}
+            />
+
+            <Route
+              path="/gst"
+              element={<Manufacturing />}
+            />
+
+            {/* =========================
+                ⭐ ACCOUNTS WORKSPACE
+            ========================= */}
+
+            <Route
+              path="/accounts"
+              element={<AccountsWorkspace />}
+            />
+
+            {/* Backward compatible */}
+
+            <Route
+              path="/accounting"
+              element={<AccountsWorkspace />}
+            />
+
+            {/* Direct Accounting page */}
+
+            <Route
+              path="/accounting/direct"
+              element={<Accounting />}
+            />
+
+            {/* =========================
+                APPROVALS
+            ========================= */}
+
+            <Route
+              path="/approvals"
+              element={
+                <Navigate
+                  to="/payroll/approvals"
+                  replace
+                />
+              }
+            />
+
+            {/* =========================
+                SECURITY
+            ========================= */}
+
+            <Route
+              path="/security"
+              element={
+                <Navigate
+                  to="/users"
+                  replace
+                />
+              }
             />
 
           </Route>
 
-          {/* =====================================================
+          {/* =========================
               ADMIN ONLY
-          ===================================================== */}
+          ========================= */}
 
           <Route
             element={
@@ -267,61 +320,9 @@ export default function App() {
 
           </Route>
 
-          {/* =====================================================
-              APPROVALS
-          ===================================================== */}
-
-          <Route
-            path="/approvals"
-            element={
-              <Navigate
-                to="/payroll/approvals"
-                replace
-              />
-            }
-          />
-
-          {/* =====================================================
-              REPORTS
-          ===================================================== */}
-
-          <Route
-            path="/reports"
-            element={<Reports />}
-          />
-
-          <Route
-            path="/reports/attendance"
-            element={<Reports />}
-          />
-
-          <Route
-            path="/reports/leave"
-            element={<Reports />}
-          />
-
-          <Route
-            path="/reports/salary"
-            element={<Reports />}
-          />
-
-          {/* =====================================================
-              SECURITY
-          ===================================================== */}
-
-          <Route
-            path="/security"
-            element={
-              <Navigate
-                to="/dashboard"
-                replace
-              />
-            }
-          />
-
-          {/* =====================================================
+          {/* =========================
               FALLBACK
-          ===================================================== */}
+          ========================= */}
 
           <Route
             path="*"
@@ -337,11 +338,8 @@ export default function App() {
 
       </Suspense>
 
-      {/* =========================================================
-          LOADING SCREEN CSS
-      ========================================================= */}
-
       <style>{`
+
         .app-loading {
           min-height: 100vh;
           display: flex;
@@ -357,39 +355,44 @@ export default function App() {
           background: #ffffff;
           border-radius: 16px;
           text-align: center;
-          box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
+          box-shadow:
+            0 10px 35px rgba(0,0,0,.08);
         }
 
         .loading-spinner {
           width: 38px;
           height: 38px;
           margin: 0 auto 18px;
-          border: 4px solid #e5e7eb;
-          border-top-color: #245a96;
+
+          border:
+            4px solid #e5e7eb;
+
+          border-top-color:
+            #245a96;
+
           border-radius: 50%;
-          animation: officeAppSpin 0.8s linear infinite;
+
+          animation:
+            appSpin .8s linear infinite;
         }
 
         .loading-card h3 {
           margin: 0;
-          color: #172b4d;
+          color: #173b68;
         }
 
         .loading-card p {
-          margin: 7px 0 0;
+          margin: 8px 0 0;
           color: #667085;
           font-size: 13px;
         }
 
-        @keyframes officeAppSpin {
-          from {
-            transform: rotate(0deg);
-          }
-
+        @keyframes appSpin {
           to {
             transform: rotate(360deg);
           }
         }
+
       `}</style>
 
     </BrowserRouter>
