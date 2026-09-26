@@ -1,3 +1,4 @@
+```jsx
 import React, { lazy, Suspense } from "react";
 import {
   BrowserRouter,
@@ -40,6 +41,11 @@ const Inventory = lazy(
   () => import("./pages/Inventory.jsx")
 );
 
+/* Integrated Accounts Workspace */
+const AccountsWorkspace = lazy(
+  () => import("./pages/AccountsWorkspace.jsx")
+);
+
 /* Inventory Master */
 const InventoryMasters = lazy(
   () => import("./pages/InventoryMasters.jsx")
@@ -53,11 +59,6 @@ const RawMaterialPurchase = lazy(
 /* Manufacturing */
 const Manufacturing = lazy(
   () => import("./pages/Manufacturing.jsx")
-);
-
-/* Accounting */
-const Accounting = lazy(
-  () => import("./pages/Accounting.jsx")
 );
 
 /* =========================================================
@@ -131,21 +132,21 @@ export default function App() {
             />
 
             {/* =================================================
+                ACCOUNTS WORKSPACE
+            ================================================= */}
+
+            <Route
+              path="/accounts"
+              element={<AccountsWorkspace />}
+            />
+
+            {/* =================================================
                 EXPENSES
             ================================================= */}
 
             <Route
               path="/expenses"
               element={<Expense />}
-            />
-
-            {/* =================================================
-                ACCOUNTS
-            ================================================= */}
-
-            <Route
-              path="/accounting"
-              element={<Accounting />}
             />
 
             {/* =================================================
@@ -395,3 +396,17 @@ export default function App() {
     </BrowserRouter>
   );
 }
+```
+
+### Inventory routes now
+
+```text
+/inventory
+/inventory/masters
+/inventory/raw-material-purchase
+/manufacturing
+/sales
+/gst
+```
+
+So **Inventory** and **Inventory Master** are completely separate pages, while still working inside the same Inventory module.
