@@ -1,77 +1,489 @@
-import React, { useMemo, useState } from "react";
+import React from "react";
 import Accounting from "./Accounting.jsx";
-import InventoryMasters from "./InventoryMasters.jsx";
-import RawMaterialPurchase from "./RawMaterialPurchase.jsx";
-import Inventory from "./Inventory.jsx";
-import Manufacturing from "./Manufacturing.jsx";
-
-const menu = [
-  { id: "accounts", label: "Accounts", icon: "▣", description: "Groups, Ledgers & Vouchers", component: Accounting },
-  { id: "masters", label: "Masters", icon: "◈", description: "Party, Supplier, Product & Location", component: InventoryMasters },
-  { id: "purchase", label: "Purchase", icon: "↓", description: "Purchase Entry & Stock In", component: RawMaterialPurchase },
-  { id: "sales", label: "Sales", icon: "↑", description: "Sales Entry & Stock Out", component: Manufacturing },
-  { id: "inventory", label: "Inventory", icon: "▦", description: "Stock, Job Order & Inventory", component: Inventory },
-];
 
 export default function AccountsWorkspace() {
-  const [active, setActive] = useState("accounts");
-  const current = useMemo(() => menu.find((x) => x.id === active) || menu[0], [active]);
-  const Component = current.component;
-
   return (
     <div className="accounts-workspace">
       <style>{`
-        .accounts-workspace{min-height:100vh;background:#f5f7fb;color:#172b4d;font-family:Arial,sans-serif}
-        .accounts-top{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #e5eaf1;box-shadow:0 2px 12px rgba(23,43,77,.05)}
-        .accounts-top-inner{max-width:1500px;margin:0 auto;padding:18px 24px 12px}
-        .accounts-title{display:flex;align-items:center;justify-content:space-between;gap:18px}
-        .accounts-title h1{margin:0;font-size:25px;letter-spacing:-.3px}
-        .accounts-title p{margin:5px 0 0;color:#6b778c;font-size:13px}
-        .accounts-badge{background:#eef5ff;color:#245a96;border:1px solid #d8e7fb;border-radius:999px;padding:8px 13px;font-size:12px;font-weight:700}
-        .accounts-nav{display:flex;gap:8px;overflow:auto;padding-top:14px;scrollbar-width:none}
-        .accounts-nav::-webkit-scrollbar{display:none}
-        .accounts-nav button{border:1px solid #e1e7ef;background:#fff;color:#44546f;border-radius:11px;padding:10px 14px;min-width:150px;text-align:left;cursor:pointer;transition:.15s;box-shadow:0 2px 8px rgba(23,43,77,.03)}
-        .accounts-nav button:hover{border-color:#b9cee8;transform:translateY(-1px)}
-        .accounts-nav button.active{background:#245a96;color:#fff;border-color:#245a96;box-shadow:0 5px 14px rgba(36,90,150,.2)}
-        .accounts-nav .nav-line{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
-        .accounts-nav .nav-icon{font-size:16px}
-        .accounts-nav small{display:block;margin-top:4px;opacity:.72;font-size:10px;line-height:1.25}
-        .accounts-content{max-width:1500px;margin:0 auto;padding:0}
-        .accounts-sectionbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:#f5f7fb;border-bottom:1px solid #e8edf3}
-        .accounts-sectionbar strong{font-size:13px}
-        .accounts-sectionbar span{font-size:11px;color:#6b778c}
-        @media(max-width:700px){.accounts-top-inner{padding:14px}.accounts-title h1{font-size:21px}.accounts-nav button{min-width:135px}.accounts-content{overflow:hidden}}
+        .accounts-workspace {
+          min-height: 100vh;
+          background: #f5f7fb;
+          color: #172b4d;
+          font-family: Arial, sans-serif;
+        }
+
+        .accounts-top {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background: #ffffff;
+          border-bottom: 1px solid #e5eaf1;
+          box-shadow: 0 2px 12px rgba(23,43,77,.05);
+        }
+
+        .accounts-top-inner {
+          max-width: 1500px;
+          margin: 0 auto;
+          padding: 16px 24px 12px;
+        }
+
+        .accounts-title {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+        }
+
+        .accounts-title-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .accounts-icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 10px;
+          display: grid;
+          place-items: center;
+          background: #245a96;
+          color: #fff;
+          font-size: 21px;
+          font-weight: 800;
+        }
+
+        .accounts-title h1 {
+          margin: 0;
+          font-size: 24px;
+          letter-spacing: -.3px;
+        }
+
+        .accounts-title p {
+          margin: 4px 0 0;
+          color: #6b778c;
+          font-size: 12px;
+        }
+
+        .accounts-badge {
+          background: #eef5ff;
+          color: #245a96;
+          border: 1px solid #d8e7fb;
+          border-radius: 999px;
+          padding: 7px 12px;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .accounts-keyboard {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 7px;
+          margin-top: 13px;
+          padding: 9px 11px;
+          background: #f8fafc;
+          border: 1px solid #e6ebf2;
+          border-radius: 9px;
+        }
+
+        .keyboard-item {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          color: #68788d;
+          font-size: 10px;
+          font-weight: 600;
+        }
+
+        .keyboard-item kbd {
+          min-width: 27px;
+          padding: 4px 6px;
+          text-align: center;
+          border: 1px solid #cfd8e3;
+          border-bottom-width: 2px;
+          border-radius: 5px;
+          background: #fff;
+          color: #34495e;
+          font-family: Arial, sans-serif;
+          font-size: 10px;
+          font-weight: 800;
+          box-shadow: 0 1px 2px rgba(0,0,0,.04);
+        }
+
+        .accounts-sectionbar {
+          max-width: 1500px;
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          padding: 11px 24px;
+          background: #f5f7fb;
+          border-bottom: 1px solid #e8edf3;
+        }
+
+        .accounts-sectionbar strong {
+          font-size: 13px;
+          color: #173957;
+        }
+
+        .accounts-sectionbar span {
+          font-size: 10px;
+          color: #78889a;
+        }
+
+        .accounts-content {
+          max-width: 1500px;
+          margin: 0 auto;
+          padding: 0;
+        }
+
+        @media(max-width:700px) {
+          .accounts-top-inner {
+            padding: 12px;
+          }
+
+          .accounts-title h1 {
+            font-size: 20px;
+          }
+
+          .accounts-title p {
+            font-size: 10px;
+          }
+
+          .accounts-badge {
+            display: none;
+          }
+
+          .accounts-keyboard {
+            gap: 5px;
+          }
+
+          .accounts-sectionbar {
+            padding: 10px 12px;
+          }
+
+          .accounts-sectionbar span {
+            display: none;
+          }
+        }
       `}</style>
 
       <header className="accounts-top">
         <div className="accounts-top-inner">
+
           <div className="accounts-title">
-            <div>
-              <h1>Accounts</h1>
-              <p>Integrated accounting, purchase, sales, inventory and masters</p>
+            <div className="accounts-title-left">
+              <div className="accounts-icon">₹</div>
+
+              <div>
+                <h1>Accounts</h1>
+                <p>Tally-style keyboard-first accounting</p>
+              </div>
             </div>
-            <div className="accounts-badge">ACCOUNTING WORKSPACE</div>
+
+            <div className="accounts-badge">
+              ACCOUNTS
+            </div>
           </div>
 
-          <nav className="accounts-nav" aria-label="Accounts modules">
-            {menu.map((item) => (
-              <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setActive(item.id)}>
-                <div className="nav-line"><span className="nav-icon">{item.icon}</span>{item.label}</div>
-                <small>{item.description}</small>
-              </button>
-            ))}
-          </nav>
+          <div className="accounts-keyboard">
+
+            <div className="keyboard-item">
+              <kbd>F4</kbd>
+              Groups
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>F5</kbd>
+              Ledgers
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>F6</kbd>
+              Voucher
+            </div>
+
+            <div className="keyboard-item">
+           import React from "react";
+import Accounting from "./Accounting.jsx";
+
+export default function AccountsWorkspace() {
+  return (
+    <div className="accounts-workspace">
+      <style>{`
+        .accounts-workspace {
+          min-height: 100vh;
+          background: #f5f7fb;
+          color: #172b4d;
+          font-family: Arial, sans-serif;
+        }
+
+        .accounts-top {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background: #ffffff;
+          border-bottom: 1px solid #e5eaf1;
+          box-shadow: 0 2px 12px rgba(23,43,77,.05);
+        }
+
+        .accounts-top-inner {
+          max-width: 1500px;
+          margin: 0 auto;
+          padding: 16px 24px 12px;
+        }
+
+        .accounts-title {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+        }
+
+        .accounts-title-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .accounts-icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 10px;
+          display: grid;
+          place-items: center;
+          background: #245a96;
+          color: #fff;
+          font-size: 21px;
+          font-weight: 800;
+        }
+
+        .accounts-title h1 {
+          margin: 0;
+          font-size: 24px;
+          letter-spacing: -.3px;
+        }
+
+        .accounts-title p {
+          margin: 4px 0 0;
+          color: #6b778c;
+          font-size: 12px;
+        }
+
+        .accounts-badge {
+          background: #eef5ff;
+          color: #245a96;
+          border: 1px solid #d8e7fb;
+          border-radius: 999px;
+          padding: 7px 12px;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .accounts-keyboard {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 7px;
+          margin-top: 13px;
+          padding: 9px 11px;
+          background: #f8fafc;
+          border: 1px solid #e6ebf2;
+          border-radius: 9px;
+        }
+
+        .keyboard-item {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          color: #68788d;
+          font-size: 10px;
+          font-weight: 600;
+        }
+
+        .keyboard-item kbd {
+          min-width: 27px;
+          padding: 4px 6px;
+          text-align: center;
+          border: 1px solid #cfd8e3;
+          border-bottom-width: 2px;
+          border-radius: 5px;
+          background: #fff;
+          color: #34495e;
+          font-family: Arial, sans-serif;
+          font-size: 10px;
+          font-weight: 800;
+          box-shadow: 0 1px 2px rgba(0,0,0,.04);
+        }
+
+        .accounts-sectionbar {
+          max-width: 1500px;
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          padding: 11px 24px;
+          background: #f5f7fb;
+          border-bottom: 1px solid #e8edf3;
+        }
+
+        .accounts-sectionbar strong {
+          font-size: 13px;
+          color: #173957;
+        }
+
+        .accounts-sectionbar span {
+          font-size: 10px;
+          color: #78889a;
+        }
+
+        .accounts-content {
+          max-width: 1500px;
+          margin: 0 auto;
+          padding: 0;
+        }
+
+        @media(max-width:700px) {
+          .accounts-top-inner {
+            padding: 12px;
+          }
+
+          .accounts-title h1 {
+            font-size: 20px;
+          }
+
+          .accounts-title p {
+            font-size: 10px;
+          }
+
+          .accounts-badge {
+            display: none;
+          }
+
+          .accounts-keyboard {
+            gap: 5px;
+          }
+
+          .accounts-sectionbar {
+            padding: 10px 12px;
+          }
+
+          .accounts-sectionbar span {
+            display: none;
+          }
+        }
+      `}</style>
+
+      <header className="accounts-top">
+        <div className="accounts-top-inner">
+
+          <div className="accounts-title">
+            <div className="accounts-title-left">
+              <div className="accounts-icon">₹</div>
+
+              <div>
+                <h1>Accounts</h1>
+                <p>Tally-style keyboard-first accounting</p>
+              </div>
+            </div>
+
+            <div className="accounts-badge">
+              ACCOUNTS
+            </div>
+          </div>
+
+          <div className="accounts-keyboard">
+
+            <div className="keyboard-item">
+              <kbd>F4</kbd>
+              Groups
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>F5</kbd>
+              Ledgers
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>F6</kbd>
+              Voucher
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>F7</kbd>
+              Register
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>Alt+C</kbd>
+              Create
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>Enter</kbd>
+              Next
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>Esc</kbd>
+              Clear
+            </div>
+
+          </div>
+
         </div>
       </header>
 
       <div className="accounts-sectionbar">
-        <strong>{current.label}</strong>
-        <span>{current.description}</span>
+        <strong>ACCOUNTING</strong>
+        <span>
+          Groups • Ledgers • Voucher Entry • Voucher Register
+        </span>
       </div>
 
       <main className="accounts-content">
-        <Component />
+        <Accounting />
       </main>
+
+    </div>
+  );
+}   <kbd>F7</kbd>
+              Register
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>Alt+C</kbd>
+              Create
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>Enter</kbd>
+              Next
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>Esc</kbd>
+              Clear
+            </div>
+
+          </div>
+
+        </div>
+      </header>
+
+      <div className="accounts-sectionbar">
+        <strong>ACCOUNTING</strong>
+        <span>
+          Groups • Ledgers • Voucher Entry • Voucher Register
+        </span>
+      </div>
+
+      <main className="accounts-content">
+        <Accounting />
+      </main>
+
     </div>
   );
 }
