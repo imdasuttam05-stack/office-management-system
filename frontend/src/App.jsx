@@ -102,7 +102,7 @@ export default function App() {
 
             {/* Accounts Masters */}
             <Route
-              path="/accounts/masters"
+              path="/accounts"
               element={<AccountsMasters />}
             />
 
