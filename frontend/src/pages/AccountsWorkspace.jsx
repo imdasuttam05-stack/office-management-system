@@ -18,7 +18,7 @@ export default function AccountsWorkspace() {
           z-index: 20;
           background: #ffffff;
           border-bottom: 1px solid #e5eaf1;
-          box-shadow: 0 2px 12px rgba(23,43,77,.05);
+          box-shadow: 0 2px 12px rgba(23, 43, 77, 0.05);
         }
 
         .accounts-top-inner {
@@ -47,7 +47,7 @@ export default function AccountsWorkspace() {
           display: grid;
           place-items: center;
           background: #245a96;
-          color: #fff;
+          color: #ffffff;
           font-size: 21px;
           font-weight: 800;
         }
@@ -55,7 +55,8 @@ export default function AccountsWorkspace() {
         .accounts-title h1 {
           margin: 0;
           font-size: 24px;
-          letter-spacing: -.3px;
+          line-height: 1.2;
+          letter-spacing: -0.3px;
         }
 
         .accounts-title p {
@@ -72,6 +73,7 @@ export default function AccountsWorkspace() {
           padding: 7px 12px;
           font-size: 11px;
           font-weight: 700;
+          white-space: nowrap;
         }
 
         .accounts-keyboard {
@@ -102,12 +104,12 @@ export default function AccountsWorkspace() {
           border: 1px solid #cfd8e3;
           border-bottom-width: 2px;
           border-radius: 5px;
-          background: #fff;
+          background: #ffffff;
           color: #34495e;
           font-family: Arial, sans-serif;
           font-size: 10px;
           font-weight: 800;
-          box-shadow: 0 1px 2px rgba(0,0,0,.04);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
         }
 
         .accounts-sectionbar {
@@ -138,7 +140,7 @@ export default function AccountsWorkspace() {
           padding: 0;
         }
 
-        @media(max-width:700px) {
+        @media (max-width: 700px) {
           .accounts-top-inner {
             padding: 12px;
           }
@@ -181,7 +183,9 @@ export default function AccountsWorkspace() {
 
               <div>
                 <h1>Accounts</h1>
-                <p>Tally-style keyboard-first accounting</p>
+                <p>
+                  Tally-style keyboard-first accounting
+                </p>
               </div>
 
             </div>
@@ -229,7 +233,6 @@ export default function AccountsWorkspace() {
             </div>
 
           </div>
-
         </div>
       </header>
 
@@ -242,9 +245,10 @@ export default function AccountsWorkspace() {
       </div>
 
       <main className="accounts-content">
-        <Accounting /      </main>
+        <Accounting />
+      </main>
 
     </div>
   );
 }
-            
+        .
