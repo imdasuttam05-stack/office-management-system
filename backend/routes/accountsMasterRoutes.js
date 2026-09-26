@@ -64,6 +64,10 @@ router.post("/", async (req,res) => {
     const body = normalizeBody(req.body);
     if (!body.masterType || !body.name) return res.status(400).json({message:"Master type and name are required."});
 
+    if (body.masterType === "LOCATION" && !String(body.state || "").trim()) {
+      return res.status(400).json({message:"State is required for Location."});
+    }
+
     // Tally-style automatic group assignment for party/supplier.
     if (body.masterType === "PARTY" && !body.under) body.under = "Sundry Debtors";
     if (body.masterType === "SUPPLIER" && !body.under) body.under = "Sundry Creditors";
