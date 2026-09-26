@@ -22,54 +22,56 @@ import PayrollApprovals from "./pages/PayrollApprovals.jsx";
 import Reports from "./pages/Reports.jsx";
 
 import AccountsWorkspace from "./pages/AccountsWorkspace.jsx";
+import AccountsMasters from "./pages/AccountsMasters.jsx";
 
 import { startSessionManager } from "./lib/sessionManager.js";
 
 startSessionManager();
 
-const Dashboard = lazy(
-  () => import("./pages/Dashboard.jsx")
+
+// Lazy loaded pages
+const Dashboard = lazy(() =>
+  import("./pages/Dashboard.jsx")
 );
 
-const RawMaterialPurchase = lazy(
-  () => import("./pages/RawMaterialPurchase.jsx")
+const RawMaterialPurchase = lazy(() =>
+  import("./pages/RawMaterialPurchase.jsx")
 );
 
-const Manufacturing = lazy(
-  () => import("./pages/Manufacturing.jsx")
+const Manufacturing = lazy(() =>
+  import("./pages/Manufacturing.jsx")
 );
 
-const InventoryMasters = lazy(
-  () => import("./pages/InventoryMasters.jsx")
+const InventoryMasters = lazy(() =>
+  import("./pages/InventoryMasters.jsx")
 );
 
-const Inventory = lazy(
-  () => import("./pages/Inventory.jsx")
+const Inventory = lazy(() =>
+  import("./pages/Inventory.jsx")
 );
 
-const Accounting = lazy(
-  () => import("./pages/Accounting.jsx")
+const Accounting = lazy(() =>
+  import("./pages/Accounting.jsx")
 );
 
+
+// Loading screen
 function LoadingScreen() {
   return (
     <div className="app-loading">
       <div className="loading-card">
 
-        <div className="loading-spinner" />
+        <div className="loading-spinner"></div>
 
-        <h3>
-          Office Management
-        </h3>
+        <h3>Office Management</h3>
 
-        <p>
-          Loading...
-        </p>
+        <p>Loading...</p>
 
       </div>
     </div>
   );
 }
+
 
 export default function App() {
   return (
@@ -80,8 +82,8 @@ export default function App() {
         <Routes>
 
           {/* =========================
-              ROOT
-          ========================= */}
+              DEFAULT
+          ========================== */}
 
           <Route
             path="/"
@@ -93,18 +95,20 @@ export default function App() {
             }
           />
 
+
           {/* =========================
               LOGIN
-          ========================= */}
+          ========================== */}
 
           <Route
             path="/login"
             element={<Login />}
           />
 
+
           {/* =========================
               PROTECTED ROUTES
-          ========================= */}
+          ========================== */}
 
           <Route element={<ProtectedRoute />}>
 
@@ -115,12 +119,14 @@ export default function App() {
               element={<Dashboard />}
             />
 
+
             {/* Expenses */}
 
             <Route
               path="/expenses"
               element={<Expense />}
             />
+
 
             {/* Payroll */}
 
@@ -129,42 +135,40 @@ export default function App() {
               element={<Payroll />}
             />
 
-            {/* Employees */}
+
+            {/* =========================
+                HR
+            ========================== */}
 
             <Route
               path="/employees"
               element={<Employees />}
             />
 
-            {/* Attendance */}
-
             <Route
               path="/attendance"
               element={<Attendance />}
             />
-
-            {/* Leave */}
 
             <Route
               path="/leave"
               element={<LeaveManagement />}
             />
 
-            {/* Holidays */}
-
             <Route
               path="/holidays"
               element={<HolidayCalendar />}
             />
-
-            {/* Shifts */}
 
             <Route
               path="/shifts"
               element={<ShiftManagement />}
             />
 
-            {/* Salary */}
+
+            {/* =========================
+                SALARY
+            ========================== */}
 
             <Route
               path="/salary"
@@ -176,14 +180,15 @@ export default function App() {
               element={<Salary />}
             />
 
-            {/* Payroll Approvals */}
-
             <Route
               path="/payroll/approvals"
               element={<PayrollApprovals />}
             />
 
-            {/* Reports */}
+
+            {/* =========================
+                REPORTS
+            ========================== */}
 
             <Route
               path="/reports"
@@ -210,13 +215,14 @@ export default function App() {
               element={<Reports />}
             />
 
+
             {/* =========================
                 INVENTORY
-            ========================= */}
+            ========================== */}
 
             <Route
-              path="/inventory"
-              element={<Inventory />}
+              path="/inventory/raw-material-purchase"
+              element={<RawMaterialPurchase />}
             />
 
             <Route
@@ -225,13 +231,14 @@ export default function App() {
             />
 
             <Route
-              path="/inventory/raw-material-purchase"
-              element={<RawMaterialPurchase />}
+              path="/inventory"
+              element={<Inventory />}
             />
 
+
             {/* =========================
-                MANUFACTURING / SALES
-            ========================= */}
+                MANUFACTURING / SALES / GST
+            ========================== */}
 
             <Route
               path="/manufacturing"
@@ -248,21 +255,23 @@ export default function App() {
               element={<Manufacturing />}
             />
 
-            {/* =========================
-                ⭐ ACCOUNTS WORKSPACE
-            ========================= */}
+
+            {/* =================================================
+                ACCOUNTS WORKSPACE
+            ================================================= */}
 
             <Route
               path="/accounts"
               element={<AccountsWorkspace />}
             />
 
-            {/* Backward compatible */}
+            {/* Alternate Accounts URL */}
 
             <Route
               path="/accounting"
               element={<AccountsWorkspace />}
             />
+
 
             {/* Direct Accounting page */}
 
@@ -271,9 +280,23 @@ export default function App() {
               element={<Accounting />}
             />
 
+
+            {/* =================================================
+                ACCOUNTS MASTERS
+
+                Direct URL:
+                /accounts/masters
+            ================================================= */}
+
+            <Route
+              path="/accounts/masters"
+              element={<AccountsMasters />}
+            />
+
+
             {/* =========================
                 APPROVALS
-            ========================= */}
+            ========================== */}
 
             <Route
               path="/approvals"
@@ -285,9 +308,10 @@ export default function App() {
               }
             />
 
+
             {/* =========================
                 SECURITY
-            ========================= */}
+            ========================== */}
 
             <Route
               path="/security"
@@ -301,9 +325,10 @@ export default function App() {
 
           </Route>
 
+
           {/* =========================
-              ADMIN ONLY
-          ========================= */}
+              ADMIN USERS
+          ========================== */}
 
           <Route
             element={
@@ -320,9 +345,10 @@ export default function App() {
 
           </Route>
 
+
           {/* =========================
               FALLBACK
-          ========================= */}
+          ========================== */}
 
           <Route
             path="*"
@@ -338,31 +364,54 @@ export default function App() {
 
       </Suspense>
 
+
+      {/* =========================
+          GLOBAL LOADING CSS
+      ========================== */}
+
       <style>{`
 
         .app-loading {
           min-height: 100vh;
+
           display: flex;
+
           align-items: center;
+
           justify-content: center;
+
           background: #f5f7fb;
-          font-family: Arial, sans-serif;
+
+          font-family:
+            Arial,
+            sans-serif;
         }
+
 
         .loading-card {
           width: 280px;
+
           padding: 30px 25px;
+
           background: #ffffff;
+
           border-radius: 16px;
+
           text-align: center;
+
           box-shadow:
-            0 10px 35px rgba(0,0,0,.08);
+            0 10px 35px
+            rgba(0, 0, 0, 0.08);
         }
+
 
         .loading-spinner {
           width: 38px;
+
           height: 38px;
-          margin: 0 auto 18px;
+
+          margin:
+            0 auto 18px;
 
           border:
             4px solid #e5e7eb;
@@ -373,24 +422,42 @@ export default function App() {
           border-radius: 50%;
 
           animation:
-            appSpin .8s linear infinite;
+            officeAppSpin
+            0.8s
+            linear
+            infinite;
         }
+
 
         .loading-card h3 {
           margin: 0;
-          color: #173b68;
+
+          color: #172b4d;
         }
 
+
         .loading-card p {
-          margin: 8px 0 0;
+          margin:
+            7px 0 0;
+
           color: #667085;
+
           font-size: 13px;
         }
 
-        @keyframes appSpin {
-          to {
-            transform: rotate(360deg);
+
+        @keyframes officeAppSpin {
+
+          from {
+            transform:
+              rotate(0deg);
           }
+
+          to {
+            transform:
+              rotate(360deg);
+          }
+
         }
 
       `}</style>
