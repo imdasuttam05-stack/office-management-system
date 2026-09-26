@@ -132,6 +132,24 @@ export default function AccountsMasters() {
     setError("");
   }
 
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.altKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        openCreate(type);
+        return;
+      }
+      const map = { F4:"group", F5:"ledger", F6:"party", F7:"supplier", F8:"product", F9:"location" };
+      if (map[e.key]) {
+        e.preventDefault();
+        const nextType = map[e.key];
+        setType(nextType); setMode("list"); setEditing(null); setForm({...blank[nextType]}); setError(""); setMessage("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [type]);
+
   function update(key, value) {
     setForm(f => {
       const next = {...f, [key]:value};
@@ -225,11 +243,12 @@ export default function AccountsMasters() {
 
       <header className="am-head">
         <div className="am-head-row">
-          <div className="am-title"><div className="am-logo">₹</div><div><h1>Accounts Masters</h1><div className="sub">Tally-style Ledger, Party, Product & Location Masters</div></div></div>
+          <div className="am-title"><div className="am-logo">₹</div><div><h1>Accounts Masters</h1><div className="sub">Group, Ledger, Party, Supplier, Product & Location — same master form</div></div></div>
           <button className="btn primary" onClick={()=>openCreate(type)}>+ Create {title}</button>
         </div>
         <div className="shortcuts">
-          <span className="kbd"><b>Alt+C</b>Create</span>
+          <span className="kbd"><b>Alt+C</b>Create current master</span>
+          <span className="kbd"><b>F4–F9</b>Switch master</span>
           <span className="kbd"><b>Enter</b>Next field</span>
           <span className="kbd"><b>Esc</b>Clear focus</span>
         </div>
@@ -237,11 +256,15 @@ export default function AccountsMasters() {
 
       <nav className="am-tabs">
         {[
-          ["ledger","Ledger"],["group","Group"],["party","Party"],["supplier","Supplier"],
-          ["product","Product"],["location","Location"]
-        ].map(([id,label]) =>
+          ["group","Group","F4"],
+          ["ledger","Ledger","F5"],
+          ["party","Party","F6"],
+          ["supplier","Supplier","F7"],
+          ["product","Product","F8"],
+          ["location","Location","F9"]
+        ].map(([id,label,key]) =>
           <button key={id} className={type===id ? "active":""} onClick={()=>{setType(id);setMode("list");setEditing(null);setForm({...blank[id]});setError("");setMessage("");}}>
-            {label}
+            {label} <span style={{fontSize:10,opacity:.7,marginLeft:4}}>{key}</span>
           </button>
         )}
       </nav>
