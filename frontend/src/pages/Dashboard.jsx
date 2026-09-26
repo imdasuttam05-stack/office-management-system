@@ -445,54 +445,20 @@ export default function Dashboard() {
               </span>
             </button>
 
-          </div>
-        </div>
-
-        {/* =================================================
-            ACCOUNTS
-        ================================================= */}
-
-        <div className="sidebar-section">
-          <div className="sidebar-heading">
-            ACCOUNTS
-          </div>
-
-          <div className="sidebar-nav">
             <button
               type="button"
               className="side-item"
-              onClick={() => goTo("/accounts/masters?tab=group")}
+              onClick={() =>
+                goTo("/accounts")
+              }
             >
-              <Icon>▤</Icon>
-              <span className="side-label">Groups</span>
+              <Icon>₹</Icon>
+
+              <span className="side-label">
+                Accounts
+              </span>
             </button>
 
-            <button
-              type="button"
-              className="side-item"
-              onClick={() => goTo("/accounts/masters?tab=ledger")}
-            >
-              <Icon>▣</Icon>
-              <span className="side-label">Ledgers</span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() => goTo("/accounts/masters?tab=location")}
-            >
-              <Icon>⌖</Icon>
-              <span className="side-label">Location Master</span>
-            </button>
-
-            <button
-              type="button"
-              className="side-item"
-              onClick={() => goTo("/accounts/masters?tab=product")}
-            >
-              <Icon>▦</Icon>
-              <span className="side-label">Product Master</span>
-            </button>
           </div>
         </div>
 
