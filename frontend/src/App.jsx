@@ -10,80 +10,48 @@ import Login from "./pages/Login.jsx";
 import Expense from "./pages/Expense.jsx";
 import Users from "./pages/Users.jsx";
 import Payroll from "./pages/Payroll.jsx";
-import ProtectedRoute from "./components/ProtectedRoute.jsx";
-
-import Employees from "./pages/Employees.jsx";
-import Attendance from "./pages/Attendance.jsx";
-import LeaveManagement from "./pages/LeaveManagement.jsx";
-import HolidayCalendar from "./pages/HolidayCalendar.jsx";
-import Salary from "./pages/Salary.jsx";
-import ShiftManagement from "./pages/ShiftManagement.jsx";
-import PayrollApprovals from "./pages/PayrollApprovals.jsx";
-import Reports from "./pages/Reports.jsx";
-
-import AccountsWorkspace from "./pages/AccountsWorkspace.jsx";
 import AccountsMasters from "./pages/AccountsMasters.jsx";
-
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { startSessionManager } from "./lib/sessionManager.js";
 
+// Start one global session manager for the whole SPA.
+// It keeps the session alive while the user is active
+// and logs the user out after 60 minutes of inactivity.
 startSessionManager();
 
-
-// Lazy loaded pages
-const Dashboard = lazy(() =>
-  import("./pages/Dashboard.jsx")
+const Dashboard = lazy(
+  () => import("./pages/Dashboard.jsx")
 );
 
-const RawMaterialPurchase = lazy(() =>
-  import("./pages/RawMaterialPurchase.jsx")
-);
-
-const Manufacturing = lazy(() =>
-  import("./pages/Manufacturing.jsx")
-);
-
-const InventoryMasters = lazy(() =>
-  import("./pages/InventoryMasters.jsx")
-);
-
-const Inventory = lazy(() =>
-  import("./pages/Inventory.jsx")
-);
-
-const Accounting = lazy(() =>
-  import("./pages/Accounting.jsx")
-);
-
-
-// Loading screen
 function LoadingScreen() {
   return (
     <div className="app-loading">
       <div className="loading-card">
-
         <div className="loading-spinner"></div>
 
-        <h3>Office Management</h3>
+        <h3>
+          Office Management
+        </h3>
 
-        <p>Loading...</p>
-
+        <p>
+          Loading...
+        </p>
       </div>
     </div>
   );
 }
 
-
 export default function App() {
   return (
     <BrowserRouter>
-
-      <Suspense fallback={<LoadingScreen />}>
-
+      <Suspense
+        fallback={<LoadingScreen />}
+      >
         <Routes>
 
-          {/* =========================
-              DEFAULT
-          ========================== */}
+          {/* =====================================
+              ROOT
+          ====================================== */}
 
           <Route
             path="/"
@@ -95,249 +63,66 @@ export default function App() {
             }
           />
 
-
-          {/* =========================
+          {/* =====================================
               LOGIN
-          ========================== */}
+          ====================================== */}
 
           <Route
             path="/login"
             element={<Login />}
           />
 
+          {/* =====================================
+              PROTECTED USER ROUTES
+          ====================================== */}
 
-          {/* =========================
-              PROTECTED ROUTES
-          ========================== */}
-
-          <Route element={<ProtectedRoute />}>
+          <Route
+            element={
+              <ProtectedRoute />
+            }
+          >
 
             {/* Dashboard */}
-
             <Route
               path="/dashboard"
               element={<Dashboard />}
             />
 
-
             {/* Expenses */}
-
             <Route
               path="/expenses"
               element={<Expense />}
             />
 
-
             {/* Payroll */}
-
             <Route
               path="/payroll"
               element={<Payroll />}
             />
 
-
-            {/* =========================
-                HR
-            ========================== */}
-
-            <Route
-              path="/employees"
-              element={<Employees />}
-            />
-
-            <Route
-              path="/attendance"
-              element={<Attendance />}
-            />
-
-            <Route
-              path="/leave"
-              element={<LeaveManagement />}
-            />
-
-            <Route
-              path="/holidays"
-              element={<HolidayCalendar />}
-            />
-
-            <Route
-              path="/shifts"
-              element={<ShiftManagement />}
-            />
-
-
-            {/* =========================
-                SALARY
-            ========================== */}
-
-            <Route
-              path="/salary"
-              element={<Salary />}
-            />
-
-            <Route
-              path="/salary/slips"
-              element={<Salary />}
-            />
-
-            <Route
-              path="/payroll/approvals"
-              element={<PayrollApprovals />}
-            />
-
-
-            {/* =========================
-                REPORTS
-            ========================== */}
-
-            <Route
-              path="/reports"
-              element={<Reports />}
-            />
-
-            <Route
-              path="/reports/attendance"
-              element={<Reports />}
-            />
-
-            <Route
-              path="/reports/leave"
-              element={<Reports />}
-            />
-
-            <Route
-              path="/reports/salary"
-              element={<Reports />}
-            />
-
-            <Route
-              path="/reports/payroll"
-              element={<Reports />}
-            />
-
-
-            {/* =========================
-                INVENTORY
-            ========================== */}
-
-            <Route
-              path="/inventory/raw-material-purchase"
-              element={<RawMaterialPurchase />}
-            />
-
-            <Route
-              path="/inventory/masters"
-              element={<InventoryMasters />}
-            />
-
-            <Route
-              path="/inventory"
-              element={<Inventory />}
-            />
-
-
-            {/* =========================
-                MANUFACTURING / SALES / GST
-            ========================== */}
-
-            <Route
-              path="/manufacturing"
-              element={<Manufacturing />}
-            />
-
-            <Route
-              path="/sales"
-              element={<Manufacturing />}
-            />
-
-            <Route
-              path="/gst"
-              element={<Manufacturing />}
-            />
-
-
-            {/* =================================================
-                ACCOUNTS WORKSPACE
-            ================================================= */}
-
-            <Route
-              path="/accounts"
-              element={<AccountsWorkspace />}
-            />
-
-            {/* Alternate Accounts URL */}
-
-            <Route
-              path="/accounting"
-              element={<AccountsWorkspace />}
-            />
-
-
-            {/* Direct Accounting page */}
-
-            <Route
-              path="/accounting/direct"
-              element={<Accounting />}
-            />
-
-
-            {/* =================================================
-                ACCOUNTS MASTERS
-
-                Direct URL:
-                /accounts/masters
-            ================================================= */}
-
+            {/* Accounts Masters */}
             <Route
               path="/accounts/masters"
               element={<AccountsMasters />}
             />
 
-
-            {/* =========================
-                APPROVALS
-            ========================== */}
-
-            <Route
-              path="/approvals"
-              element={
-                <Navigate
-                  to="/payroll/approvals"
-                  replace
-                />
-              }
-            />
-
-
-            {/* =========================
-                SECURITY
-            ========================== */}
-
-            <Route
-              path="/security"
-              element={
-                <Navigate
-                  to="/users"
-                  replace
-                />
-              }
-            />
-
           </Route>
 
-
-          {/* =========================
-              ADMIN USERS
-          ========================== */}
+          {/* =====================================
+              ADMIN ONLY
+          ====================================== */}
 
           <Route
             element={
               <ProtectedRoute
-                allowedRoles={["Admin"]}
+                allowedRoles={[
+                  "Admin",
+                ]}
               />
             }
           >
 
+            {/* User Management */}
             <Route
               path="/users"
               element={<Users />}
@@ -345,10 +130,9 @@ export default function App() {
 
           </Route>
 
-
-          {/* =========================
-              FALLBACK
-          ========================== */}
+          {/* =====================================
+              UNKNOWN ROUTE
+          ====================================== */}
 
           <Route
             path="*"
@@ -361,13 +145,11 @@ export default function App() {
           />
 
         </Routes>
-
       </Suspense>
 
-
-      {/* =========================
-          GLOBAL LOADING CSS
-      ========================== */}
+      {/* =======================================
+          LOADING STYLES
+      ======================================== */}
 
       <style>{`
 
@@ -387,13 +169,13 @@ export default function App() {
             sans-serif;
         }
 
-
         .loading-card {
           width: 280px;
 
-          padding: 30px 25px;
+          padding:
+            30px 25px;
 
-          background: #ffffff;
+          background: #fff;
 
           border-radius: 16px;
 
@@ -404,10 +186,8 @@ export default function App() {
             rgba(0, 0, 0, 0.08);
         }
 
-
         .loading-spinner {
           width: 38px;
-
           height: 38px;
 
           margin:
@@ -428,23 +208,22 @@ export default function App() {
             infinite;
         }
 
-
         .loading-card h3 {
           margin: 0;
 
-          color: #172b4d;
+          color:
+            #172b4d;
         }
-
 
         .loading-card p {
           margin:
             7px 0 0;
 
-          color: #667085;
+          color:
+            #667085;
 
           font-size: 13px;
         }
-
 
         @keyframes officeAppSpin {
 
@@ -461,7 +240,6 @@ export default function App() {
         }
 
       `}</style>
-
     </BrowserRouter>
   );
 }
