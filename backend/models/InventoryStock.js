@@ -5,7 +5,7 @@ const inventoryStockSchema = new mongoose.Schema(
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null, index: true },
     location: { type: String, required: true, trim: true, maxlength: 120, index: true },
     itemName: { type: String, required: true, trim: true, maxlength: 180, index: true },
-    itemType: { type: String, enum: ["RAW_MATERIAL", "GRADE", "FINISHED_GOODS"], default: "RAW_MATERIAL", index: true },
+    itemType: { type: String, enum: ["RAW_MATERIAL", "GRADE", "FINISHED_GOODS", "PACKED_GOODS", "RETURN_GOODS", "REJECTED"], default: "RAW_MATERIAL", index: true },
     hsn: { type: String, trim: true, default: "", maxlength: 30 },
     unit: { type: String, required: true, trim: true, maxlength: 30 },
     batchNo: { type: String, trim: true, default: "", maxlength: 80, index: true },
