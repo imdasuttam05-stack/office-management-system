@@ -11,6 +11,12 @@ import Expense from "./pages/Expense.jsx";
 import Users from "./pages/Users.jsx";
 import Payroll from "./pages/Payroll.jsx";
 import AccountsMasters from "./pages/AccountsMasters.jsx";
+import InventoryMasters from "./pages/InventoryMasters.jsx";
+import RawMaterialPurchase from "./pages/RawMaterialPurchase.jsx";
+import Manufacturing from "./pages/Manufacturing.jsx";
+import Inventory from "./pages/Inventory.jsx";
+import Accounting from "./pages/Accounting.jsx";
+import IntegratedOperations from "./pages/IntegratedOperations.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { startSessionManager } from "./lib/sessionManager.js";
 
@@ -105,6 +111,13 @@ export default function App() {
               path="/accounts"
               element={<AccountsMasters />}
             />
+            <Route path="/inventory-masters" element={<InventoryMasters />} />
+            <Route path="/raw-material-purchase" element={<RawMaterialPurchase />} />
+            <Route path="/manufacturing" element={<Manufacturing />} />
+            <Route path="/inventory" element={<Inventory />} />
+            <Route path="/accounting" element={<Accounting />} />
+            <Route path="/operations" element={<IntegratedOperations />} />
+
 
           </Route>
 
