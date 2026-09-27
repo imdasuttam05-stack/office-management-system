@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
 const today = () => new Date().toISOString().slice(0, 10);
-const blankLine = () => ({ itemId: "", itemName: "", hsn: "", unit: "KG", batchNo: "", barcode: "", mfgDate: "", expiryDate: "", qty: "", purchaseRate: "", discount: "", gstRate: "", gstType: "NONE" });
+const blankLine = () => ({ itemName: "", hsn: "", unit: "KG", batchNo: "", barcode: "", mfgDate: "", expiryDate: "", qty: "", purchaseRate: "", discount: "", gstRate: "", gstType: "NONE" });
 
-function headers() { return { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("accessToken") || ""}` }; }
+function headers() { return { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || ""}` }; }
 function money(n) { return Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 export default function RawMaterialPurchase() {
@@ -12,6 +12,8 @@ export default function RawMaterialPurchase() {
   const [lines, setLines] = useState([blankLine()]);
   const [purchases, setPurchases] = useState([]);
   const [stock, setStock] = useState([]);
+  const [masters, setMasters] = useState({ locations: [], suppliers: [], items: [] });
+  const [mastersLoading, setMastersLoading] = useState(false);
   const [tab, setTab] = useState("purchase");
   const [loading, setLoading] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
@@ -22,8 +24,6 @@ export default function RawMaterialPurchase() {
   const [stockPage, setStockPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [stockPagination, setStockPagination] = useState({ page: 1, pages: 1, total: 0 });
-  const [masters, setMasters] = useState({ locations: [], suppliers: [], items: [] });
-  const [mastersLoading, setMastersLoading] = useState(false);
 
   const totals = useMemo(() => lines.reduce((a, l) => {
     const gross = Number(l.qty || 0) * Number(l.purchaseRate || 0);
@@ -42,42 +42,28 @@ export default function RawMaterialPurchase() {
 
   async function loadMasters() {
     setMastersLoading(true);
-    setError("");
     try {
-      const h = headers();
-      let r = await fetch(`${API_URL}/api/inventory/raw-material-masters`, { headers: h });
-      let d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.message || `Master data load failed (${r.status}).`);
-
-      // Some deployments expose the same master data through the workflow endpoint.
-      // Use it only when the purchase-master endpoint returns an empty list.
-      const hasPurchaseMasters = (d.locations?.length || 0) + (d.suppliers?.length || 0) + (d.items?.length || 0) > 0;
-      if (!hasPurchaseMasters) {
-        const wr = await fetch(`${API_URL}/api/inventory/workflow/masters`, { headers: h });
-        const wd = await wr.json().catch(() => ({}));
-        if (wr.ok) d = { ...d, ...wd };
-      }
-
-      setMasters({
-        locations: Array.isArray(d.locations) ? d.locations : [],
-        suppliers: Array.isArray(d.suppliers) ? d.suppliers : [],
-        items: Array.isArray(d.items) ? d.items.filter(x => !x.itemType || x.itemType === "RAW_MATERIAL") : []
-      });
+      const r = await fetch(`${API_URL}/api/inventory/raw-material-masters`, { headers: headers() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || "Purchase master load failed.");
+      setMasters({ locations: Array.isArray(d.locations) ? d.locations : [], suppliers: Array.isArray(d.suppliers) ? d.suppliers : [], items: Array.isArray(d.items) ? d.items : [] });
     } catch (e) {
-      setError(e.message || "Purchase masters load failed. Please refresh the page.");
+      setError(e.message || "Purchase master load failed.");
     } finally { setMastersLoading(false); }
   }
-
   function selectSupplier(id) {
     const s = masters.suppliers.find(x => String(x._id) === String(id));
-    setForm(f => ({ ...f, supplierName: s?.name || "", supplierGSTIN: s?.gstin || "" }));
+    setField("supplierName", s?.name || "");
+    setField("supplierGSTIN", s?.gstin || "");
   }
-
   function selectItem(i, id) {
-    const x = masters.items.find(v => String(v._id) === String(id));
-    setLines(a => a.map((row, idx) => idx === i ? { ...row, itemId: id, itemName: x?.name || "", hsn: x?.hsn || "", unit: x?.unit || "KG", gstRate: x?.defaultGstRate ?? "", barcode: row.barcode || x?.defaultBarcode || "" } : row));
+    const m = masters.items.find(x => String(x._id) === String(id));
+    setLine(i, "itemName", m?.name || "");
+    setLine(i, "hsn", m?.hsn || "");
+    setLine(i, "unit", m?.unit || "KG");
+    setLine(i, "gstRate", m?.defaultGstRate ?? "");
+    setLine(i, "barcode", m?.defaultBarcode || "");
   }
-
   async function loadPurchases() {
     setLoadingList(true); setError("");
     try { const r = await fetch(`${API_URL}/api/inventory/raw-material-purchases?page=${page}&limit=15&search=${encodeURIComponent(search)}`, { headers: headers() }); const d = await r.json(); if (!r.ok) throw new Error(d.message); setPurchases(d.items || []); setPagination(d.pagination || pagination); }
@@ -108,15 +94,15 @@ export default function RawMaterialPurchase() {
     {tab === "purchase" && <>
       <div className="rmp-card"><div className="rmp-grid">
         <div className="rmp-field"><label>Purchase Date</label><input type="date" value={form.date} onChange={e=>setField("date",e.target.value)}/></div>
-        <div className="rmp-field"><label>Location / Godown *</label><select value={form.location} onChange={e=>setField("location",e.target.value)} disabled={mastersLoading}><option value="">{mastersLoading ? "Loading locations..." : "Select Location / Godown"}</option>{masters.locations.map(x=><option key={x._id} value={x.name}>{x.name}{x.code ? ` (${x.code})` : ""}</option>)}</select></div>
-        <div className="rmp-field"><label>Supplier *</label><select value={masters.suppliers.find(x=>x.name===form.supplierName)?._id || ""} onChange={e=>selectSupplier(e.target.value)} disabled={mastersLoading}><option value="">{mastersLoading ? "Loading suppliers..." : "Select Supplier"}</option>{masters.suppliers.map(x=><option key={x._id} value={x._id}>{x.name}</option>)}</select></div>
+        <div className="rmp-field"><label>Location / Godown *</label><select value={form.location} onChange={e=>setField("location",e.target.value)}><option value="">{mastersLoading ? "Loading locations..." : "Select Location / Godown"}</option>{masters.locations.map(x=><option key={x._id} value={x.name}>{x.name}{x.code ? ` (${x.code})` : ""}</option>)}</select></div>
+        <div className="rmp-field"><label>Supplier *</label><select value={masters.suppliers.find(x=>x.name===form.supplierName)?._id || ""} onChange={e=>selectSupplier(e.target.value)}><option value="">{mastersLoading ? "Loading suppliers..." : "Select Supplier"}</option>{masters.suppliers.map(x=><option key={x._id} value={x._id}>{x.name}</option>)}</select></div>
         <div className="rmp-field"><label>Supplier GSTIN</label><input value={form.supplierGSTIN} onChange={e=>setField("supplierGSTIN",e.target.value.toUpperCase())}/></div>
         <div className="rmp-field"><label>Supplier Invoice No.</label><input value={form.supplierInvoiceNo} onChange={e=>setField("supplierInvoiceNo",e.target.value)}/></div>
         <div className="rmp-field"><label>Invoice Date</label><input type="date" value={form.supplierInvoiceDate} onChange={e=>setField("supplierInvoiceDate",e.target.value)}/></div>
         <div className="rmp-field"><label>Transport Cost</label><input type="number" min="0" value={form.transportCost} onChange={e=>setField("transportCost",e.target.value)}/></div>
         <div className="rmp-field"><label>Other Cost</label><input type="number" min="0" value={form.otherCost} onChange={e=>setField("otherCost",e.target.value)}/></div>
       </div></div>
-      <div className="rmp-card"><div className="rmp-scroll"><table className="rmp-table"><thead><tr><th>Raw Material *</th><th>HSN</th><th>Unit</th><th>Batch</th><th>Barcode</th><th>MFG</th><th>Expiry</th><th>Qty *</th><th>Rate *</th><th>Discount</th><th>GST %</th><th>GST Type</th><th></th></tr></thead><tbody>{lines.map((l,i)=><tr key={i}><td><select value={l.itemId || ""} onChange={e=>selectItem(i,e.target.value)} disabled={mastersLoading}><option value="">{mastersLoading ? "Loading..." : "Select Raw Material"}</option>{masters.items.map(x=><option key={x._id} value={x._id}>{x.name}</option>)}</select></td><td><input value={l.hsn} onChange={e=>setLine(i,"hsn",e.target.value)}/></td><td><input value={l.unit} onChange={e=>setLine(i,"unit",e.target.value)}/></td><td><input value={l.batchNo} onChange={e=>setLine(i,"batchNo",e.target.value)}/></td><td><input value={l.barcode} onChange={e=>setLine(i,"barcode",e.target.value)}/></td><td><input type="date" value={l.mfgDate} onChange={e=>setLine(i,"mfgDate",e.target.value)}/></td><td><input type="date" value={l.expiryDate} onChange={e=>setLine(i,"expiryDate",e.target.value)}/></td><td><input type="number" min="0" value={l.qty} onChange={e=>setLine(i,"qty",e.target.value)}/></td><td><input type="number" min="0" value={l.purchaseRate} onChange={e=>setLine(i,"purchaseRate",e.target.value)}/></td><td><input type="number" min="0" value={l.discount} onChange={e=>setLine(i,"discount",e.target.value)}/></td><td><input type="number" min="0" max="100" value={l.gstRate} onChange={e=>setLine(i,"gstRate",e.target.value)}/></td><td><select value={l.gstType} onChange={e=>setLine(i,"gstType",e.target.value)}><option value="NONE">None</option><option value="CGST_SGST">CGST + SGST</option><option value="IGST">IGST</option></select></td><td><button className="rmp-btn rmp-danger" onClick={()=>setLines(a=>a.filter((_,x)=>x!==i))} disabled={lines.length===1}>×</button></td></tr>)}</tbody></table></div><button className="rmp-btn rmp-secondary" style={{marginTop:12}} onClick={()=>setLines(a=>[...a,blankLine()])}>+ Add Raw Material</button></div>
+      <div className="rmp-card"><div className="rmp-scroll"><table className="rmp-table"><thead><tr><th>Raw Material *</th><th>HSN</th><th>Unit</th><th>Batch</th><th>Barcode</th><th>MFG</th><th>Expiry</th><th>Qty *</th><th>Rate *</th><th>Discount</th><th>GST %</th><th>GST Type</th><th></th></tr></thead><tbody>{lines.map((l,i)=><tr key={i}><td><select value={masters.items.find(x=>x.name===l.itemName)?._id || ""} onChange={e=>selectItem(i,e.target.value)}><option value="">{mastersLoading ? "Loading raw materials..." : "Select Raw Material"}</option>{masters.items.map(x=><option key={x._id} value={x._id}>{x.name}</option>)}</select></td><td><input value={l.hsn} onChange={e=>setLine(i,"hsn",e.target.value)}/></td><td><input value={l.unit} onChange={e=>setLine(i,"unit",e.target.value)}/></td><td><input value={l.batchNo} onChange={e=>setLine(i,"batchNo",e.target.value)}/></td><td><input value={l.barcode} onChange={e=>setLine(i,"barcode",e.target.value)}/></td><td><input type="date" value={l.mfgDate} onChange={e=>setLine(i,"mfgDate",e.target.value)}/></td><td><input type="date" value={l.expiryDate} onChange={e=>setLine(i,"expiryDate",e.target.value)}/></td><td><input type="number" min="0" value={l.qty} onChange={e=>setLine(i,"qty",e.target.value)}/></td><td><input type="number" min="0" value={l.purchaseRate} onChange={e=>setLine(i,"purchaseRate",e.target.value)}/></td><td><input type="number" min="0" value={l.discount} onChange={e=>setLine(i,"discount",e.target.value)}/></td><td><input type="number" min="0" max="100" value={l.gstRate} onChange={e=>setLine(i,"gstRate",e.target.value)}/></td><td><select value={l.gstType} onChange={e=>setLine(i,"gstType",e.target.value)}><option value="NONE">None</option><option value="CGST_SGST">CGST + SGST</option><option value="IGST">IGST</option></select></td><td><button className="rmp-btn rmp-danger" onClick={()=>setLines(a=>a.filter((_,x)=>x!==i))} disabled={lines.length===1}>×</button></td></tr>)}</tbody></table></div><button className="rmp-btn rmp-secondary" style={{marginTop:12}} onClick={()=>setLines(a=>[...a,blankLine()])}>+ Add Raw Material</button></div>
       <div className="rmp-card"><div className="rmp-grid"><div className="rmp-field rmp-wide"><label>Remarks</label><textarea value={form.remarks} onChange={e=>setField("remarks",e.target.value)}/></div></div><div className="rmp-summary"><span>Taxable: <strong>₹ {money(totals.taxable)}</strong></span><span>CGST: <strong>₹ {money(totals.cgst)}</strong></span><span>SGST: <strong>₹ {money(totals.sgst)}</strong></span><span>IGST: <strong>₹ {money(totals.igst)}</strong></span><span>Grand Total: <strong>₹ {money(grand)}</strong></span></div><div className="rmp-actions"><button className="rmp-btn rmp-secondary" onClick={reset}>Clear</button><button className="rmp-btn rmp-primary" disabled={loading} onClick={save}>{loading ? "Posting..." : "Post Purchase & Update Stock"}</button></div></div>
     </>}
     {(tab === "list" || tab === "stock") && <div className="rmp-card"><div className="rmp-search"><input placeholder="Search purchase / supplier / material" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>e.key==='Enter' && (tab==='list'?loadPurchases():loadStock())}/><button className="rmp-btn rmp-secondary" onClick={()=>{tab==='list'?loadPurchases():loadStock()}}>Search</button></div>{loadingList?<div>Loading...</div>:tab==='list'?<div className="rmp-scroll"><table className="rmp-table"><thead><tr><th>Purchase No</th><th>Date</th><th>Supplier</th><th>Location</th><th>Items</th><th>Total</th></tr></thead><tbody>{purchases.map(p=><tr key={p._id}><td>{p.purchaseNo}</td><td>{new Date(p.date).toLocaleDateString("en-IN")}</td><td>{p.supplierName}</td><td>{p.location}</td><td>{p.lines?.map(x=>`${x.itemName} (${x.qty} ${x.unit})`).join(", ")}</td><td>₹ {money(p.grandTotal)}</td></tr>)}</tbody></table></div>:<div className="rmp-scroll"><table className="rmp-table"><thead><tr><th>Material</th><th>Location</th><th>Batch</th><th>Barcode</th><th>Qty</th><th>Unit</th><th>Average Rate</th><th>Stock Value</th></tr></thead><tbody>{stock.map(s=><tr key={s._id}><td>{s.itemName}</td><td>{s.location}</td><td>{s.batchNo || "-"}</td><td>{s.barcode || "-"}</td><td>{s.qty}</td><td>{s.unit}</td><td>₹ {money(s.averageRate)}</td><td>₹ {money(s.stockValue)}</td></tr>)}</tbody></table></div>}
