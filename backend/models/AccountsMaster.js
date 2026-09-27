@@ -8,7 +8,7 @@ const accountsMasterSchema = new mongoose.Schema({
   under: String,
   nature: String,
   openingBalance: { type: Number, default: 0 },
-  openingType: { type: String, enum: ["Dr","Cr"], default: "Dr" },
+  openingType: { type: String, enum: ["Dr", "Cr"], default: "Dr" },
   gstApplicable: { type: Boolean, default: false },
   gstin: String,
   pan: String,
@@ -39,5 +39,4 @@ const accountsMasterSchema = new mongoose.Schema({
 
 accountsMasterSchema.index({ masterType: 1, name: 1 });
 
-export default mongoose.models.AccountsMaster ||
-  mongoose.model("AccountsMaster", accountsMasterSchema);
+export default mongoose.models.AccountsMaster || mongoose.model("AccountsMaster", accountsMasterSchema);
