@@ -49,21 +49,20 @@ const envOrigins = (process.env.CLIENT_URL || "")
 
 const fallbackOrigins = [
   "https://office-management-system-lilac.vercel.app",
+  "https://office-management-system-8u8zryaln-imdasuttam05-stacks-projects.vercel.app",
 ];
 
-const allowedOrigins = [
-  ...new Set([
-    ...envOrigins,
-    ...fallbackOrigins,
-    "https://office-management-system-8u8zryaln-imdasuttam05-stacks-projects.vercel.app",
-  ]),
-];
+const allowedOrigins = [...new Set([...envOrigins, ...fallbackOrigins])];
 
 function isAllowedVercelProjectOrigin(origin) {
   try {
     const url = new URL(origin);
     const host = url.hostname.toLowerCase();
-    return url.protocol === "https:" && host.endsWith(".vercel.app") && host.startsWith("office-management-system-");
+    return (
+      url.protocol === "https:" &&
+      host.endsWith(".vercel.app") &&
+      host.startsWith("office-management-system-")
+    );
   } catch {
     return false;
   }
@@ -78,15 +77,25 @@ await ensureBootstrapAdmin();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
 const corsOptions = {
   origin(origin, callback) {
     if (!origin) return callback(null, true);
+
     const normalizedOrigin = String(origin).trim().replace(/\/+$/, "");
-    if (allowedOrigins.includes(normalizedOrigin) || isAllowedVercelProjectOrigin(normalizedOrigin)) {
+
+    if (
+      allowedOrigins.includes(normalizedOrigin) ||
+      isAllowedVercelProjectOrigin(normalizedOrigin)
+    ) {
       return callback(null, true);
     }
+
     console.warn("Blocked CORS origin:", origin);
     return callback(new Error("CORS origin not allowed."));
   },
@@ -96,68 +105,111 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
+// Express 5: do not use app.options("*", ...).
 app.use(cors(corsOptions));
+
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(cookieParser());
 
-if (process.env.NODE_ENV !== "test") app.use(morgan("combined"));
+if (process.env.NODE_ENV !== "test") {
+  app.use(morgan("combined"));
+}
 
-app.get("/", (req, res) => res.status(200).json({
-  success: true,
-  message: "Office Management API is running",
-  environment: process.env.NODE_ENV === "production" ? "production" : "development",
-  timestamp: new Date().toISOString(),
-}));
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Office Management API is running",
+    environment: process.env.NODE_ENV === "production" ? "production" : "development",
+    timestamp: new Date().toISOString(),
+  });
+});
 
-app.get("/api/health", (req, res) => res.status(200).json({
-  success: true,
-  service: "office-management-backend",
-  timestamp: new Date().toISOString(),
-  userRoutes: Boolean(userRoutes),
-  hrRoutes: true,
-  accountsMasterRoutes: true,
-}));
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    service: "office-management-backend",
+    timestamp: new Date().toISOString(),
+    userRoutes: Boolean(userRoutes),
+    hrRoutes: true,
+    accountingRoutes: true,
+    accountsMasterRoutes: true,
+  });
+});
 
 app.use("/api", apiLimiter);
+
 app.use("/api/auth", authRoutes);
 app.use("/api/security", securityRoutes);
 app.use("/api/expenses", expenseRoutes);
+
+// Existing Inventory / Purchase / Manufacturing / Sales / GST APIs.
 app.use("/api/inventory", inventoryRoutes);
+
+// Accounts / Tally-style accounting APIs.
 app.use("/api/accounting", accountingRoutes);
+
+// Accounts Masters: Group / Ledger / Party / Supplier / Product / Location.
+// Transaction screens use this route to populate dropdowns.
 app.use("/api/accounts-masters", accountsMasterRoutes);
 
 if (userRoutes) {
   app.use("/api/users", userRoutes);
 } else {
-  app.use("/api/users", (req, res) => res.status(503).json({
-    success: false,
-    message: "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
-  }));
+  app.use("/api/users", (req, res) => {
+    res.status(503).json({
+      success: false,
+      message: "User Management API is not deployed yet. Please deploy backend/routes/userRoutes.js.",
+    });
+  });
 }
 
 app.use("/api/payroll", hrRoutes);
 app.use("/api/ocr", ocrRoutes);
 
-app.use((req, res) => res.status(404).json({
-  success: false,
-  message: "API route not found.",
-  path: req.originalUrl,
-  method: req.method,
-}));
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API route not found.",
+    path: req.originalUrl,
+    method: req.method,
+  });
+});
 
 app.use((err, req, res, next) => {
   console.error("SERVER ERROR:", err?.stack || err?.message || err);
 
-  const isUploadError = err?.name === "MulterError" || String(err?.message || "").includes("Only JPG");
+  const isUploadError =
+    err?.name === "MulterError" ||
+    String(err?.message || "").includes("Only JPG");
 
-  if (err?.code === "LIMIT_FILE_SIZE") return res.status(413).json({ success: false, message: "Image is too large. Maximum size is 10 MB." });
-  if (isUploadError) return res.status(400).json({ success: false, message: "Invalid image upload." });
-  if (String(err?.message || "").includes("CORS origin not allowed")) return res.status(403).json({ success: false, message: "CORS origin not allowed." });
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({
+      success: false,
+      message: "Image is too large. Maximum size is 10 MB.",
+    });
+  }
+
+  if (isUploadError) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid image upload.",
+    });
+  }
+
+  if (String(err?.message || "").includes("CORS origin not allowed")) {
+    return res.status(403).json({
+      success: false,
+      message: "CORS origin not allowed.",
+    });
+  }
 
   return res.status(err?.statusCode || 500).json({
     success: false,
-    message: process.env.NODE_ENV === "production" ? "Internal server error." : err?.message || "Internal server error.",
+    message:
+      process.env.NODE_ENV === "production"
+        ? "Internal server error."
+        : err?.message || "Internal server error.",
   });
 });
 
@@ -165,5 +217,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Office Management Backend running on port ${PORT}`);
   console.log(`User Management: ${userRoutes ? "ENABLED" : "DISABLED"}`);
   console.log("HR / Payroll: ENABLED");
-  console.log("Accounts Master: ENABLED");
+  console.log("Accounting: ENABLED");
+  console.log("Accounts Masters: ENABLED");
 });
