@@ -69,16 +69,18 @@ async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narratio
 export async function getPurchaseMasters(req,res){
  try{
   const companyId=req.user?.companyId||null;
-  const scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{ $or:[{companyId:null},{companyId:{$exists:false}}] };
+  const scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};
+  const activeScope={$or:[{active:true},{active:{$exists:false}},{active:null}]};
   const [locations,suppliers,items,customers]=await Promise.all([
-   LocationMaster.find({...scope,active:true}).sort({name:1}).lean(),
-   SupplierMaster.find({...scope,active:true}).populate("ledgerId","name").sort({name:1}).lean(),
-   InventoryItemMaster.find({...scope,active:true,itemType:"RAW_MATERIAL"}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
-   CustomerMaster.find({...scope,active:true}).populate("ledgerId","name").sort({name:1}).lean()
+   LocationMaster.find({...scope,...activeScope}).sort({name:1}).lean(),
+   SupplierMaster.find({...scope,...activeScope}).populate("ledgerId","name").sort({name:1}).lean(),
+   InventoryItemMaster.find({...scope,...activeScope,itemType:"RAW_MATERIAL"}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
+   CustomerMaster.find({...scope,...activeScope}).populate("ledgerId","name").sort({name:1}).lean()
   ]);
   return res.json({success:true,locations,suppliers,items,customers});
  }catch(e){return res.status(500).json({success:false,message:e.message||"Master data load failed."})}
 }
+
 export async function createLocationMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Location / Godown name is required."});const code=clean(b.code).toUpperCase()||await next("LOCATION","LOC");const row=await LocationMaster.create({companyId:req.user?.companyId||null,name,code,pin:clean(b.pin),state:clean(b.state),district:clean(b.district),address:clean(b.address),createdBy:req.user._id});return res.status(201).json({success:true,message:"Location / Godown master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Location / Godown already exists.":e.message})}}
 export async function createSupplierMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Supplier name is required."});const row=await SupplierMaster.create({companyId:req.user?.companyId||null,name,gstin:clean(b.gstin).toUpperCase(),state:clean(b.state),district:clean(b.district),pin:clean(b.pin),phone:clean(b.phone),address:clean(b.address),gstStatus:clean(b.gstStatus),createdBy:req.user._id});return res.status(201).json({success:true,message:"Supplier master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Supplier already exists.":e.message})}}
 export async function createInventoryItemMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Item name is required."});const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS"].includes(b.itemType)?b.itemType:"RAW_MATERIAL";const row=await InventoryItemMaster.create({companyId:req.user?.companyId||null,name,itemType,hsn:clean(b.hsn),unit:clean(b.unit)||"KG",defaultGstRate:Math.max(0,Math.min(num(b.defaultGstRate),100)),defaultBarcode:clean(b.defaultBarcode),createdBy:req.user._id});return res.status(201).json({success:true,message:"Item master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Item already exists.":e.message})}}
