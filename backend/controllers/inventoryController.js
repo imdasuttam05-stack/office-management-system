@@ -69,13 +69,16 @@ async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narratio
 export async function getPurchaseMasters(req,res){
  try{
   const companyId=req.user?.companyId||null;
-  const scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};
+  const companyScope=companyId
+   ? {$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}
+   : {$or:[{companyId:null},{companyId:{$exists:false}}]};
   const activeScope={$or:[{active:true},{active:{$exists:false}},{active:null}]};
+  const masterScope={$and:[companyScope,activeScope]};
   const [locations,suppliers,items,customers]=await Promise.all([
-   LocationMaster.find({...scope,...activeScope}).sort({name:1}).lean(),
-   SupplierMaster.find({...scope,...activeScope}).populate("ledgerId","name").sort({name:1}).lean(),
-   InventoryItemMaster.find({...scope,...activeScope,itemType:"RAW_MATERIAL"}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
-   CustomerMaster.find({...scope,...activeScope}).populate("ledgerId","name").sort({name:1}).lean()
+   LocationMaster.find(masterScope).sort({name:1}).lean(),
+   SupplierMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean(),
+   InventoryItemMaster.find({$and:[companyScope,activeScope,{itemType:"RAW_MATERIAL"}]}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
+   CustomerMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean()
   ]);
   return res.json({success:true,locations,suppliers,items,customers});
  }catch(e){return res.status(500).json({success:false,message:e.message||"Master data load failed."})}
