@@ -4,7 +4,7 @@ const API_URL = (import.meta.env.VITE_API_URL || "https://office-management-syst
 const today = () => new Date().toISOString().slice(0, 10);
 const blankLine = () => ({ itemId: "", itemName: "", hsn: "", unit: "KG", batchNo: "", barcode: "", mfgDate: "", expiryDate: "", qty: "", purchaseRate: "", discount: "", gstRate: "", gstType: "NONE" });
 
-function headers() { return { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || ""}` }; }
+function headers() { return { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("accessToken") || ""}` }; }
 function money(n) { return Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 export default function RawMaterialPurchase() {
@@ -42,13 +42,30 @@ export default function RawMaterialPurchase() {
 
   async function loadMasters() {
     setMastersLoading(true);
+    setError("");
     try {
-      const r = await fetch(`${API_URL}/api/inventory/raw-material-masters`, { headers: headers() });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.message || "Master data load failed.");
-      setMasters({ locations: d.locations || [], suppliers: d.suppliers || [], items: d.items || [] });
-    } catch (e) { setError(e.message || "Purchase masters load failed."); }
-    finally { setMastersLoading(false); }
+      const h = headers();
+      let r = await fetch(`${API_URL}/api/inventory/raw-material-masters`, { headers: h });
+      let d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || `Master data load failed (${r.status}).`);
+
+      // Some deployments expose the same master data through the workflow endpoint.
+      // Use it only when the purchase-master endpoint returns an empty list.
+      const hasPurchaseMasters = (d.locations?.length || 0) + (d.suppliers?.length || 0) + (d.items?.length || 0) > 0;
+      if (!hasPurchaseMasters) {
+        const wr = await fetch(`${API_URL}/api/inventory/workflow/masters`, { headers: h });
+        const wd = await wr.json().catch(() => ({}));
+        if (wr.ok) d = { ...d, ...wd };
+      }
+
+      setMasters({
+        locations: Array.isArray(d.locations) ? d.locations : [],
+        suppliers: Array.isArray(d.suppliers) ? d.suppliers : [],
+        items: Array.isArray(d.items) ? d.items.filter(x => !x.itemType || x.itemType === "RAW_MATERIAL") : []
+      });
+    } catch (e) {
+      setError(e.message || "Purchase masters load failed. Please refresh the page.");
+    } finally { setMastersLoading(false); }
   }
 
   function selectSupplier(id) {
