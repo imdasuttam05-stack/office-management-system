@@ -1,47 +1,49 @@
 import express from "express";
 import {
-  cleanMasterType,
-  getMasterLookups,
   listMasters,
+  getMaster,
   createMaster,
   updateMaster,
-  deactivateMaster,
+  deleteMaster,
 } from "../services/accountsMasterService.js";
 
 const router = express.Router();
 
-router.get("/lookups", async (req, res) => {
-  try { res.json(await getMasterLookups()); }
-  catch (e) { res.status(500).json({ message: e.message }); }
-});
-
-router.get("/", async (req, res) => {
+router.get("/", async (req, res, next) => {
   try {
-    const type = cleanMasterType(req.query.type);
-    if (!type) return res.status(400).json({ message: "Invalid master type." });
-    res.json(await listMasters(type));
-  } catch (e) { res.status(500).json({ message: e.message }); }
+    const type = String(req.query.type || "").trim().toLowerCase();
+    const rows = await listMasters(type || null);
+    res.json({ success: true, data: rows, masters: rows });
+  } catch (err) { next(err); }
 });
 
-router.post("/", async (req, res) => {
+router.get("/:id", async (req, res, next) => {
+  try {
+    const row = await getMaster(req.params.id);
+    if (!row) return res.status(404).json({ success: false, message: "Master not found." });
+    res.json({ success: true, data: row, master: row });
+  } catch (err) { next(err); }
+});
+
+router.post("/", async (req, res, next) => {
   try {
     const row = await createMaster(req.body);
-    res.status(201).json({ message: "Master created successfully.", row });
-  } catch (e) { res.status(e.status || 500).json({ message: e.message }); }
+    res.status(201).json({ success: true, message: "Master saved successfully.", data: row, master: row });
+  } catch (err) { next(err); }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", async (req, res, next) => {
   try {
     const row = await updateMaster(req.params.id, req.body);
-    res.json({ message: "Master updated successfully.", row });
-  } catch (e) { res.status(e.status || 500).json({ message: e.message }); }
+    res.json({ success: true, message: "Master updated successfully.", data: row, master: row });
+  } catch (err) { next(err); }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", async (req, res, next) => {
   try {
-    const row = await deactivateMaster(req.params.id);
-    res.json({ message: "Master deleted successfully.", row });
-  } catch (e) { res.status(e.status || 500).json({ message: e.message }); }
+    const row = await deleteMaster(req.params.id);
+    res.json({ success: true, message: "Master deleted successfully.", data: row });
+  } catch (err) { next(err); }
 });
 
 export default router;
