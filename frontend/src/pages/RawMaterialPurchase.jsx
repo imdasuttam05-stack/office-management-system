@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-const API_URL = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
+const API_URL = (import.meta.env.VITE_API_URL || "https://hansaria-app-backend.onrender.com").replace(/\/+$/, "");
 const today = () => new Date().toISOString().slice(0, 10);
 const blankLine = () => ({ itemName: "", hsn: "", unit: "KG", batchNo: "", barcode: "", mfgDate: "", expiryDate: "", qty: "", purchaseRate: "", discount: "", gstRate: "", gstType: "NONE" });
 
