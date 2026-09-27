@@ -11,7 +11,6 @@ import CustomerMaster from "../models/CustomerMaster.js";
 import Group from "../models/Group.js";
 import Ledger from "../models/Ledger.js";
 import Voucher from "../models/Voucher.js";
-import InventoryMovement from "../models/InventoryMovement.js";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
@@ -24,7 +23,6 @@ async function adjustStock({companyId,location,itemType,itemName,unit,qty,value,
  if(mode!=="ADD" && oq+q < -0.000001) throw new Error(`Insufficient ${itemType} stock for ${itemName}. Available ${oq}, required ${qty}.`);
  const nq=r2(oq+q), nv=r2(Math.max(0,ov+v));
  await InventoryStock.findOneAndUpdate(filter,{$set:{hsn,unit,mfgDate,expiryDate,averageRate:nq?r2(nv/nq):0,lastPurchaseRate:mode==="ADD"?r2(value/(qty||1)):undefined,lastPurchaseDate:mode==="ADD"?new Date():undefined},$inc:{qty:q,stockValue:v},$setOnInsert:{companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""}},{upsert:true,new:true});
- await InventoryMovement.create({companyId:companyId||null,date:new Date(),location,itemName,itemType,unit,qtyIn:mode==="ADD"?qty:0,qtyOut:mode==="ADD"?0:qty,valueIn:mode==="ADD"?value:0,valueOut:mode==="ADD"?0:value,balanceQty:nq,sourceType:"LEGACY_STOCK_POST",sourceNo:"",batchNo:batchNo||"",barcode:barcode||""});
 }
 function buildLine(x){const qty=num(x.qty),rate=num(x.purchaseRate),gross=qty*rate,discount=Math.min(Math.max(num(x.discount),0),gross),taxable=r2(gross-discount),gstRate=Math.max(0,Math.min(num(x.gstRate),100)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),cgst=gstType==="CGST_SGST"?r2(gst/2):0,sgst=gstType==="CGST_SGST"?r2(gst-cgst):0,igst=gstType==="IGST"?gst:0;return {itemName:clean(x.itemName),hsn:clean(x.hsn),unit:clean(x.unit)||"KG",batchNo:clean(x.batchNo),barcode:clean(x.barcode),mfgDate:dt(x.mfgDate),expiryDate:dt(x.expiryDate),qty,purchaseRate:rate,discount:r2(discount),taxableAmount:taxable,gstRate,gstType,cgst,sgst,igst,lineTotal:r2(taxable+cgst+sgst+igst),landedCost:0}}
 export async function lookupPincode(req,res){
@@ -71,18 +69,19 @@ async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narratio
 export async function getPurchaseMasters(req,res){
  try{
   const companyId=req.user?.companyId||null;
+  const scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{ $or:[{companyId:null},{companyId:{$exists:false}}] };
   const [locations,suppliers,items,customers]=await Promise.all([
-   LocationMaster.find({companyId,active:true}).sort({name:1}).lean(),
-   SupplierMaster.find({companyId,active:true}).populate("ledgerId","name").sort({name:1}).lean(),
-   InventoryItemMaster.find({companyId,active:true,itemType:"RAW_MATERIAL"}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
-   CustomerMaster.find({companyId,active:true}).populate("ledgerId","name").sort({name:1}).lean()
+   LocationMaster.find({...scope,active:true}).sort({name:1}).lean(),
+   SupplierMaster.find({...scope,active:true}).populate("ledgerId","name").sort({name:1}).lean(),
+   InventoryItemMaster.find({...scope,active:true,itemType:"RAW_MATERIAL"}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
+   CustomerMaster.find({...scope,active:true}).populate("ledgerId","name").sort({name:1}).lean()
   ]);
   return res.json({success:true,locations,suppliers,items,customers});
  }catch(e){return res.status(500).json({success:false,message:e.message||"Master data load failed."})}
 }
 export async function createLocationMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Location / Godown name is required."});const code=clean(b.code).toUpperCase()||await next("LOCATION","LOC");const row=await LocationMaster.create({companyId:req.user?.companyId||null,name,code,pin:clean(b.pin),state:clean(b.state),district:clean(b.district),address:clean(b.address),createdBy:req.user._id});return res.status(201).json({success:true,message:"Location / Godown master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Location / Godown already exists.":e.message})}}
 export async function createSupplierMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Supplier name is required."});const row=await SupplierMaster.create({companyId:req.user?.companyId||null,name,gstin:clean(b.gstin).toUpperCase(),state:clean(b.state),district:clean(b.district),pin:clean(b.pin),phone:clean(b.phone),address:clean(b.address),gstStatus:clean(b.gstStatus),createdBy:req.user._id});return res.status(201).json({success:true,message:"Supplier master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Supplier already exists.":e.message})}}
-export async function createInventoryItemMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Item name is required."});const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(b.itemType)?b.itemType:"RAW_MATERIAL";const row=await InventoryItemMaster.create({companyId:req.user?.companyId||null,name,itemType,hsn:clean(b.hsn),unit:clean(b.unit)||"KG",defaultGstRate:Math.max(0,Math.min(num(b.defaultGstRate),100)),defaultBarcode:clean(b.defaultBarcode),createdBy:req.user._id});return res.status(201).json({success:true,message:"Item master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Item already exists.":e.message})}}
+export async function createInventoryItemMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Item name is required."});const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS"].includes(b.itemType)?b.itemType:"RAW_MATERIAL";const row=await InventoryItemMaster.create({companyId:req.user?.companyId||null,name,itemType,hsn:clean(b.hsn),unit:clean(b.unit)||"KG",defaultGstRate:Math.max(0,Math.min(num(b.defaultGstRate),100)),defaultBarcode:clean(b.defaultBarcode),createdBy:req.user._id});return res.status(201).json({success:true,message:"Item master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Item already exists.":e.message})}}
 export async function createRawMaterialPurchase(req,res){
   try{
     const b=req.body||{},location=clean(b.location),supplierName=clean(b.supplierName),raw=Array.isArray(b.lines)?b.lines:[];
@@ -219,7 +218,7 @@ export async function deleteSupplierMaster(req,res){
 export async function updateInventoryItemMaster(req,res){
   try{
     const b=req.body||{};
-    const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(b.itemType)?b.itemType:"RAW_MATERIAL";
+    const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS"].includes(b.itemType)?b.itemType:"RAW_MATERIAL";
     const row=await InventoryItemMaster.findOneAndUpdate(
       {_id:req.params.id,companyId:req.user?.companyId||null},
       {$set:{name:clean(b.name),itemType,hsn:clean(b.hsn),unit:clean(b.unit)||"KG",defaultGstRate:Math.max(0,Math.min(num(b.defaultGstRate),100)),defaultBarcode:clean(b.defaultBarcode)}},
