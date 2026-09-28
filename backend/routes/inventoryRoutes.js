@@ -1,5 +1,5 @@
 import express from "express";
-import {getWorkflowMasters,listBoms,createBom,costing,createPI,createReturn,createRepack,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
+import {getWorkflowMasters,listBoms,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
 import auth from "../middleware/auth.js";
 import requireRole from "../middleware/role.js";
 import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateLocationMaster,deleteLocationMaster,updateSupplierMaster,deleteSupplierMaster,updateCustomerMaster,deleteCustomerMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,getJobs,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
@@ -35,6 +35,8 @@ router.post("/workflow/costing",auth,costing);
 router.post("/workflow/pi",auth,requireRole("Admin","Manager"),createPI);
 router.post("/workflow/returns",auth,requireRole("Admin","Manager"),createReturn);
 router.post("/workflow/repack",auth,requireRole("Admin","Manager"),createRepack);
+router.post("/workflow/damage",auth,requireRole("Admin","Manager"),createDamage);
+router.post("/workflow/packing-conversion",auth,requireRole("Admin","Manager"),createPackingConversion);
 router.get("/workflow/documents",auth,getWorkflowDocs);
 router.get("/workflow/stock-ledger",auth,getStockLedger);
 export default router;
