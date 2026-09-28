@@ -11,6 +11,7 @@ import Expense from "./pages/Expense.jsx";
 import Users from "./pages/Users.jsx";
 import Payroll from "./pages/Payroll.jsx";
 import AccountsMasters from "./pages/AccountsMasters.jsx";
+import AccountsWorkspace from "./pages/AccountsWorkspace.jsx";
 import InventoryMasters from "./pages/InventoryMasters.jsx";
 import RawMaterialPurchase from "./pages/RawMaterialPurchase.jsx";
 import Manufacturing from "./pages/Manufacturing.jsx";
@@ -49,12 +50,10 @@ function LoadingScreen() {
   );
 }
 
-function GlobalVoucherKeys(){const nav=useNavigate();React.useEffect(()=>{const h=e=>{if(e.key==="F8"){e.preventDefault();nav("/voucher");}};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h)},[nav]);return null}
 
 export default function App() {
   return (
     <BrowserRouter>
-      <GlobalVoucherKeys />
       <Suspense
         fallback={<LoadingScreen />}
       >
@@ -114,7 +113,7 @@ export default function App() {
             {/* Accounts Masters */}
             <Route
               path="/accounts"
-              element={<AccountsMasters />}
+              element={<AccountsWorkspace />}
             />
             <Route path="/inventory-masters" element={<InventoryMasters />} />
             <Route path="/raw-material-purchase" element={<RawMaterialPurchase />} />
