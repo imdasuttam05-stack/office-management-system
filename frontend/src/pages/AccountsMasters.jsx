@@ -85,26 +85,30 @@ export default function AccountsMasters() {
 
   async function load() {
     try {
-      const r = await fetch(`${API_URL}/api/accounts/masters?type=${type}`, {headers:headers()});
+      const r = await fetch(`${API_URL}/api/accounts-masters?type=${type}`, {headers:headers()});
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || "Master load failed");
-      setRows(d.rows || []);
-      if (d.groups) setGroups(d.groups);
-      if (d.locations) setLocations(d.locations);
-      if (d.ledgers) setLedgers(d.ledgers);
+      setRows(d.data || d.masters || d.rows || []);
+      
     } catch (e) { setError(e.message); }
   }
 
   async function loadLookups() {
     try {
-      const r = await fetch(`${API_URL}/api/accounts/masters/lookups`, {headers:headers()});
-      const d = await r.json();
-      if (r.ok) {
-        setGroups(d.groups || []);
-        setLocations(d.locations || []);
-        setLedgers(d.ledgers || []);
-      }
-    } catch {}
+      const [g, l, led, p, s] = await Promise.all([
+        fetch(`${API_URL}/api/accounts-masters?type=group`, {headers:headers()}),
+        fetch(`${API_URL}/api/accounts-masters?type=location`, {headers:headers()}),
+        fetch(`${API_URL}/api/accounts-masters?type=ledger`, {headers:headers()}),
+        fetch(`${API_URL}/api/accounts-masters?type=party`, {headers:headers()}),
+        fetch(`${API_URL}/api/accounts-masters?type=supplier`, {headers:headers()})
+      ]);
+      const [gd, ld, ledD, pd, sd] = await Promise.all([g.json(), l.json(), led.json(), p.json(), s.json()]);
+      if (g.ok) setGroups(gd.data || gd.masters || []);
+      if (l.ok) setLocations(ld.data || ld.masters || []);
+      if (led.ok) setLedgers(ledD.data || ledD.masters || []);
+    } catch (e) {
+      console.warn('Accounts master lookups failed:', e);
+    }
   }
 
   useEffect(() => { load(); loadLookups(); }, [type]);
@@ -165,7 +169,7 @@ export default function AccountsMasters() {
     }
     setBusy(true); setError(""); setMessage("");
     try {
-      const url = `${API_URL}/api/accounts/masters/${editing?._id || ""}`;
+      const url = `${API_URL}/api/accounts-masters/${editing?._id || ""}`;
       const r = await fetch(url, {
         method: editing ? "PUT" : "POST",
         headers: headers(),
@@ -185,7 +189,7 @@ export default function AccountsMasters() {
   async function remove(row) {
     if (!window.confirm(`Delete ${row.name}?`)) return;
     try {
-      const r = await fetch(`${API_URL}/api/accounts/masters/${row._id}`, {
+      const r = await fetch(`${API_URL}/api/accounts-masters/${row._id}`, {
         method:"DELETE", headers:headers()
       });
       const d = await r.json();
