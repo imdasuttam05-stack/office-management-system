@@ -92,7 +92,7 @@ export async function createRawMaterialPurchase(req,res){
     const b=req.body||{},location=clean(b.location),supplierName=clean(b.supplierName),raw=Array.isArray(b.lines)?b.lines:[];
     if(!location||!supplierName||!raw.length)return res.status(400).json({success:false,message:"Location, Supplier and at least one line are required."});
     const companyId=req.user?.companyId||null;
-    const supplier=await SupplierMaster.findOne({companyId,name:supplierName,active:true});
+    const supplier=await SupplierMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:supplierName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]});
     if(!supplier)return res.status(400).json({success:false,message:"Supplier master not found. Create the supplier first."});
     const supplierLedger=supplier.ledgerId?await Ledger.findById(supplier.ledgerId):await ensureLedger({name:supplier.name,groupName:"Sundry Creditors",nature:"Liability",req,gstin:supplier.gstin,address:supplier.address,phone:supplier.phone});
     if(!supplier.ledgerId){supplier.ledgerId=supplierLedger._id;await supplier.save();}
@@ -125,7 +125,7 @@ export async function createSale(req,res){
     const b=req.body||{},location=clean(b.location),customerName=clean(b.customerName),lines=Array.isArray(b.lines)?b.lines:[];
     if(!location||!customerName||!lines.length)return res.status(400).json({success:false,message:"Location, customer and at least one line are required."});
     const companyId=req.user?.companyId||null;
-    const customer=await CustomerMaster.findOne({companyId,name:customerName,active:true});
+    const customer=await CustomerMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:customerName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]});
     if(!customer)return res.status(400).json({success:false,message:"Customer / Party master not found. Create the customer first."});
     const customerLedger=customer.ledgerId?await Ledger.findById(customer.ledgerId):await ensureLedger({name:customer.name,groupName:"Sundry Debtors",nature:"Asset",req,gstin:customer.gstin,address:customer.address,phone:customer.phone});
     if(!customer.ledgerId){customer.ledgerId=customerLedger._id;await customer.save();}
