@@ -2,6 +2,10 @@ import AccountsMaster from "../models/AccountsMaster.js";
 
 const clean = (v) => String(v ?? "").trim();
 const num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+const objectIdOrNull = (v) => {
+  const value = clean(v);
+  return /^[a-fA-F0-9]{24}$/.test(value) ? value : null;
+};
 
 export async function listMasters(masterType) {
   const filter = masterType ? { masterType, active: true } : { active: true };
@@ -23,6 +27,9 @@ export async function createMaster(payload = {}) {
   const data = {
     ...payload,
     masterType,
+    ledgerId: objectIdOrNull(payload.ledgerId),
+    locationId: objectIdOrNull(payload.locationId),
+    stockLedgerId: objectIdOrNull(payload.stockLedgerId),
     name,
     alias: clean(payload.alias),
     code: clean(payload.code),
