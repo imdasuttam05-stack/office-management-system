@@ -9,6 +9,7 @@ import InventoryMasters from "./InventoryMasters.jsx";
 import RawMaterialPurchase from "./RawMaterialPurchase.jsx";
 import Inventory from "./Inventory.jsx";
 import Manufacturing from "./Manufacturing.jsx";
+import VoucherCenter from "./VoucherCenter.jsx";
 
 export default function AccountsWorkspace() {
 
@@ -19,6 +20,16 @@ export default function AccountsWorkspace() {
     useRef(null);
 
   const menu = [
+
+    {
+      id: "voucher",
+      label: "Voucher Entry",
+      icon: "₹",
+      shortcut: "F6",
+      description:
+        "Purchase, Sale, Job, Production, Return & Stock vouchers",
+      component: VoucherCenter,
+    },
 
     {
       id: "accounting",
@@ -44,7 +55,7 @@ export default function AccountsWorkspace() {
       id: "purchase",
       label: "Purchase",
       icon: "↓",
-      shortcut: "F6",
+      shortcut: "F7",
       description:
         "Purchase Entry & Stock In",
       component: RawMaterialPurchase,
@@ -54,7 +65,7 @@ export default function AccountsWorkspace() {
       id: "sales",
       label: "Sales",
       icon: "↑",
-      shortcut: "F7",
+      shortcut: "F8",
       description:
         "Sales Entry & Stock Out",
       component: Manufacturing,
@@ -64,7 +75,7 @@ export default function AccountsWorkspace() {
       id: "inventory",
       label: "Inventory",
       icon: "▦",
-      shortcut: "F8",
+      shortcut: "F9",
       description:
         "Stock, Job Order & Inventory",
       component: Inventory,
@@ -145,7 +156,7 @@ export default function AccountsWorkspace() {
 
         event.preventDefault();
 
-        setActive("purchase");
+        setActive("voucher");
 
         return;
       }
@@ -156,7 +167,7 @@ export default function AccountsWorkspace() {
 
         event.preventDefault();
 
-        setActive("sales");
+        setActive("purchase");
 
         return;
       }
@@ -164,6 +175,17 @@ export default function AccountsWorkspace() {
       /* F8 */
 
       if (event.key === "F8") {
+
+        event.preventDefault();
+
+        setActive("sales");
+
+        return;
+      }
+
+      /* F9 */
+
+      if (event.key === "F9") {
 
         event.preventDefault();
 
@@ -678,16 +700,21 @@ export default function AccountsWorkspace() {
 
             <div className="keyboard-item">
               <kbd>F6</kbd>
-              <span>Purchase</span>
+              <span>Voucher Entry</span>
             </div>
 
             <div className="keyboard-item">
               <kbd>F7</kbd>
-              <span>Sales</span>
+              <span>Purchase</span>
             </div>
 
             <div className="keyboard-item">
               <kbd>F8</kbd>
+              <span>Sales</span>
+            </div>
+
+            <div className="keyboard-item">
+              <kbd>F9</kbd>
               <span>Inventory</span>
             </div>
 
