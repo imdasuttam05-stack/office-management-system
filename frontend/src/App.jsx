@@ -17,6 +17,18 @@ import Manufacturing from "./pages/Manufacturing.jsx";
 import Inventory from "./pages/Inventory.jsx";
 import Accounting from "./pages/Accounting.jsx";
 import IntegratedOperations from "./pages/IntegratedOperations.jsx";
+import Employees from "./pages/Employees.jsx";
+import Attendance from "./pages/Attendance.jsx";
+import LeaveManagement from "./pages/LeaveManagement.jsx";
+import HolidayCalendar from "./pages/HolidayCalendar.jsx";
+import ShiftManagement from "./pages/ShiftManagement.jsx";
+import Salary from "./pages/Salary.jsx";
+import PayrollReport from "./pages/PayrollReport.jsx";
+import PayrollApprovals from "./pages/PayrollApprovals.jsx";
+import Reports from "./pages/Reports.jsx";
+import AccountsTrading from "./pages/AccountsTrading.jsx";
+import AccountsWorkspace from "./pages/AccountsWorkspace.jsx";
+
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { startSessionManager } from "./lib/sessionManager.js";
 
@@ -118,6 +130,21 @@ export default function App() {
             <Route path="/accounting" element={<Accounting />} />
             <Route path="/operations" element={<IntegratedOperations />} />
 
+            {/* HR / Reports / Payroll routes used by Dashboard sidebar */}
+            <Route path="/employees" element={<Employees />} />
+            <Route path="/attendance" element={<Attendance />} />
+            <Route path="/leave" element={<LeaveManagement />} />
+            <Route path="/holidays" element={<HolidayCalendar />} />
+            <Route path="/shifts" element={<ShiftManagement />} />
+            <Route path="/salary" element={<Salary />} />
+            <Route path="/salary/slips" element={<PayrollReport />} />
+            <Route path="/approvals" element={<PayrollApprovals />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/reports/attendance" element={<Attendance />} />
+            <Route path="/reports/leave" element={<LeaveManagement />} />
+            <Route path="/reports/salary" element={<PayrollReport />} />
+            <Route path="/accounts/trading" element={<AccountsTrading />} />
+            <Route path="/accounts/workspace" element={<AccountsWorkspace />} />
 
           </Route>
 
