@@ -47,6 +47,8 @@ export default function Accounting() {
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const openVoucherCenter = () => { window.location.href = "/voucher"; };
+
   const groupNameRef = useRef(null);
   const ledgerNameRef = useRef(null);
   const voucherDateRef = useRef(null);
@@ -167,6 +169,12 @@ export default function Accounting() {
       if (e.key === "F6") {
         e.preventDefault();
         openTab("voucher");
+      }
+
+      // F8 = Voucher Center
+      if (e.key === "F8") {
+        e.preventDefault();
+        openVoucherCenter();
       }
 
       // F7 = Register

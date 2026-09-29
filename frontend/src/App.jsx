@@ -113,7 +113,7 @@ export default function App() {
             {/* Accounts Masters */}
             <Route
               path="/accounts"
-              element={<AccountsWorkspace />}
+              element={<AccountsMasters />}
             />
             <Route path="/inventory-masters" element={<InventoryMasters />} />
             <Route path="/raw-material-purchase" element={<RawMaterialPurchase />} />

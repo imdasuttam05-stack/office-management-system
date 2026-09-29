@@ -165,58 +165,70 @@ export default function Dashboard() {
       const token = getToken();
 
       if (!token) {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
         return;
       }
 
-      const headers = {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      };
-
       try {
-        // Load dashboard data independently so one slow/failing API
-        // does not keep the whole dashboard waiting.
-        const [expenseResult, employeeResult] =
-          await Promise.allSettled([
-            fetch(`${API_URL}/api/expenses`, {
-              method: "GET",
-              headers,
-            }),
-            fetch(`${API_URL}/api/payroll/employees`, {
-              method: "GET",
-              headers,
-            }),
-          ]);
+        const response = await fetch(
+          `${API_URL}/api/expenses`,
+          {
+            method: "GET",
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+              "Content-Type":
+                "application/json",
+            },
+          }
+        );
+
+        if (response.status === 401) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            "Failed to load expenses"
+          );
+        }
+
+        const data =
+          await response.json();
 
         if (cancelled) return;
 
-        if (
-          expenseResult.status === "fulfilled" &&
-          expenseResult.value.ok
-        ) {
-          const data = await expenseResult.value.json();
+        const expenses =
+          Array.isArray(data)
+            ? data
+            : Array.isArray(
+                data?.expenses
+              )
+            ? data.expenses
+            : Array.isArray(
+                data?.data
+              )
+            ? data.data
+            : [];
 
-          const expenses =
-            Array.isArray(data)
-              ? data
-              : Array.isArray(data?.expenses)
-              ? data.expenses
-              : Array.isArray(data?.data)
-              ? data.data
-              : [];
+        let total = 0;
+        let pending = 0;
 
-          let total = 0;
-          let pending = 0;
+        expenses.forEach(
+          (expense) => {
+            const amount =
+              Number(
+                expense?.amount
+              ) || 0;
 
-          expenses.forEach((expense) => {
-            total += Number(expense?.amount) || 0;
+            total += amount;
 
-            const status = String(
-              expense?.status ||
-                expense?.approvalStatus ||
-                ""
-            ).toLowerCase();
+            const status =
+              String(
+                expense?.status ||
+                  expense?.approvalStatus ||
+                  ""
+              ).toLowerCase();
 
             if (
               status === "pending" ||
@@ -224,51 +236,14 @@ export default function Dashboard() {
             ) {
               pending += 1;
             }
-          });
+          }
+        );
 
-          setExpenseTotal(total);
-          setPendingApproval(pending);
-        } else if (
-          expenseResult.status === "fulfilled" &&
-          expenseResult.value.status === 401
-        ) {
-          console.warn("Dashboard expense request returned 401.");
-        } else if (expenseResult.status === "rejected") {
-          console.error(
-            "Dashboard expense request failed:",
-            expenseResult.reason
-          );
-        }
-
-        if (
-          employeeResult.status === "fulfilled" &&
-          employeeResult.value.ok
-        ) {
-          const data = await employeeResult.value.json();
-
-          const employees =
-            Array.isArray(data)
-              ? data
-              : Array.isArray(data?.employees)
-              ? data.employees
-              : Array.isArray(data?.data)
-              ? data.data
-              : [];
-
-          setEmployeeCount(
-            Number.isFinite(Number(data?.count))
-              ? Number(data.count)
-              : employees.length
-          );
-        } else if (employeeResult.status === "rejected") {
-          console.error(
-            "Dashboard employee request failed:",
-            employeeResult.reason
-          );
-        }
+        setExpenseTotal(total);
+        setPendingApproval(pending);
       } catch (error) {
         console.error(
-          "Dashboard initial data error:",
+          "Dashboard expense error:",
           error
         );
       } finally {
@@ -278,7 +253,6 @@ export default function Dashboard() {
       }
     }
 
-    // Run immediately on first render. Do not wait for a click.
     loadDashboard();
 
     return () => {
