@@ -61,6 +61,9 @@ const blank = {
   location: {
     name:"", code:"", state:"West Bengal", district:"", pin:"", address:"",
     gstStateCode:"", masterType:"LOCATION"
+  },
+  unit: {
+    name:"", code:"", decimalPlaces:2, masterType:"UNIT", active:true
   }
 };
 
@@ -71,6 +74,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
   const [groups, setGroups] = useState([]);
   const [locations, setLocations] = useState([]);
   const [ledgers, setLedgers] = useState([]);
+  const [units, setUnits] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({...blank.ledger});
   const [search, setSearch] = useState("");
@@ -118,6 +122,9 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
       if (g.ok) setGroups(gd.data || gd.masters || []);
       if (l.ok) setLocations(ld.data || ld.masters || []);
       if (led.ok) setLedgers(ledD.data || ledD.masters || []);
+      const u = await fetch(`${API_URL}/api/accounts-masters?type=unit`, {headers:headers()});
+      const ud = await u.json();
+      if (u.ok) setUnits(ud.data || ud.masters || []);
     } catch (e) {
       console.warn('Accounts master lookups failed:', e);
     }
@@ -168,7 +175,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
         }
       }
 
-      const map = { F4:"group", F5:"ledger", F6:"party", F7:"supplier", F8:"product", F9:"location" };
+      const map = { F4:"group", F5:"ledger", F6:"party", F7:"supplier", F8:"product", F9:"location", F10:"unit" };
       if (map[e.key]) {
         e.preventDefault();
         const nextType = map[e.key];
@@ -245,7 +252,8 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
     party:"Party / Customer",
     supplier:"Supplier",
     product:"Product / Stock Item",
-    location:"Location / Godown"
+    location:"Location / Godown",
+    unit:"Unit"
   }[type];
 
   return (
@@ -277,7 +285,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
         </div>
         <div className="shortcuts">
           <span className="kbd"><b>Alt+C</b>Create current master</span>
-          <span className="kbd"><b>F4–F9</b>Switch master</span>
+          <span className="kbd"><b>F4–F10</b>Switch master</span>
           <span className="kbd"><b>Enter</b>Next field</span>
           <span className="kbd"><b>Esc</b>Clear focus</span>
         </div>
@@ -290,7 +298,8 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
           ["party","Party","F6"],
           ["supplier","Supplier","F7"],
           ["product","Product","F8"],
-          ["location","Location","F9"]
+          ["location","Location","F9"],
+          ["unit","Unit","F10"]
         ].map(([id,label,key]) =>
           <button key={id} className={type===id ? "active":""} onClick={()=>{setType(id);setMode("list");setEditing(null);setForm({...blank[id]});setError("");setMessage("");}}>
             {label} <span style={{fontSize:10,opacity:.7,marginLeft:4}}>{key}</span>
@@ -320,6 +329,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
                         {(type==="party" || type==="supplier") && <>GSTIN: {row.gstin || "Not set"} · {row.state || ""} · {row.locationName || ""}</>}
                         {type==="product" && <>Code: {row.code || "-"} · HSN: {row.hsn || "-"} · Unit: {row.unit || "-"} · GST: {row.gstRate || 0}%</>}
                         {type==="location" && <>Code: {row.code || "-"} · {row.district || ""} · {row.state || ""} · PIN {row.pin || ""}</>}
+                        {type==="unit" && <>Code: {row.code || "-"} · Decimal Places: {row.decimalPlaces ?? 2}</>}
                       </small>
                     </div>
                     <div className="actions"><button onClick={()=>edit(row)}>Edit</button><button className="danger" onClick={()=>remove(row)}>Delete</button></div>
@@ -379,7 +389,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
                 <div className="field"><label>Product Code</label><input value={form.code||""} placeholder="Auto / optional" onChange={e=>update("code",e.target.value)}/></div>
                 <div className="field"><label>Item Type</label><select value={form.itemType||"FINISHED_GOODS"} onChange={e=>update("itemType",e.target.value)}><option>RAW_MATERIAL</option><option>GRADE</option><option>FINISHED_GOODS</option><option>PACKED_GOODS</option><option>RETURN_GOODS</option><option>REJECTED</option></select></div>
                 <div className="field"><label>HSN</label><input value={form.hsn||""} onChange={e=>update("hsn",e.target.value)}/></div>
-                <div className="field"><label>Unit</label><input value={form.unit||"KG"} onChange={e=>update("unit",e.target.value)}/></div>
+                <div className="field"><label>Unit *</label><select value={form.unit||""} onChange={e=>update("unit",e.target.value)}><option value="">Select Unit</option>{units.map(x=><option key={x._id} value={x.code || x.name}>{x.code || x.name} — {x.name}</option>)}</select></div>
                 <div className="field"><label>GST %</label><input type="number" value={form.gstRate||""} onChange={e=>update("gstRate",e.target.value)}/></div>
                 <div className="field"><label>Under / Stock Ledger</label><select value={form.under||"Stock-in-Hand"} onChange={e=>update("under",e.target.value)}><option>Stock-in-Hand</option>{groups.map(x=><option key={x}>{x}</option>)}</select></div>
                 <div className="field"><label>Purchase Rate</label><input type="number" value={form.purchaseRate||""} onChange={e=>update("purchaseRate",e.target.value)}/></div>
@@ -389,8 +399,14 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
                 <div className="field"><label>Location</label><select value={form.locationId||""} onChange={e=>update("locationId",e.target.value)}><option value="">Select Location</option>{locations.map(x=><option value={x._id} key={x._id}>{x.name}</option>)}</select></div>
               </>}
 
-              {type==="location" && <>
-                <div className="field"><label>Location Code</label><input value={form.code||""} placeholder="Auto code" onChange={e=>update("code",e.target.value)}/></div>
+              {type==="unit" && <>
+                <div className="field"><label>Unit Name *</label><input autoFocus value={form.name||""} onChange={e=>update("name",e.target.value)} placeholder="Kilogram" /></div>
+                <div className="field"><label>Unit Code *</label><input value={form.code||""} onChange={e=>update("code",e.target.value.toUpperCase().replace(/\s+/g,"_"))} placeholder="KG" /></div>
+                <div className="field"><label>Decimal Places</label><select value={form.decimalPlaces ?? 2} onChange={e=>update("decimalPlaces",Number(e.target.value))}>{[0,1,2,3,4,5,6].map(n=><option key={n} value={n}>{n}</option>)}</select></div>
+                <div className="field full"><div className="hint">Example: KG = Kilogram, MT = Metric Ton, PCS = Pieces, LTR = Litre.</div></div>
+              </>}
+
+              {type==="location" && <>                <div className="field"><label>Location Code</label><input value={form.code||""} placeholder="Auto code" onChange={e=>update("code",e.target.value)}/></div>
                 <div className="field"><label>State *</label><select value={form.state||""} onChange={e=>update("state",e.target.value)}><option value="">Select State</option>{STATES.map(x=><option key={x}>{x}</option>)}</select></div>
                 <div className="field"><label>District</label><input value={form.district||""} onChange={e=>update("district",e.target.value)}/></div>
                 <div className="field"><label>PIN</label><input maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
