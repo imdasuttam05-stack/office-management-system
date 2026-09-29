@@ -124,7 +124,7 @@ export async function getMaster(id) {
 export async function createMaster(payload = {}, ctx = {}) {
   requireContext(ctx);
   const masterType = clean(payload.masterType).toLowerCase();
-  if (!["group", "ledger", "party", "supplier", "product", "location"].includes(masterType)) throw new Error("Invalid master type.");
+  if (!["group", "ledger", "party", "supplier", "product", "location", "unit"].includes(masterType)) throw new Error("Invalid master type.");
   const name = clean(payload.name);
   if (!name) throw new Error("Name is required.");
 
@@ -138,13 +138,14 @@ export async function createMaster(payload = {}, ctx = {}) {
     alias: clean(payload.alias), code: clean(payload.code), under: clean(payload.under),
     state: clean(payload.state), district: clean(payload.district), pin: clean(payload.pin), address: clean(payload.address),
     mobile: clean(payload.mobile), email: clean(payload.email), gstin: clean(payload.gstin).toUpperCase(), pan: clean(payload.pan).toUpperCase(),
-    openingBalance: num(payload.openingBalance), creditLimit: num(payload.creditLimit), creditDays: num(payload.creditDays),
+    openingBalance: num(payload.openingBalance), decimalPlaces: Math.max(0, Math.min(6, Number.isFinite(Number(payload.decimalPlaces)) ? Number(payload.decimalPlaces) : 2)), creditLimit: num(payload.creditLimit), creditDays: num(payload.creditDays),
     gstRate: num(payload.gstRate), purchaseRate: num(payload.purchaseRate), salesRate: num(payload.salesRate), openingQty: num(payload.openingQty), openingValue: num(payload.openingValue),
     active:true,
   };
   if (masterType === "party") { data.under=data.under||"Sundry Debtors"; data.partyType=data.partyType||"CUSTOMER"; data.nature=data.nature||"Current Assets"; }
   if (masterType === "supplier") { data.under=data.under||"Sundry Creditors"; data.partyType=data.partyType||"SUPPLIER"; data.nature=data.nature||"Current Liabilities"; }
   if (masterType === "product") { data.under=data.under||"Stock-in-Hand"; data.itemType=data.itemType||"RAW_MATERIAL"; data.unit=data.unit||"KG"; }
+  if (masterType === "unit") { data.code=data.code||name.toUpperCase().replace(/\s+/g,"_"); data.decimalPlaces=Math.max(0, Math.min(6, Number(data.decimalPlaces ?? 2))); }
 
   const created = await AccountsMaster.create(data);
   await syncTransactionMaster(created.toObject(), ctx);
@@ -155,7 +156,7 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
   requireContext(ctx);
   const existing = await AccountsMaster.findById(id);
   if (!existing) throw new Error("Master not found.");
-  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","gstStateCode","active"];
+  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
   for (const key of allowed) if (payload[key] !== undefined) existing[key]=payload[key];
   existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
   await existing.save();
@@ -169,6 +170,7 @@ export async function deleteMaster(id, ctx = {}) {
   if (!existing) throw new Error("Master not found.");
   existing.active=false; await existing.save();
   const companyId=ctx.user?.companyId||null;
+  if (existing.masterType==="unit") { /* Unit is stored in AccountsMaster; no secondary model is required. */ }
   if (existing.masterType==="product") await InventoryItemMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
   if (existing.masterType==="supplier") await SupplierMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
   if (existing.masterType==="party") await CustomerMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
