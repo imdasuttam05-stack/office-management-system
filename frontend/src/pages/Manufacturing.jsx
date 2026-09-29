@@ -1,32 +1,947 @@
-import React,{useEffect,useMemo,useState} from "react";
-const API=(import.meta.env.VITE_API_URL||"https://office-management-system-ikx8.onrender.com").replace(/\/+$/,'');
-const auth=()=>({"Content-Type":"application/json",Authorization:`Bearer ${localStorage.getItem("token")||""}`});
-async function api(path,opt={}){const r=await fetch(`${API}/api/inventory${path}`,{...opt,headers:{...auth(),...(opt.headers||{})}});const d=await r.json();if(!r.ok)throw new Error(d.message||"Request failed");return d}
-const today=()=>new Date().toISOString().slice(0,10); const money=n=>Number(n||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
-function Input({label,...p}){return <label className="mf"><span>{label}</span><input {...p}/></label>}
-function Select({label,children,...p}){return <label className="mf"><span>{label}</span><select {...p}>{children}</select></label>}
-function Lines({items,setItems,products=[],allowedTypes=[]}){
-const options=products.filter(p=>!allowedTypes.length || allowedTypes.includes(p.itemType));
-return <div className="scroll"><table><thead><tr><th>Product</th><th>Unit</th><th>Qty</th><th>Rate</th><th>Batch</th><th>Barcode</th><th></th></tr></thead><tbody>{items.map((x,i)=><tr key={i}><td><select value={x.itemName||""} onChange={e=>{const p=options.find(v=>v.name===e.target.value);setItems(a=>a.map((v,j)=>j===i?{...v,itemName:e.target.value,unit:p?.unit||v.unit||"KG",rate:v.rate||p?.purchaseRate||"",hsn:p?.hsn||v.hsn||"",gstRate:p?.gstRate??v.gstRate}:v))}}><option value="">Select Product</option>{options.map(p=><option key={p._id} value={p.name}>{p.name}{p.code?` (${p.code})`:""} — {p.itemType}</option>)}</select></td><td><input value={x.unit||"KG"} readOnly/></td><td><input type="number" min="0" value={x.qty||""} onChange={e=>setItems(a=>a.map((v,j)=>j===i?{...v,qty:e.target.value}:v))}/></td><td><input type="number" min="0" value={x.rate||""} onChange={e=>setItems(a=>a.map((v,j)=>j===i?{...v,rate:e.target.value}:v))}/></td><td><input value={x.batchNo||""} onChange={e=>setItems(a=>a.map((v,j)=>j===i?{...v,batchNo:e.target.value}:v))}/></td><td><input value={x.barcode||""} onChange={e=>setItems(a=>a.map((v,j)=>j===i?{...v,barcode:e.target.value}:v))}/></td><td><button className="danger" onClick={()=>setItems(a=>a.filter((_,j)=>j!==i))}>×</button></td></tr>)}</tbody></table></div>}
-function StockTable({items,title}){return <div className="card"><h3>{title}</h3><div className="scroll"><table><thead><tr><th>Item</th><th>Type</th><th>Location</th><th>Batch</th><th>Qty</th><th>Unit</th><th>Avg Rate</th><th>Value</th></tr></thead><tbody>{items.map(x=><tr key={x._id}><td>{x.itemName}</td><td>{x.itemType}</td><td>{x.location}</td><td>{x.batchNo||"-"}</td><td>{money(x.qty)}</td><td>{x.unit}</td><td>₹ {money(x.averageRate)}</td><td>₹ {money(x.stockValue)}</td></tr>)}</tbody></table></div></div>}
-export default function Manufacturing(){const [tab,setTab]=useState(()=>new URLSearchParams(window.location.search).get("tab")||"purchase"),[msg,setMsg]=useState(""),[err,setErr]=useState(""),[busy,setBusy]=useState(false),[stock,setStock]=useState([]),[products,setProducts]=useState([]),[jobs,setJobs]=useState([]),[sales,setSales]=useState([]),[gst,setGst]=useState(null);
-const [purchase,setPurchase]=useState({date:today(),location:"",supplierName:"",supplierGSTIN:"",supplierInvoiceNo:"",supplierInvoiceDate:"",transportCost:"",otherCost:"",remarks:""});
-const blank=()=>({itemName:"",unit:"KG",qty:"",rate:"",batchNo:"",barcode:""});const [pLines,setPLines]=useState([blank()]);
-const [job,setJob]=useState({date:today(),location:"",labourCost:"",transportCost:"",otherCost:"",notes:""}),[sources,setSources]=useState([blank()]),[outputs,setOutputs]=useState([blank()]);
-const [sale,setSale]=useState({date:today(),location:"",customerName:"",customerGSTIN:"",customerState:"",supplierState:"",placeOfSupply:"",remarks:""}),[sLines,setSLines]=useState([{...blank(),gstRate:"",gstType:"CGST_SGST"}]);
-const [jobType,setJobType]=useState("GRADING");
-async function refresh(){try{const [r,g,f,s,j,p]=await Promise.all([api('/stock?itemType=RAW_MATERIAL'),api('/stock?itemType=GRADE'),api('/stock?itemType=FINISHED_GOODS'),api('/sales'),api('/job-orders'),fetch(`${API}/api/accounts-masters?type=product`,{headers:auth()}).then(async x=>{const d=await x.json();if(!x.ok)throw new Error(d.message||'Product load failed');return d})]);setStock([...r.items,...g.items,...f.items]);setSales(s.items||[]);setJobs(j.items||[]);setProducts(p.data||p.masters||[])}catch(e){setErr(e.message)}}
-useEffect(()=>{refresh()},[]);useEffect(()=>{if(tab==="gst")api('/gst-report').then(setGst).catch(e=>setErr(e.message))},[tab]);
-async function savePurchase(){setBusy(true);setErr("");try{const d=await api('/raw-material-purchases',{method:'POST',body:JSON.stringify({...purchase,lines:pLines})});setMsg(d.message);setPLines([blank()]);await refresh()}catch(e){setErr(e.message)}finally{setBusy(false)}}
-async function saveJob(forceType=jobType){setBusy(true);setErr("");try{const d=await api('/job-orders',{method:'POST',body:JSON.stringify({...job,type:forceType,sourceItems:sources,outputItems:outputs})});setMsg(d.message);setSources([blank()]);setOutputs([blank()]);await refresh()}catch(e){setErr(e.message)}finally{setBusy(false)}}
-async function saveSale(){setBusy(true);setErr("");try{const d=await api('/sales',{method:'POST',body:JSON.stringify({...sale,lines:sLines})});setMsg(d.message);setSLines([{...blank(),gstRate:"",gstType:"CGST_SGST"}]);await refresh()}catch(e){setErr(e.message)}finally{setBusy(false)}}
-const tabs=[['purchase','Purchase'],['grading','Grading Job Order'],['grade','Grade Stock'],['fgjob','Finished Goods Job'],['fg','Finished Goods Stock'],['sales','Sales'],['gst','GST Reports']];
-return <main className="manufacturing"><style>{`.manufacturing{padding:20px;max-width:1500px;margin:auto;font-family:Inter,Arial,sans-serif;color:#172b4d}.top{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:15px}.top h1{margin:0}.tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:15px}.tab{border:1px solid #d0d5dd;background:#fff;padding:10px 13px;border-radius:8px;cursor:pointer}.tab.on{background:#175cd3;color:#fff;border-color:#175cd3}.card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:16px;margin-bottom:15px;box-shadow:0 2px 10px #1018280d}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.mf{display:grid;gap:5px;font-size:12px;font-weight:600}.mf input,.mf select,.card input{padding:9px;border:1px solid #d0d5dd;border-radius:7px;box-sizing:border-box;width:100%}.wide{grid-column:span 2}.btn{border:0;border-radius:8px;padding:10px 14px;background:#175cd3;color:white;font-weight:700;cursor:pointer}.secondary{background:#eef2f6;color:#344054}.danger{border:0;background:#fee4e2;color:#b42318;padding:7px 10px;border-radius:6px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;min-width:850px}th,td{border-bottom:1px solid #eaecf0;padding:9px;text-align:left;font-size:12px;white-space:nowrap}th{background:#f8fafc}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.msg{background:#ecfdf3;color:#027a48;padding:10px;border-radius:8px;margin-bottom:12px}.err{background:#fef3f2;color:#b42318;padding:10px;border-radius:8px;margin-bottom:12px}.muted{color:#667085;font-size:13px}.summary{display:flex;gap:25px;justify-content:flex-end;margin-top:12px}.job-head{display:flex;gap:10px;align-items:center;margin-bottom:10px}@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:600px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}`}</style>
-<div className="top"><div><h1>Purchase → Production → Sales → GST</h1><div className="muted">Raw Stock → Grade Stock → Finished Goods Stock with stock-controlled job orders.</div></div><button className="btn secondary" onClick={refresh}>Refresh</button></div>
-<div className="tabs">{tabs.map(([k,n])=><button className={`tab ${tab===k?'on':''}`} onClick={()=>{setTab(k);setMsg('');setErr('')}} key={k}>{n}</button>)}</div>{msg&&<div className="msg">{msg}</div>}{err&&<div className="err">{err}</div>}
-{tab==='purchase'&&<><div className="card"><h3>Raw Material Purchase</h3><div className="grid"><Input label="Date" type="date" value={purchase.date} onChange={e=>setPurchase({...purchase,date:e.target.value})}/><Input label="Location / Godown" value={purchase.location} onChange={e=>setPurchase({...purchase,location:e.target.value})}/><Input label="Supplier" value={purchase.supplierName} onChange={e=>setPurchase({...purchase,supplierName:e.target.value})}/><Input label="Supplier GSTIN" value={purchase.supplierGSTIN} onChange={e=>setPurchase({...purchase,supplierGSTIN:e.target.value.toUpperCase()})}/><Input label="Invoice No" value={purchase.supplierInvoiceNo} onChange={e=>setPurchase({...purchase,supplierInvoiceNo:e.target.value})}/><Input label="Invoice Date" type="date" value={purchase.supplierInvoiceDate} onChange={e=>setPurchase({...purchase,supplierInvoiceDate:e.target.value})}/><Input label="Transport Cost" type="number" value={purchase.transportCost} onChange={e=>setPurchase({...purchase,transportCost:e.target.value})}/><Input label="Other Cost" type="number" value={purchase.otherCost} onChange={e=>setPurchase({...purchase,otherCost:e.target.value})}/></div></div><div className="card"><h3>Raw Material Lines</h3><Lines items={pLines} setItems={setPLines} products={products} allowedTypes={["RAW_MATERIAL"]}/><button className="btn secondary" onClick={()=>setPLines([...pLines,blank()])}>+ Add Raw Material</button><div className="actions"><button className="btn" disabled={busy} onClick={savePurchase}>{busy?'Posting...':'Post Purchase → Raw Stock'}</button></div></div></>}
-{(tab==='grading'||tab==='fgjob')&&<div className="card"><div className="job-head"><h3 style={{margin:0}}>{tab==='grading'?'Grading Job Order':'Finished Goods Job Order'}</h3><Select label="" value={jobType} onChange={e=>setJobType(e.target.value)}><option value="GRADING">GRADING: Raw → Grades</option><option value="FINISHED_GOODS">FINISHED GOODS: Grade → FG</option></Select></div><div className="grid"><Input label="Date" type="date" value={job.date} onChange={e=>setJob({...job,date:e.target.value})}/><Input label="Location" value={job.location} onChange={e=>setJob({...job,location:e.target.value})}/><Input label="Labour Cost" type="number" value={job.labourCost} onChange={e=>setJob({...job,labourCost:e.target.value})}/><Input label="Transport Cost" type="number" value={job.transportCost} onChange={e=>setJob({...job,transportCost:e.target.value})}/><Input label="Other Production Cost" type="number" value={job.otherCost} onChange={e=>setJob({...job,otherCost:e.target.value})}/></div><h4>Source Stock (will decrease)</h4><Lines items={sources} setItems={setSources} products={products} allowedTypes={jobType==="GRADING"?["RAW_MATERIAL"]:["GRADE"]}/><button className="btn secondary" onClick={()=>setSources([...sources,blank()])}>+ Source</button><h4>Output Stock (will increase)</h4><Lines items={outputs} setItems={setOutputs} products={products} allowedTypes={jobType==="GRADING"?["GRADE"]:["FINISHED_GOODS"]}/><button className="btn secondary" onClick={()=>setOutputs([...outputs,blank()])}>+ Output</button><div className="actions"><button className="btn" disabled={busy} onClick={()=>{const t=tab==='grading'?'GRADING':'FINISHED_GOODS';setJobType(t);saveJob(t)}}>{busy?'Posting...':'Post Job Order & Update Stock'}</button></div></div>}
-{tab==='grade'&&<StockTable items={stock.filter(x=>x.itemType==='GRADE')} title="Grade Stock"/>}{tab==='fg'&&<StockTable items={stock.filter(x=>x.itemType==='FINISHED_GOODS')} title="Finished Goods Stock"/>}
-{tab==='sales'&&<><div className="card"><h3>Finished Goods Sale</h3><div className="grid"><Input label="Date" type="date" value={sale.date} onChange={e=>setSale({...sale,date:e.target.value})}/><Input label="Location" value={sale.location} onChange={e=>setSale({...sale,location:e.target.value})}/><Input label="Customer / Party" value={sale.customerName} onChange={e=>setSale({...sale,customerName:e.target.value})}/><Input label="Customer GSTIN" value={sale.customerGSTIN} onChange={e=>setSale({...sale,customerGSTIN:e.target.value.toUpperCase()})}/><Input label="Supplier State" value={sale.supplierState} onChange={e=>setSale({...sale,supplierState:e.target.value})}/><Input label="Place of Supply" value={sale.placeOfSupply} onChange={e=>setSale({...sale,placeOfSupply:e.target.value})}/><Input label="Customer State" value={sale.customerState} onChange={e=>setSale({...sale,customerState:e.target.value})}/></div></div><div className="card"><h3>Sale Lines</h3><div className="scroll"><table><thead><tr><th>FG Item</th><th>Unit</th><th>Qty</th><th>Rate</th><th>Batch</th><th>Barcode</th><th>HSN</th><th>GST %</th><th>Tax Type</th><th></th></tr></thead><tbody>{sLines.map((x,i)=><tr key={i}>{['itemName','unit','qty','rate','batchNo','barcode','hsn','gstRate'].map(k=><td key={k}><input type={['qty','rate','gstRate'].includes(k)?'number':'text'} value={x[k]||''} onChange={e=>setSLines(a=>a.map((v,j)=>j===i?{...v,[k]:e.target.value}:v))}/></td>)}<td><select value={x.gstType} onChange={e=>setSLines(a=>a.map((v,j)=>j===i?{...v,gstType:e.target.value}:v))}><option value="NONE">None</option><option value="CGST_SGST">CGST+SGST</option><option value="IGST">IGST</option></select></td><td><button className="danger" onClick={()=>setSLines(a=>a.filter((_,j)=>j!==i))}>×</button></td></tr>)}</tbody></table></div><button className="btn secondary" onClick={()=>setSLines([...sLines,{...blank(),gstRate:'',gstType:'CGST_SGST'}])}>+ Sale Line</button><div className="actions"><button className="btn" disabled={busy} onClick={saveSale}>{busy?'Posting...':'Post Sale & Reduce FG Stock'}</button></div></div><div className="card"><h3>Sales List</h3><div className="scroll"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Location</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr></thead><tbody>{sales.map(x=><tr key={x._id}><td>{x.invoiceNo}</td><td>{new Date(x.date).toLocaleDateString('en-IN')}</td><td>{x.customerName}</td><td>{x.location}</td><td>₹ {money(x.subtotal)}</td><td>₹ {money(x.totalCGST)}</td><td>₹ {money(x.totalSGST)}</td><td>₹ {money(x.totalIGST)}</td><td>₹ {money(x.grandTotal)}</td></tr>)}</tbody></table></div></div></>}
-{tab==='gst'&&<div className="card"><h3>GST Input / Output Summary</h3>{gst?<><div className="grid"><div><b>Input Taxable</b><h2>₹ {money(gst.summary.input.taxable)}</h2></div><div><b>Input CGST</b><h2>₹ {money(gst.summary.input.cgst)}</h2></div><div><b>Input SGST</b><h2>₹ {money(gst.summary.input.sgst)}</h2></div><div><b>Input IGST</b><h2>₹ {money(gst.summary.input.igst)}</h2></div><div><b>Output Taxable</b><h2>₹ {money(gst.summary.output.taxable)}</h2></div><div><b>Output CGST</b><h2>₹ {money(gst.summary.output.cgst)}</h2></div><div><b>Output SGST</b><h2>₹ {money(gst.summary.output.sgst)}</h2></div><div><b>Output IGST</b><h2>₹ {money(gst.summary.output.igst)}</h2></div></div><h4>GST Document Ledger</h4><div className="scroll"><table><thead><tr><th>Type</th><th>Document</th><th>Date</th><th>Party</th><th>GSTIN</th><th>HSN</th><th>Taxable</th><th>CGST</th><th>SGST</th><th>IGST</th></tr></thead><tbody>{gst.rows.map(x=><tr key={x._id}><td>{x.sourceType}</td><td>{x.documentNo}</td><td>{new Date(x.date).toLocaleDateString('en-IN')}</td><td>{x.partyName}</td><td>{x.partyGSTIN||'-'}</td><td>{x.hsn||'-'}</td><td>₹ {money(x.taxableAmount)}</td><td>₹ {money(x.cgst)}</td><td>₹ {money(x.sgst)}</td><td>₹ {money(x.igst)}</td></tr>)}</tbody></table></div></>:<div className="muted">Loading GST report...</div>}</div>}
-</main>}
+```jsx
+import React, { useEffect, useMemo, useState } from "react";
+
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://office-management-system-ikx8.onrender.com";
+
+const emptyJob = {
+  jobNo: "",
+  date: new Date().toISOString().slice(0, 10),
+  type: "Finished Goods",
+  customerName: "",
+  location: "",
+  sourceItemId: "",
+  sourceItemName: "",
+  sourceQty: "",
+  sourceUnit: "",
+  outputItemId: "",
+  outputItemName: "",
+  outputQty: "",
+  outputUnit: "",
+  wastageQty: "",
+  remarks: "",
+};
+
+export default function Manufacturing() {
+  const [items, setItems] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [form, setForm] = useState(emptyJob);
+  const [loading, setLoading] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const token =
+    localStorage.getItem("token") ||
+    localStorage.getItem("accessToken") ||
+    "";
+
+  const headers = useMemo(
+    () => ({
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }),
+    [token]
+  );
+
+  // ---------------------------------------------------------
+  // LOAD INVENTORY MASTER ITEMS
+  // ---------------------------------------------------------
+  const loadItems = async () => {
+    try {
+      setItemsLoading(true);
+      setError("");
+
+      const response = await fetch(`${API_URL}/api/inventory/items`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Unable to load inventory items (${response.status})`);
+      }
+
+      const data = await response.json();
+
+      // Supports:
+      // {items: []}
+      // {data: []}
+      // []
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data.items)
+        ? data.items
+        : Array.isArray(data.data)
+        ? data.data
+        : [];
+
+      setItems(list);
+    } catch (err) {
+      console.error("Inventory items loading error:", err);
+      setError(
+        "Inventory Master items load হচ্ছে না. API endpoint/check করুন."
+      );
+      setItems([]);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // ---------------------------------------------------------
+  // LOAD JOB ORDERS
+  // ---------------------------------------------------------
+  const loadJobs = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/inventory/jobs`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data.jobs)
+        ? data.jobs
+        : Array.isArray(data.data)
+        ? data.data
+        : [];
+
+      setJobs(list);
+    } catch (err) {
+      console.error("Job orders loading error:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadItems();
+    loadJobs();
+  }, []);
+
+  // ---------------------------------------------------------
+  // NORMALIZE ITEM DATA
+  // ---------------------------------------------------------
+  const getItemId = (item) =>
+    item._id ||
+    item.id ||
+    item.itemId ||
+    item.productId ||
+    item.stockItemId ||
+    "";
+
+  const getItemName = (item) =>
+    item.name ||
+    item.itemName ||
+    item.productName ||
+    item.stockItemName ||
+    item.product ||
+    "";
+
+  const getItemCode = (item) =>
+    item.code ||
+    item.itemCode ||
+    item.productCode ||
+    item.stockCode ||
+    "";
+
+  const getItemUnit = (item) =>
+    item.unit ||
+    item.unitName ||
+    item.stockUnit ||
+    "PCS";
+
+  // Remove duplicate products
+  const uniqueItems = useMemo(() => {
+    const map = new Map();
+
+    items.forEach((item) => {
+      const id = String(getItemId(item));
+
+      if (!id) return;
+
+      if (!map.has(id)) {
+        map.set(id, item);
+      }
+    });
+
+    return Array.from(map.values());
+  }, [items]);
+
+  // ---------------------------------------------------------
+  // HANDLE FORM
+  // ---------------------------------------------------------
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  // ---------------------------------------------------------
+  // SOURCE ITEM SELECT
+  // SOURCE STOCK WILL DECREASE
+  // ---------------------------------------------------------
+  const handleSourceItemChange = (e) => {
+    const id = e.target.value;
+
+    const item = uniqueItems.find(
+      (x) => String(getItemId(x)) === String(id)
+    );
+
+    if (!item) {
+      setForm((prev) => ({
+        ...prev,
+        sourceItemId: "",
+        sourceItemName: "",
+        sourceUnit: "",
+      }));
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      sourceItemId: getItemId(item),
+      sourceItemName: getItemName(item),
+      sourceUnit: getItemUnit(item),
+    }));
+  };
+
+  // ---------------------------------------------------------
+  // OUTPUT ITEM SELECT
+  // OUTPUT STOCK WILL INCREASE
+  // ---------------------------------------------------------
+  const handleOutputItemChange = (e) => {
+    const id = e.target.value;
+
+    const item = uniqueItems.find(
+      (x) => String(getItemId(x)) === String(id)
+    );
+
+    if (!item) {
+      setForm((prev) => ({
+        ...prev,
+        outputItemId: "",
+        outputItemName: "",
+        outputUnit: "",
+      }));
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      outputItemId: getItemId(item),
+      outputItemName: getItemName(item),
+      outputUnit: getItemUnit(item),
+    }));
+  };
+
+  // ---------------------------------------------------------
+  // RESET
+  // ---------------------------------------------------------
+  const resetForm = () => {
+    setForm({
+      ...emptyJob,
+      jobNo: `JOB-${new Date().getFullYear()}-${String(
+        jobs.length + 1
+      ).padStart(5, "0")}`,
+      date: new Date().toISOString().slice(0, 10),
+    });
+  };
+
+  // ---------------------------------------------------------
+  // SAVE JOB ORDER
+  // ---------------------------------------------------------
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    setError("");
+
+    if (!form.sourceItemId) {
+      setError("Source Stock-এর Item Name select করুন.");
+      return;
+    }
+
+    if (!form.outputItemId) {
+      setError("Output Stock-এর Item Name select করুন.");
+      return;
+    }
+
+    if (!form.sourceQty || Number(form.sourceQty) <= 0) {
+      setError("Source Stock quantity দিন.");
+      return;
+    }
+
+    if (!form.outputQty || Number(form.outputQty) <= 0) {
+      setError("Output Stock quantity দিন.");
+      return;
+    }
+
+    const payload = {
+      jobNo: form.jobNo,
+      date: form.date,
+      type: form.type,
+
+      customerName: form.customerName,
+      location: form.location,
+
+      // SOURCE
+      sourceItemId: form.sourceItemId,
+      sourceItemName: form.sourceItemName,
+      sourceQty: Number(form.sourceQty),
+      sourceUnit: form.sourceUnit,
+
+      // OUTPUT
+      outputItemId: form.outputItemId,
+      outputItemName: form.outputItemName,
+      outputQty: Number(form.outputQty),
+      outputUnit: form.outputUnit,
+
+      wastageQty: Number(form.wastageQty || 0),
+
+      remarks: form.remarks,
+    };
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(`${API_URL}/api/inventory/jobs`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || data.error || "Job Order save failed"
+        );
+      }
+
+      await loadJobs();
+
+      resetForm();
+
+      alert(
+        "Job Order saved successfully.\n\n" +
+          `Source Stock: ${form.sourceItemName} (-${form.sourceQty} ${form.sourceUnit})\n` +
+          `Output Stock: ${form.outputItemName} (+${form.outputQty} ${form.outputUnit})`
+      );
+    } catch (err) {
+      console.error("Job Order save error:", err);
+      setError(err.message || "Job Order save failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        padding: 24,
+        background: "#f5f7fb",
+        minHeight: "100%",
+      }}
+    >
+      {/* HEADER */}
+      <div
+        style={{
+          background: "#111827",
+          color: "#fff",
+          padding: "18px 22px",
+          borderRadius: 12,
+          marginBottom: 20,
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.7,
+            marginBottom: 5,
+            letterSpacing: 1,
+          }}
+        >
+          INVENTORY / MANUFACTURING
+        </div>
+
+        <h2 style={{ margin: 0 }}>Job Order</h2>
+
+        <div
+          style={{
+            marginTop: 5,
+            opacity: 0.75,
+            fontSize: 13,
+          }}
+        >
+          Source Stock → Decrease &nbsp; | &nbsp; Output Stock → Increase
+        </div>
+      </div>
+
+      {/* ERROR */}
+      {error && (
+        <div
+          style={{
+            background: "#fee2e2",
+            color: "#991b1b",
+            padding: "12px 15px",
+            borderRadius: 8,
+            marginBottom: 15,
+            fontSize: 14,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        {/* BASIC */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 20,
+            marginBottom: 18,
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>Job Order Details</h3>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 15,
+            }}
+          >
+            <Field
+              label="Job No."
+              name="jobNo"
+              value={form.jobNo}
+              onChange={handleChange}
+              placeholder="Auto"
+            />
+
+            <Field
+              label="Date"
+              name="date"
+              type="date"
+              value={form.date}
+              onChange={handleChange}
+            />
+
+            <div>
+              <label className="field-label">Job Type</label>
+
+              <select
+                name="type"
+                value={form.type}
+                onChange={handleChange}
+                className="field-input"
+              >
+                <option value="Finished Goods">Finished Goods</option>
+                <option value="Grading">Grading</option>
+                <option value="Packing">Packing</option>
+                <option value="Production">Production</option>
+              </select>
+            </div>
+
+            <Field
+              label="Customer"
+              name="customerName"
+              value={form.customerName}
+              onChange={handleChange}
+              placeholder="Customer / Party"
+            />
+          </div>
+        </div>
+
+        {/* STOCK MAPPING */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 18,
+            marginBottom: 18,
+          }}
+        >
+          {/* SOURCE */}
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 20,
+              border: "1px solid #fecaca",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 15,
+              }}
+            >
+              <h3 style={{ margin: 0 }}>Source Stock</h3>
+
+              <span
+                style={{
+                  background: "#fee2e2",
+                  color: "#b91c1c",
+                  padding: "5px 10px",
+                  borderRadius: 20,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                WILL DECREASE
+              </span>
+            </div>
+
+            <label className="field-label">
+              Item Name <span style={{ color: "red" }}>*</span>
+            </label>
+
+            <select
+              value={form.sourceItemId}
+              onChange={handleSourceItemChange}
+              className="field-input"
+              disabled={itemsLoading}
+            >
+              <option value="">
+                {itemsLoading
+                  ? "Loading Inventory Items..."
+                  : uniqueItems.length
+                  ? "Select Source Item"
+                  : "No Inventory Item Found"}
+              </option>
+
+              {uniqueItems.map((item) => {
+                const id = getItemId(item);
+                const name = getItemName(item);
+                const code = getItemCode(item);
+
+                return (
+                  <option key={id} value={id}>
+                    {name}
+                    {code ? ` — ${code}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+                marginTop: 15,
+              }}
+            >
+              <Field
+                label="Quantity"
+                name="sourceQty"
+                type="number"
+                value={form.sourceQty}
+                onChange={handleChange}
+                placeholder="0"
+              />
+
+              <Field
+                label="Unit"
+                name="sourceUnit"
+                value={form.sourceUnit}
+                onChange={handleChange}
+                readOnly
+              />
+            </div>
+
+            {form.sourceItemName && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  background: "#fff7ed",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              >
+                Selected Source:
+                <strong> {form.sourceItemName}</strong>
+                <br />
+                Stock movement:
+                <strong> -{form.sourceQty || 0}</strong>{" "}
+                {form.sourceUnit}
+              </div>
+            )}
+          </div>
+
+          {/* OUTPUT */}
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 20,
+              border: "1px solid #bbf7d0",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 15,
+              }}
+            >
+              <h3 style={{ margin: 0 }}>Output Stock</h3>
+
+              <span
+                style={{
+                  background: "#dcfce7",
+                  color: "#15803d",
+                  padding: "5px 10px",
+                  borderRadius: 20,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                WILL INCREASE
+              </span>
+            </div>
+
+            <label className="field-label">
+              Item Name <span style={{ color: "red" }}>*</span>
+            </label>
+
+            <select
+              value={form.outputItemId}
+              onChange={handleOutputItemChange}
+              className="field-input"
+              disabled={itemsLoading}
+            >
+              <option value="">
+                {itemsLoading
+                  ? "Loading Inventory Items..."
+                  : uniqueItems.length
+                  ? "Select Finished Goods"
+                  : "No Inventory Item Found"}
+              </option>
+
+              {uniqueItems.map((item) => {
+                const id = getItemId(item);
+                const name = getItemName(item);
+                const code = getItemCode(item);
+
+                return (
+                  <option key={id} value={id}>
+                    {name}
+                    {code ? ` — ${code}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+                marginTop: 15,
+              }}
+            >
+              <Field
+                label="Quantity"
+                name="outputQty"
+                type="number"
+                value={form.outputQty}
+                onChange={handleChange}
+                placeholder="0"
+              />
+
+              <Field
+                label="Unit"
+                name="outputUnit"
+                value={form.outputUnit}
+                onChange={handleChange}
+                readOnly
+              />
+            </div>
+
+            {form.outputItemName && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  background: "#f0fdf4",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              >
+                Selected Output:
+                <strong> {form.outputItemName}</strong>
+                <br />
+                Stock movement:
+                <strong> +{form.outputQty || 0}</strong>{" "}
+                {form.outputUnit}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* OTHER DETAILS */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 20,
+            border: "1px solid #e5e7eb",
+            marginBottom: 18,
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>Other Details</h3>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 15,
+            }}
+          >
+            <Field
+              label="Location"
+              name="location"
+              value={form.location}
+              onChange={handleChange}
+              placeholder="Select / enter location"
+            />
+
+            <Field
+              label="Wastage Qty"
+              name="wastageQty"
+              type="number"
+              value={form.wastageQty}
+              onChange={handleChange}
+              placeholder="0"
+            />
+          </div>
+
+          <div style={{ marginTop: 15 }}>
+            <label className="field-label">Remarks</label>
+
+            <textarea
+              name="remarks"
+              value={form.remarks}
+              onChange={handleChange}
+              className="field-input"
+              rows={3}
+              placeholder="Remarks / production note"
+            />
+          </div>
+        </div>
+
+        {/* BUTTONS */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+          }}
+        >
+          <button
+            type="button"
+            onClick={resetForm}
+            style={{
+              padding: "11px 20px",
+              border: "1px solid #d1d5db",
+              background: "#fff",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            Clear
+          </button>
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              padding: "11px 25px",
+              border: 0,
+              background: "#111827",
+              color: "#fff",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            {loading ? "Saving..." : "Save Job Order"}
+          </button>
+        </div>
+      </form>
+
+      {/* JOB ORDER LIST */}
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          padding: 20,
+          marginTop: 25,
+          border: "1px solid #e5e7eb",
+        }}
+      >
+        <h3 style={{ marginTop: 0 }}>Recent Job Orders</h3>
+
+        {jobs.length === 0 ? (
+          <div style={{ color: "#6b7280", padding: 15 }}>
+            No Job Orders found.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 13,
+              }}
+            >
+              <thead>
+                <tr>
+                  <th className="table-head">Job No.</th>
+                  <th className="table-head">Date</th>
+                  <th className="table-head">Source Stock</th>
+                  <th className="table-head">Source Qty</th>
+                  <th className="table-head">Output Stock</th>
+                  <th className="table-head">Output Qty</th>
+                  <th className="table-head">Type</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {jobs.map((job, index) => (
+                  <tr key={job._id || job.id || index}>
+                    <td className="table-cell">
+                      {job.jobNo || job.jobNumber || "-"}
+                    </td>
+
+                    <td className="table-cell">
+                      {job.date
+                        ? String(job.date).slice(0, 10)
+                        : "-"}
+                    </td>
+
+                    <td className="table-cell">
+                      {job.sourceItemName ||
+                        job.sourceStock ||
+                        "-"}
+                    </td>
+
+                    <td className="table-cell">
+                      {job.sourceQty || 0}{" "}
+                      {job.sourceUnit || ""}
+                    </td>
+
+                    <td className="table-cell">
+                      {job.outputItemName ||
+                        job.outputStock ||
+                        "-"}
+                    </td>
+
+                    <td className="table-cell">
+                      {job.outputQty || 0}{" "}
+                      {job.outputUnit || ""}
+                    </td>
+
+                    <td className="table-cell">
+                      {job.type || "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        .field-label {
+          display: block;
+          font-size: 12px;
+          font-weight: 600;
+          color: #374151;
+          margin-bottom: 6px;
+        }
+
+        .field-input {
+          width: 100%;
+          box-sizing: border-box;
+          border: 1px solid #d1d5db;
+          border-radius: 7px;
+          padding: 10px 11px;
+          background: #fff;
+          color: #111827;
+          outline: none;
+          font-size: 14px;
+        }
+
+        .field-input:focus {
+          border-color: #111827;
+          box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.08);
+        }
+
+        .table-head {
+          text-align: left;
+          padding: 10px;
+          border-bottom: 1px solid #e5e7eb;
+          background: #f9fafb;
+          white-space: nowrap;
+        }
+
+        .table-cell {
+          padding: 10px;
+          border-bottom: 1px solid #f1f5f9;
+          white-space: nowrap;
+        }
+
+        @media (max-width: 900px) {
+          form > div,
+          form > div > div {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------
+// REUSABLE FIELD
+// ---------------------------------------------------------
+function Field({
+  label,
+  name,
+  value,
+  onChange,
+  type = "text",
+  placeholder = "",
+  readOnly = false,
+}) {
+  return (
+    <div>
+      <label className="field-label">{label}</label>
+
+      <input
+        className="field-input"
+        type={type}
+        name={name}
+        value={value ?? ""}
+        onChange={onChange}
+        placeholder={placeholder}
+        readOnly={readOnly}
+      />
+    </div>
+  );
+}
+```
