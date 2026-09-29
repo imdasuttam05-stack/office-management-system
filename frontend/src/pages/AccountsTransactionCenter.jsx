@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 const API = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
-const auth = () => ({"Content-Type":"application/json", Authorization:`Bearer ${localStorage.getItem("token") || localStorage.getItem("accessToken") || ""`});
+const auth = () => ({"Content-Type":"application/json", Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("accessToken") || ""}`});
 const today = () => new Date().toISOString().slice(0,10);
 const money = v => Number(v || 0).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2});
 const n = v => Number(v || 0);
