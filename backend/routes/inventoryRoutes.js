@@ -2,7 +2,7 @@ import express from "express";
 import {getWorkflowMasters,listBoms,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
 import auth from "../middleware/auth.js";
 import requireRole from "../middleware/role.js";
-import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateLocationMaster,deleteLocationMaster,updateSupplierMaster,deleteSupplierMaster,updateCustomerMaster,deleteCustomerMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,getJobs,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
+import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateLocationMaster,deleteLocationMaster,updateSupplierMaster,deleteSupplierMaster,updateCustomerMaster,deleteCustomerMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,getJobs,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
 const router=express.Router();
 router.get("/raw-material-masters",auth,getPurchaseMasters);
 router.get("/masters/pincode/:pin",auth,lookupPincode);
@@ -19,6 +19,9 @@ router.put("/masters/suppliers/:id",auth,requireRole("Admin","Manager"),updateSu
 router.delete("/masters/suppliers/:id",auth,requireRole("Admin","Manager"),deleteSupplierMaster);
 router.put("/masters/items/:id",auth,requireRole("Admin","Manager"),updateInventoryItemMaster);
 router.delete("/masters/items/:id",auth,requireRole("Admin","Manager"),deleteInventoryItemMaster);
+router.post("/masters/units",auth,requireRole("Admin","Manager"),createUnitMaster);
+router.put("/masters/units/:id",auth,requireRole("Admin","Manager"),updateUnitMaster);
+router.delete("/masters/units/:id",auth,requireRole("Admin","Manager"),deleteUnitMaster);
 router.get("/raw-material-purchases",auth,getRawMaterialPurchases);
 router.post("/raw-material-purchases",auth,requireRole("Admin","Manager"),createRawMaterialPurchase);
 router.get("/raw-material-stock",auth,getRawMaterialStock);
