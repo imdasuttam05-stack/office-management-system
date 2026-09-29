@@ -20,6 +20,7 @@ async function api(path, options = {}) {
   });
 
   let data = {};
+
   try {
     data = await response.json();
   } catch {
@@ -116,21 +117,11 @@ function getProductRate(product) {
 }
 
 function getProductHSN(product) {
-  return (
-    product?.hsn ||
-    product?.hsnCode ||
-    product?.sac ||
-    ""
-  );
+  return product?.hsn || product?.hsnCode || product?.sac || "";
 }
 
 function getProductGST(product) {
-  return (
-    product?.gstRate ??
-    product?.gst ??
-    product?.taxRate ??
-    ""
-  );
+  return product?.gstRate ?? product?.gst ?? product?.taxRate ?? "";
 }
 
 function extractArray(data) {
@@ -165,83 +156,7 @@ function Select({ label, children, ...props }) {
 }
 
 /* =========================================================
-   PRODUCT / STOCK DROPDOWN
-========================================================= */
-
-function ProductSelect({
-  value,
-  products,
-  stockProducts,
-  allowedTypes,
-  onChange,
-}) {
-  const normalizedAllowed = allowedTypes.map(normalizeType);
-
-  const sourceList =
-    stockProducts && stockProducts.length > 0
-      ? stockProducts
-      : products;
-
-  const options = useMemo(() => {
-    const seen = new Set();
-
-    const result = sourceList.filter((product) => {
-      const name = getProductName(product);
-      if (!name) return false;
-
-      const id = getProductId(product);
-      const key = `${id}-${name}`;
-
-      if (seen.has(key)) return false;
-
-      const type = getProductType(product);
-
-      /*
-       * If type is known, enforce allowed type.
-       *
-       * If type is missing from old Product Master data,
-       * keep the product available so dropdown never breaks.
-       */
-      if (type && normalizedAllowed.length > 0) {
-        if (!normalizedAllowed.includes(type)) {
-          return false;
-        }
-      }
-
-      seen.add(key);
-      return true;
-    });
-
-    return result;
-  }, [sourceList, normalizedAllowed.join("|")]);
-
-  return (
-    <select value={value || ""} onChange={onChange}>
-      <option value="">Select Product</option>
-
-      {options.map((product, index) => {
-        const id = getProductId(product);
-        const name = getProductName(product);
-        const code = getProductCode(product);
-        const type = getProductType(product);
-
-        return (
-          <option
-            key={id || `${name}-${index}`}
-            value={name}
-          >
-            {name}
-            {code ? ` (${code})` : ""}
-            {type ? ` — ${type}` : ""}
-          </option>
-        );
-      })}
-    </select>
-  );
-}
-
-/* =========================================================
-   LINE TABLE
+   PRODUCT LINES
 ========================================================= */
 
 function Lines({
@@ -259,7 +174,7 @@ function Lines({
       ? stockProducts
       : products;
 
-  const filteredOptions = useMemo(() => {
+  const options = useMemo(() => {
     const seen = new Set();
 
     return sourceList.filter((product) => {
@@ -274,6 +189,13 @@ function Lines({
 
       const type = getProductType(product);
 
+      /*
+       * If stock/product type is available,
+       * validate it.
+       *
+       * If old records do not have type,
+       * keep them visible.
+       */
       if (
         normalizedAllowed.length > 0 &&
         type &&
@@ -300,14 +222,14 @@ function Lines({
     );
   }
 
-  function selectProduct(index, productName) {
-    const product = filteredOptions.find(
-      (item) => getProductName(item) === productName
+  function selectProduct(index, name) {
+    const product = options.find(
+      (item) => getProductName(item) === name
     );
 
     if (!product) {
       updateLine(index, {
-        itemName: productName,
+        itemName: name,
       });
       return;
     }
@@ -325,7 +247,9 @@ function Lines({
 
   return (
     <div className="scroll">
+
       <table>
+
         <thead>
           <tr>
             <th>Product</th>
@@ -340,31 +264,62 @@ function Lines({
         </thead>
 
         <tbody>
+
           {items.map((row, index) => (
             <tr key={index}>
-              <td style={{ minWidth: 300 }}>
-                <ProductSelect
-                  value={row.itemName}
-                  products={products}
-                  stockProducts={stockProducts}
-                  allowedTypes={allowedTypes}
-                  onChange={(e) =>
-                    selectProduct(index, e.target.value)
-                  }
-                />
 
-                {filteredOptions.length === 0 && (
+              <td style={{ minWidth: 300 }}>
+
+                <select
+                  value={row.itemName || ""}
+                  onChange={(e) =>
+                    selectProduct(
+                      index,
+                      e.target.value
+                    )
+                  }
+                >
+
+                  <option value="">
+                    Select Product
+                  </option>
+
+                  {options.map((product, productIndex) => {
+
+                    const id = getProductId(product);
+                    const name = getProductName(product);
+                    const code = getProductCode(product);
+                    const type = getProductType(product);
+
+                    return (
+                      <option
+                        key={
+                          id ||
+                          `${name}-${productIndex}`
+                        }
+                        value={name}
+                      >
+                        {name}
+                        {code ? ` (${code})` : ""}
+                        {type ? ` — ${type}` : ""}
+                      </option>
+                    );
+                  })}
+
+                </select>
+
+                {!options.length && (
                   <div className="dropdown-help">
                     {emptyMessage}
                   </div>
                 )}
+
               </td>
 
               <td>
                 <input
                   value={row.itemType || ""}
                   readOnly
-                  placeholder="Type"
                 />
               </td>
 
@@ -432,7 +387,8 @@ function Lines({
                   onClick={() =>
                     setItems((current) =>
                       current.filter(
-                        (_, rowIndex) => rowIndex !== index
+                        (_, rowIndex) =>
+                          rowIndex !== index
                       )
                     )
                   }
@@ -440,10 +396,14 @@ function Lines({
                   ×
                 </button>
               </td>
+
             </tr>
           ))}
+
         </tbody>
+
       </table>
+
     </div>
   );
 }
@@ -455,10 +415,13 @@ function Lines({
 function StockTable({ items, title }) {
   return (
     <div className="card">
+
       <h3>{title}</h3>
 
       <div className="scroll">
+
         <table>
+
           <thead>
             <tr>
               <th>Item</th>
@@ -473,20 +436,25 @@ function StockTable({ items, title }) {
           </thead>
 
           <tbody>
+
             {items.map((item, index) => (
               <tr key={item._id || index}>
+
                 <td>{item.itemName}</td>
                 <td>{item.itemType}</td>
                 <td>{item.location || "-"}</td>
                 <td>{item.batchNo || "-"}</td>
                 <td>{money(item.qty)}</td>
                 <td>{item.unit || "KG"}</td>
+
                 <td>
                   ₹ {money(item.averageRate)}
                 </td>
+
                 <td>
                   ₹ {money(item.stockValue)}
                 </td>
+
               </tr>
             ))}
 
@@ -497,18 +465,23 @@ function StockTable({ items, title }) {
                 </td>
               </tr>
             )}
+
           </tbody>
+
         </table>
+
       </div>
+
     </div>
   );
 }
 
 /* =========================================================
-   MAIN MANUFACTURING
+   MAIN
 ========================================================= */
 
 export default function Manufacturing() {
+
   const [tab, setTab] = useState(
     () =>
       new URLSearchParams(window.location.search).get("tab") ||
@@ -519,14 +492,12 @@ export default function Manufacturing() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [stock, setStock] = useState([]);
   const [products, setProducts] = useState([]);
 
   const [rawStock, setRawStock] = useState([]);
   const [gradeStock, setGradeStock] = useState([]);
   const [finishedStock, setFinishedStock] = useState([]);
 
-  const [jobs, setJobs] = useState([]);
   const [sales, setSales] = useState([]);
   const [gst, setGst] = useState(null);
 
@@ -559,10 +530,12 @@ export default function Manufacturing() {
     gstRate: "",
   });
 
-  const [pLines, setPLines] = useState([blank()]);
+  const [pLines, setPLines] = useState([
+    blank(),
+  ]);
 
   /* =======================================================
-     JOB ORDER
+     JOB
   ======================================================= */
 
   const [job, setJob] = useState({
@@ -574,10 +547,17 @@ export default function Manufacturing() {
     notes: "",
   });
 
-  const [sources, setSources] = useState([blank()]);
-  const [outputs, setOutputs] = useState([blank()]);
+  const [sources, setSources] = useState([
+    blank(),
+  ]);
 
-  const [jobType, setJobType] = useState("GRADING");
+  const [outputs, setOutputs] = useState([
+    blank(),
+  ]);
+
+  const [jobType, setJobType] = useState(
+    "GRADING"
+  );
 
   /* =======================================================
      SALE
@@ -603,10 +583,11 @@ export default function Manufacturing() {
   ]);
 
   /* =======================================================
-     LOAD DATA
+     LOAD PRODUCT MASTER
   ======================================================= */
 
   async function loadProducts() {
+
     const response = await fetch(
       `${API}/api/accounts-masters?type=product`,
       {
@@ -624,17 +605,22 @@ export default function Manufacturing() {
 
     if (!response.ok) {
       throw new Error(
-        data.message || "Product Master load failed"
+        data.message ||
+          "Product Master load failed"
       );
     }
 
-    const list = extractArray(data);
-
-    return list;
+    return extractArray(data);
   }
 
+  /* =======================================================
+     LOAD STOCK
+  ======================================================= */
+
   async function loadStock(type) {
+
     try {
+
       const response = await api(
         `/stock?itemType=${encodeURIComponent(type)}`
       );
@@ -645,13 +631,20 @@ export default function Manufacturing() {
         response?.stock ||
         []
       );
+
     } catch {
       return [];
     }
   }
 
+  /* =======================================================
+     REFRESH
+  ======================================================= */
+
   async function refresh() {
+
     try {
+
       setErr("");
 
       const [
@@ -659,31 +652,24 @@ export default function Manufacturing() {
         grade,
         finished,
         salesResponse,
-        jobsResponse,
         productList,
       ] = await Promise.all([
+
         loadStock("RAW_MATERIAL"),
+
         loadStock("GRADE"),
+
         loadStock("FINISHED_GOODS"),
 
         api("/sales"),
 
-        api("/job-orders"),
-
         loadProducts(),
-      ]);
 
-      const allStock = [
-        ...raw,
-        ...grade,
-        ...finished,
-      ];
+      ]);
 
       setRawStock(raw);
       setGradeStock(grade);
       setFinishedStock(finished);
-
-      setStock(allStock);
 
       setSales(
         salesResponse?.items ||
@@ -692,17 +678,14 @@ export default function Manufacturing() {
           []
       );
 
-      setJobs(
-        jobsResponse?.items ||
-          jobsResponse?.data ||
-          jobsResponse?.jobs ||
-          []
-      );
-
       setProducts(productList);
+
     } catch (error) {
+
       console.error(error);
+
       setErr(error.message);
+
     }
   }
 
@@ -711,198 +694,304 @@ export default function Manufacturing() {
   }, []);
 
   useEffect(() => {
+
     if (tab === "gst") {
+
       api("/gst-report")
         .then(setGst)
-        .catch((error) => setErr(error.message));
+        .catch((error) =>
+          setErr(error.message)
+        );
+
     }
+
   }, [tab]);
 
   /* =======================================================
      PRODUCT FILTERS
   ======================================================= */
 
-  const allProducts = useMemo(() => {
-    return products.filter(
-      (product) => getProductName(product)
-    );
-  }, [products]);
+  const allProducts = useMemo(
+    () =>
+      products.filter(
+        (product) =>
+          getProductName(product)
+      ),
+    [products]
+  );
 
-  const rawProducts = useMemo(() => {
-    return allProducts.filter((product) => {
-      const type = getProductType(product);
+  const rawProducts = useMemo(
+    () =>
+      allProducts.filter((product) => {
 
-      return (
-        !type ||
-        type === "RAW_MATERIAL" ||
-        type === "RAW"
-      );
-    });
-  }, [allProducts]);
+        const type =
+          getProductType(product);
 
-  const gradeProducts = useMemo(() => {
-    return allProducts.filter((product) => {
-      const type = getProductType(product);
+        return (
+          !type ||
+          type === "RAW_MATERIAL" ||
+          type === "RAW"
+        );
 
-      return (
-        !type ||
-        type === "GRADE" ||
-        type === "GRADE_STOCK"
-      );
-    });
-  }, [allProducts]);
+      }),
+    [allProducts]
+  );
 
-  const finishedProducts = useMemo(() => {
-    return allProducts.filter((product) => {
-      const type = getProductType(product);
+  const gradeProducts = useMemo(
+    () =>
+      allProducts.filter((product) => {
 
-      return (
-        !type ||
-        type === "FINISHED_GOODS" ||
-        type === "FINISHED_PRODUCT" ||
-        type === "FINISHED"
-      );
-    });
-  }, [allProducts]);
+        const type =
+          getProductType(product);
+
+        return (
+          !type ||
+          type === "GRADE" ||
+          type === "GRADE_STOCK"
+        );
+
+      }),
+    [allProducts]
+  );
+
+  const finishedProducts = useMemo(
+    () =>
+      allProducts.filter((product) => {
+
+        const type =
+          getProductType(product);
+
+        return (
+          !type ||
+          type === "FINISHED_GOODS" ||
+          type === "FINISHED_PRODUCT" ||
+          type === "FINISHED"
+        );
+
+      }),
+    [allProducts]
+  );
 
   /* =======================================================
-     PURCHASE
+     PURCHASE SAVE
   ======================================================= */
 
   async function savePurchase() {
+
     setBusy(true);
     setErr("");
     setMsg("");
 
     try {
-      const d = await api("/raw-material-purchases", {
-        method: "POST",
-        body: JSON.stringify({
-          ...purchase,
-          lines: pLines,
-        }),
-      });
 
-      setMsg(d.message || "Purchase posted successfully.");
+      const result =
+        await api(
+          "/raw-material-purchases",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              ...purchase,
+              lines: pLines,
+            }),
+          }
+        );
+
+      setMsg(
+        result.message ||
+          "Purchase posted successfully."
+      );
 
       setPLines([blank()]);
 
       await refresh();
+
     } catch (error) {
+
       setErr(error.message);
+
     } finally {
+
       setBusy(false);
+
     }
   }
 
   /* =======================================================
-     JOB ORDER
+     JOB SAVE
   ======================================================= */
 
-  async function saveJob(forceType = jobType) {
+  async function saveJob(type) {
+
     setBusy(true);
     setErr("");
     setMsg("");
 
     try {
-      if (!sources.length || !outputs.length) {
-        throw new Error(
-          "At least one Source Stock and one Output Stock line are required."
+
+      const validSources =
+        sources.filter(
+          (line) =>
+            line.itemName &&
+            Number(line.qty) > 0
         );
-      }
 
-      const validSources = sources.filter(
-        (line) =>
-          line.itemName &&
-          Number(line.qty) > 0
-      );
-
-      const validOutputs = outputs.filter(
-        (line) =>
-          line.itemName &&
-          Number(line.qty) > 0
-      );
+      const validOutputs =
+        outputs.filter(
+          (line) =>
+            line.itemName &&
+            Number(line.qty) > 0
+        );
 
       if (!validSources.length) {
         throw new Error(
-          "Please select Source Stock product and enter quantity."
+          "Please select Source Stock item and enter quantity."
         );
       }
 
       if (!validOutputs.length) {
         throw new Error(
-          "Please select Output Stock product and enter quantity."
+          "Please select Output Stock item and enter quantity."
         );
       }
 
+      /*
+       * FINISHED GOODS:
+       *
+       * Source = RAW MATERIAL
+       * Output = FINISHED GOODS
+       *
+       * GRADING:
+       *
+       * Source = RAW MATERIAL
+       * Output = GRADE
+       */
+
       const payload = {
+
         ...job,
 
-        type: forceType,
+        type,
 
-        sourceItems: validSources.map((line) => ({
-          itemId: line.itemId || "",
-          itemName: line.itemName,
-          itemType: line.itemType,
-          unit: line.unit || "KG",
-          qty: Number(line.qty || 0),
-          rate: Number(line.rate || 0),
-          batchNo: line.batchNo || "",
-          barcode: line.barcode || "",
-        })),
+        sourceItems:
+          validSources.map((line) => ({
+            itemId:
+              line.itemId || "",
 
-        outputItems: validOutputs.map((line) => ({
-          itemId: line.itemId || "",
-          itemName: line.itemName,
-          itemType: line.itemType,
-          unit: line.unit || "KG",
-          qty: Number(line.qty || 0),
-          rate: Number(line.rate || 0),
-          batchNo: line.batchNo || "",
-          barcode: line.barcode || "",
-        })),
+            itemName:
+              line.itemName,
+
+            itemType:
+              line.itemType ||
+              "RAW_MATERIAL",
+
+            unit:
+              line.unit || "KG",
+
+            qty:
+              Number(line.qty || 0),
+
+            rate:
+              Number(line.rate || 0),
+
+            batchNo:
+              line.batchNo || "",
+
+            barcode:
+              line.barcode || "",
+          })),
+
+        outputItems:
+          validOutputs.map((line) => ({
+            itemId:
+              line.itemId || "",
+
+            itemName:
+              line.itemName,
+
+            itemType:
+              line.itemType ||
+              (
+                type === "GRADING"
+                  ? "GRADE"
+                  : "FINISHED_GOODS"
+              ),
+
+            unit:
+              line.unit || "KG",
+
+            qty:
+              Number(line.qty || 0),
+
+            rate:
+              Number(line.rate || 0),
+
+            batchNo:
+              line.batchNo || "",
+
+            barcode:
+              line.barcode || "",
+          })),
+
       };
 
-      const d = await api("/job-orders", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const result =
+        await api(
+          "/job-orders",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          }
+        );
 
       setMsg(
-        d.message ||
-          `${forceType} Job Order posted successfully.`
+        result.message ||
+          `${type} Job Order posted successfully.`
       );
 
       setSources([blank()]);
       setOutputs([blank()]);
 
       await refresh();
+
     } catch (error) {
+
       setErr(error.message);
+
     } finally {
+
       setBusy(false);
+
     }
   }
 
   /* =======================================================
-     SALE
+     SALE SAVE
   ======================================================= */
 
   async function saveSale() {
+
     setBusy(true);
     setErr("");
     setMsg("");
 
     try {
-      const d = await api("/sales", {
-        method: "POST",
-        body: JSON.stringify({
-          ...sale,
-          lines: sLines,
-        }),
-      });
 
-      setMsg(d.message || "Sale posted successfully.");
+      const result =
+        await api(
+          "/sales",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              ...sale,
+              lines: sLines,
+            }),
+          }
+        );
+
+      setMsg(
+        result.message ||
+          "Sale posted successfully."
+      );
 
       setSLines([
         {
@@ -913,10 +1002,15 @@ export default function Manufacturing() {
       ]);
 
       await refresh();
+
     } catch (error) {
+
       setErr(error.message);
+
     } finally {
+
       setBusy(false);
+
     }
   }
 
@@ -933,10 +1027,6 @@ export default function Manufacturing() {
     ["sales", "Sales"],
     ["gst", "GST Reports"],
   ];
-
-  /* =======================================================
-     RENDER
-  ======================================================= */
 
   return (
     <main className="manufacturing">
@@ -996,10 +1086,8 @@ export default function Manufacturing() {
 
         .grid {
           display: grid;
-          grid-template-columns: repeat(
-            4,
-            minmax(0, 1fr)
-          );
+          grid-template-columns:
+            repeat(4, minmax(0, 1fr));
           gap: 12px;
         }
 
@@ -1024,17 +1112,6 @@ export default function Manufacturing() {
           background: #fff;
         }
 
-        .mf input:focus,
-        .mf select:focus,
-        .card input:focus,
-        .card select:focus,
-        table input:focus,
-        table select:focus {
-          outline: none;
-          border-color: #175cd3;
-          box-shadow: 0 0 0 2px #175cd322;
-        }
-
         .btn {
           border: 0;
           border-radius: 8px;
@@ -1045,12 +1122,8 @@ export default function Manufacturing() {
           cursor: pointer;
         }
 
-        .btn:hover {
-          opacity: 0.92;
-        }
-
         .btn:disabled {
-          opacity: 0.6;
+          opacity: .6;
           cursor: not-allowed;
         }
 
@@ -1090,7 +1163,6 @@ export default function Manufacturing() {
 
         th {
           background: #f8fafc;
-          font-weight: 700;
         }
 
         .actions {
@@ -1129,19 +1201,19 @@ export default function Manufacturing() {
 
         .dropdown-help {
           margin-top: 5px;
-          font-size: 11px;
           color: #b42318;
+          font-size: 11px;
         }
 
         .job-head {
           display: flex;
-          gap: 15px;
+          gap: 20px;
           align-items: flex-end;
           margin-bottom: 15px;
         }
 
-        .job-type-box {
-          min-width: 320px;
+        .job-type {
+          min-width: 350px;
         }
 
         .workflow {
@@ -1160,34 +1232,26 @@ export default function Manufacturing() {
         }
 
         .workflow-title {
-          font-size: 13px;
           font-weight: 800;
-          margin-bottom: 5px;
+          font-size: 13px;
         }
 
         .workflow-sub {
-          font-size: 12px;
+          margin-top: 5px;
           color: #667085;
+          font-size: 12px;
         }
 
         .workflow-arrow {
-          font-size: 25px;
+          font-size: 28px;
           font-weight: 800;
         }
 
-        .summary {
-          display: flex;
-          gap: 25px;
-          justify-content: flex-end;
-          margin-top: 12px;
-        }
-
         @media(max-width: 1000px) {
+
           .grid {
-            grid-template-columns: repeat(
-              2,
-              minmax(0, 1fr)
-            );
+            grid-template-columns:
+              repeat(2, minmax(0, 1fr));
           }
 
           .workflow {
@@ -1198,9 +1262,11 @@ export default function Manufacturing() {
             transform: rotate(90deg);
             text-align: center;
           }
+
         }
 
         @media(max-width: 600px) {
+
           .grid {
             grid-template-columns: 1fr;
           }
@@ -1210,71 +1276,90 @@ export default function Manufacturing() {
             align-items: stretch;
           }
 
-          .job-type-box {
+          .job-type {
             min-width: 0;
           }
+
         }
 
       `}</style>
 
-      {/* ===================================================
-          HEADER
-      =================================================== */}
+      {/* HEADER */}
 
       <div className="top">
+
         <div>
+
           <h1>
             Purchase → Production → Sales → GST
           </h1>
 
           <div className="muted">
-            Raw Stock → Grade Stock → Finished Goods Stock
-            with stock-controlled job orders.
+            Raw Material → Production → Grade /
+            Finished Goods → Sales
           </div>
+
         </div>
 
         <button
+          type="button"
           className="btn secondary"
           onClick={refresh}
         >
           Refresh
         </button>
+
       </div>
 
-      {/* ===================================================
-          TABS
-      =================================================== */}
+      {/* TABS */}
 
       <div className="tabs">
+
         {tabs.map(([key, name]) => (
+
           <button
             type="button"
-            className={`tab ${
-              tab === key ? "on" : ""
-            }`}
+            key={key}
+            className={
+              `tab ${tab === key ? "on" : ""}`
+            }
             onClick={() => {
               setTab(key);
               setMsg("");
               setErr("");
             }}
-            key={key}
           >
             {name}
           </button>
+
         ))}
+
       </div>
 
-      {msg && <div className="msg">{msg}</div>}
-      {err && <div className="err">{err}</div>}
+      {msg && (
+        <div className="msg">
+          {msg}
+        </div>
+      )}
 
-      {/* ===================================================
+      {err && (
+        <div className="err">
+          {err}
+        </div>
+      )}
+
+      {/* =================================================
           PURCHASE
-      =================================================== */}
+      ================================================= */}
 
       {tab === "purchase" && (
         <>
+
           <div className="card">
-            <h3>Raw Material Purchase</h3>
+
+            <h3>
+              Raw Material Purchase
+            </h3>
 
             <div className="grid">
 
@@ -1296,7 +1381,8 @@ export default function Manufacturing() {
                 onChange={(e) =>
                   setPurchase({
                     ...purchase,
-                    location: e.target.value,
+                    location:
+                      e.target.value,
                   })
                 }
               />
@@ -1307,7 +1393,8 @@ export default function Manufacturing() {
                 onChange={(e) =>
                   setPurchase({
                     ...purchase,
-                    supplierName: e.target.value,
+                    supplierName:
+                      e.target.value,
                   })
                 }
               />
@@ -1339,7 +1426,9 @@ export default function Manufacturing() {
               <Input
                 label="Invoice Date"
                 type="date"
-                value={purchase.supplierInvoiceDate}
+                value={
+                  purchase.supplierInvoiceDate
+                }
                 onChange={(e) =>
                   setPurchase({
                     ...purchase,
@@ -1369,24 +1458,34 @@ export default function Manufacturing() {
                 onChange={(e) =>
                   setPurchase({
                     ...purchase,
-                    otherCost: e.target.value,
+                    otherCost:
+                      e.target.value,
                   })
                 }
               />
 
             </div>
+
           </div>
 
           <div className="card">
 
-            <h3>Raw Material Lines</h3>
+            <h3>
+              Raw Material Lines
+            </h3>
 
             <Lines
               items={pLines}
               setItems={setPLines}
               products={rawProducts}
-              allowedTypes={["RAW_MATERIAL"]}
-              emptyMessage="No Raw Material product found in Product Master."
+              stockProducts={[]}
+              allowedTypes={[
+                "RAW_MATERIAL",
+                "RAW",
+              ]}
+              emptyMessage={
+                "No Raw Material product found."
+              }
             />
 
             <button
@@ -1416,50 +1515,55 @@ export default function Manufacturing() {
               </button>
 
             </div>
+
           </div>
+
         </>
       )}
 
-      {/* ===================================================
+      {/* =================================================
           JOB ORDER
-      =================================================== */}
+      ================================================= */}
 
       {(tab === "grading" ||
         tab === "fgjob") && (
+
         <div className="card">
 
           <div className="job-head">
 
             <div>
               <h3 style={{ margin: 0 }}>
-                {tab === "grading"
+                {jobType === "GRADING"
                   ? "Grading Job Order"
                   : "Finished Goods Job Order"}
               </h3>
 
               <div className="muted">
-                Select source stock and output stock
-                according to production type.
+                Select Job Order Type first.
               </div>
             </div>
 
-            <div className="job-type-box">
+            <div className="job-type">
 
               <Select
                 label="Job Order Type"
                 value={jobType}
                 onChange={(e) => {
-                  const type = e.target.value;
 
-                  setJobType(type);
+                  const value =
+                    e.target.value;
 
-                  /*
-                   * Clear old lines when switching
-                   * production type so wrong products
-                   * cannot remain selected.
-                   */
-                  setSources([blank()]);
-                  setOutputs([blank()]);
+                  setJobType(value);
+
+                  setSources([
+                    blank(),
+                  ]);
+
+                  setOutputs([
+                    blank(),
+                  ]);
+
                 }}
               >
 
@@ -1468,7 +1572,7 @@ export default function Manufacturing() {
                 </option>
 
                 <option value="FINISHED_GOODS">
-                  FINISHED GOODS: Grade → Finished Goods
+                  FINISHED GOODS: Raw Material → Finished Goods
                 </option>
 
               </Select>
@@ -1477,22 +1581,18 @@ export default function Manufacturing() {
 
           </div>
 
-          {/* WORKFLOW DISPLAY */}
+          {/* WORKFLOW */}
 
           <div className="workflow">
 
             <div className="workflow-box">
 
               <div className="workflow-title">
-                Source Stock — Will Decrease
+                Source Stock — will decrease
               </div>
 
               <div className="workflow-sub">
-
-                {jobType === "GRADING"
-                  ? "RAW MATERIAL stock"
-                  : "GRADE stock"}
-
+                Raw Material
               </div>
 
             </div>
@@ -1504,14 +1604,14 @@ export default function Manufacturing() {
             <div className="workflow-box">
 
               <div className="workflow-title">
-                Output Stock — Will Increase
+                Output Stock — will increase
               </div>
 
               <div className="workflow-sub">
 
                 {jobType === "GRADING"
-                  ? "GRADE stock"
-                  : "FINISHED GOODS stock"}
+                  ? "Grade"
+                  : "Finished Goods"}
 
               </div>
 
@@ -1541,7 +1641,8 @@ export default function Manufacturing() {
               onChange={(e) =>
                 setJob({
                   ...job,
-                  location: e.target.value,
+                  location:
+                    e.target.value,
                 })
               }
             />
@@ -1553,7 +1654,8 @@ export default function Manufacturing() {
               onChange={(e) =>
                 setJob({
                   ...job,
-                  labourCost: e.target.value,
+                  labourCost:
+                    e.target.value,
                 })
               }
             />
@@ -1578,7 +1680,8 @@ export default function Manufacturing() {
               onChange={(e) =>
                 setJob({
                   ...job,
-                  otherCost: e.target.value,
+                  otherCost:
+                    e.target.value,
                 })
               }
             />
@@ -1589,14 +1692,15 @@ export default function Manufacturing() {
               onChange={(e) =>
                 setJob({
                   ...job,
-                  notes: e.target.value,
+                  notes:
+                    e.target.value,
                 })
               }
             />
 
           </div>
 
-          {/* SOURCE STOCK */}
+          {/* SOURCE */}
 
           <div className="card">
 
@@ -1608,39 +1712,30 @@ export default function Manufacturing() {
                   color: "#b42318",
                 }}
               >
-                (will decrease)
+                — will decrease
               </span>
             </h4>
 
-            {jobType === "GRADING" ? (
+            {/*
+             * IMPORTANT:
+             *
+             * BOTH GRADING AND FINISHED GOODS
+             * use RAW MATERIAL as source.
+             */}
 
-              <Lines
-                items={sources}
-                setItems={setSources}
-                products={rawProducts}
-                stockProducts={rawStock}
-                allowedTypes={[
-                  "RAW_MATERIAL",
-                  "RAW",
-                ]}
-                emptyMessage="No Raw Material stock available."
-              />
-
-            ) : (
-
-              <Lines
-                items={sources}
-                setItems={setSources}
-                products={gradeProducts}
-                stockProducts={gradeStock}
-                allowedTypes={[
-                  "GRADE",
-                  "GRADE_STOCK",
-                ]}
-                emptyMessage="No Grade stock available for Finished Goods production."
-              />
-
-            )}
+            <Lines
+              items={sources}
+              setItems={setSources}
+              products={rawProducts}
+              stockProducts={rawStock}
+              allowedTypes={[
+                "RAW_MATERIAL",
+                "RAW",
+              ]}
+              emptyMessage={
+                "No Raw Material stock available."
+              }
+            />
 
             <button
               type="button"
@@ -1657,7 +1752,7 @@ export default function Manufacturing() {
 
           </div>
 
-          {/* OUTPUT STOCK */}
+          {/* OUTPUT */}
 
           <div className="card">
 
@@ -1669,7 +1764,7 @@ export default function Manufacturing() {
                   color: "#027a48",
                 }}
               >
-                (will increase)
+                — will increase
               </span>
             </h4>
 
@@ -1679,36 +1774,31 @@ export default function Manufacturing() {
                 items={outputs}
                 setItems={setOutputs}
                 products={gradeProducts}
+                stockProducts={[]}
                 allowedTypes={[
                   "GRADE",
                   "GRADE_STOCK",
                 ]}
-                emptyMessage="No Grade product found in Product Master."
+                emptyMessage={
+                  "No Grade product found in Product Master."
+                }
               />
 
             ) : (
-
-              /*
-               * IMPORTANT:
-               *
-               * Finished Goods OUTPUT uses Product Master.
-               * It does not depend on existing FG stock.
-               *
-               * This is why a newly-created Finished Goods
-               * product can be selected even when current
-               * FG stock is zero.
-               */
 
               <Lines
                 items={outputs}
                 setItems={setOutputs}
                 products={finishedProducts}
+                stockProducts={[]}
                 allowedTypes={[
                   "FINISHED_GOODS",
                   "FINISHED_PRODUCT",
                   "FINISHED",
                 ]}
-                emptyMessage="No Finished Goods product found. Please create a Finished Goods item in Accounts → Product Master."
+                emptyMessage={
+                  "No Finished Goods product found. Create Finished Goods in Accounts → Product Master."
+                }
               />
 
             )}
@@ -1737,14 +1827,15 @@ export default function Manufacturing() {
               className="btn"
               disabled={busy}
               onClick={() => {
-                const type =
-                  tab === "grading"
-                    ? "GRADING"
-                    : "FINISHED_GOODS";
 
-                setJobType(type);
+                const type =
+                  jobType ===
+                  "FINISHED_GOODS"
+                    ? "FINISHED_GOODS"
+                    : "GRADING";
 
                 saveJob(type);
+
               }}
             >
               {busy
@@ -1757,9 +1848,9 @@ export default function Manufacturing() {
         </div>
       )}
 
-      {/* ===================================================
+      {/* =================================================
           GRADE STOCK
-      =================================================== */}
+      ================================================= */}
 
       {tab === "grade" && (
         <StockTable
@@ -1768,9 +1859,9 @@ export default function Manufacturing() {
         />
       )}
 
-      {/* ===================================================
+      {/* =================================================
           FINISHED GOODS STOCK
-      =================================================== */}
+      ================================================= */}
 
       {tab === "fg" && (
         <StockTable
@@ -1779,15 +1870,17 @@ export default function Manufacturing() {
         />
       )}
 
-      {/* ===================================================
+      {/* =================================================
           SALES
-      =================================================== */}
+      ================================================= */}
 
       {tab === "sales" && (
         <>
           <div className="card">
 
-            <h3>Finished Goods Sale</h3>
+            <h3>
+              Finished Goods Sale
+            </h3>
 
             <div className="grid">
 
@@ -1798,7 +1891,8 @@ export default function Manufacturing() {
                 onChange={(e) =>
                   setSale({
                     ...sale,
-                    date: e.target.value,
+                    date:
+                      e.target.value,
                   })
                 }
               />
@@ -1809,7 +1903,8 @@ export default function Manufacturing() {
                 onChange={(e) =>
                   setSale({
                     ...sale,
-                    location: e.target.value,
+                    location:
+                      e.target.value,
                   })
                 }
               />
@@ -1875,11 +1970,14 @@ export default function Manufacturing() {
               />
 
             </div>
+
           </div>
 
           <div className="card">
 
-            <h3>Sale Lines</h3>
+            <h3>
+              Sale Lines
+            </h3>
 
             <div className="scroll">
 
@@ -1902,305 +2000,377 @@ export default function Manufacturing() {
 
                 <tbody>
 
-                  {sLines.map((row, index) => (
+                  {sLines.map(
+                    (line, index) => (
 
-                    <tr key={index}>
+                      <tr key={index}>
 
-                      <td>
-                        <select
-                          value={row.itemName || ""}
-                          onChange={(e) => {
-                            const name =
-                              e.target.value;
+                        <td>
 
-                            const product =
-                              finishedProducts.find(
-                                (item) =>
-                                  getProductName(
-                                    item
-                                  ) === name
-                              );
-
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        itemId:
-                                          getProductId(
-                                            product
-                                          ),
-                                        itemName: name,
-                                        itemType:
-                                          "FINISHED_GOODS",
-                                        unit:
-                                          getProductUnit(
-                                            product
-                                          ),
-                                        rate:
-                                          item.rate ||
-                                          getProductRate(
-                                            product
-                                          ),
-                                        hsn:
-                                          getProductHSN(
-                                            product
-                                          ),
-                                        gstRate:
-                                          getProductGST(
-                                            product
-                                          ),
-                                      }
-                                    : item
-                              )
-                            );
-                          }}
-                        >
-
-                          <option value="">
-                            Select Finished Goods
-                          </option>
-
-                          {finishedProducts.map(
-                            (product, productIndex) => {
-
-                              const id =
-                                getProductId(
-                                  product
-                                );
+                          <select
+                            value={
+                              line.itemName ||
+                              ""
+                            }
+                            onChange={(e) => {
 
                               const name =
-                                getProductName(
-                                  product
+                                e.target
+                                  .value;
+
+                              const product =
+                                finishedProducts.find(
+                                  (item) =>
+                                    getProductName(
+                                      item
+                                    ) === name
                                 );
 
-                              const code =
-                                getProductCode(
-                                  product
-                                );
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            itemId:
+                                              getProductId(
+                                                product
+                                              ),
+                                            itemName:
+                                              name,
+                                            itemType:
+                                              "FINISHED_GOODS",
+                                            unit:
+                                              getProductUnit(
+                                                product
+                                              ),
+                                            rate:
+                                              row.rate ||
+                                              getProductRate(
+                                                product
+                                              ),
+                                            hsn:
+                                              getProductHSN(
+                                                product
+                                              ),
+                                            gstRate:
+                                              getProductGST(
+                                                product
+                                              ),
+                                          }
+                                        : row
+                                  )
+                              );
 
-                              return (
+                            }}
+                          >
+
+                            <option value="">
+                              Select Finished Goods
+                            </option>
+
+                            {finishedProducts.map(
+                              (
+                                product,
+                                productIndex
+                              ) => (
+
                                 <option
                                   key={
-                                    id ||
-                                    `${name}-${productIndex}`
+                                    getProductId(
+                                      product
+                                    ) ||
+                                    `${getProductName(
+                                      product
+                                    )}-${productIndex}`
                                   }
-                                  value={name}
+                                  value={getProductName(
+                                    product
+                                  )}
                                 >
-                                  {name}
-                                  {code
-                                    ? ` (${code})`
+                                  {
+                                    getProductName(
+                                      product
+                                    )
+                                  }
+                                  {getProductCode(
+                                    product
+                                  )
+                                    ? ` (${getProductCode(
+                                        product
+                                      )})`
                                     : ""}
                                 </option>
-                              );
+
+                              )
+                            )}
+
+                          </select>
+
+                        </td>
+
+                        <td>
+                          <input
+                            value={
+                              line.unit ||
+                              "KG"
                             }
-                          )}
+                            readOnly
+                          />
+                        </td>
 
-                        </select>
-                      </td>
-
-                      <td>
-                        <input
-                          value={
-                            row.unit || "KG"
-                          }
-                          readOnly
-                        />
-                      </td>
-
-                      <td>
-                        <input
-                          type="number"
-                          value={row.qty || ""}
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        qty:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+                          <input
+                            type="number"
+                            value={
+                              line.qty || ""
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            qty:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        />
-                      </td>
+                            }
+                          />
+                        </td>
 
-                      <td>
-                        <input
-                          type="number"
-                          value={row.rate || ""}
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        rate:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+                          <input
+                            type="number"
+                            value={
+                              line.rate || ""
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            rate:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        />
-                      </td>
+                            }
+                          />
+                        </td>
 
-                      <td>
-                        <input
-                          value={
-                            row.batchNo || ""
-                          }
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        batchNo:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+                          <input
+                            value={
+                              line.batchNo ||
+                              ""
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            batchNo:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        />
-                      </td>
+                            }
+                          />
+                        </td>
 
-                      <td>
-                        <input
-                          value={
-                            row.barcode || ""
-                          }
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        barcode:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+                          <input
+                            value={
+                              line.barcode ||
+                              ""
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            barcode:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        />
-                      </td>
+                            }
+                          />
+                        </td>
 
-                      <td>
-                        <input
-                          value={row.hsn || ""}
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        hsn:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+                          <input
+                            value={
+                              line.hsn || ""
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            hsn:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        />
-                      </td>
+                            }
+                          />
+                        </td>
 
-                      <td>
-                        <input
-                          type="number"
-                          value={
-                            row.gstRate || ""
-                          }
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        gstRate:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+                          <input
+                            type="number"
+                            value={
+                              line.gstRate ||
+                              ""
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            gstRate:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        />
-                      </td>
+                            }
+                          />
+                        </td>
 
-                      <td>
-                        <select
-                          value={
-                            row.gstType ||
-                            "CGST_SGST"
-                          }
-                          onChange={(e) =>
-                            setSLines((current) =>
-                              current.map(
-                                (item, rowIndex) =>
-                                  rowIndex === index
-                                    ? {
-                                        ...item,
-                                        gstType:
-                                          e.target
-                                            .value,
-                                      }
-                                    : item
+                        <td>
+
+                          <select
+                            value={
+                              line.gstType ||
+                              "CGST_SGST"
+                            }
+                            onChange={(e) =>
+                              setSLines(
+                                (current) =>
+                                  current.map(
+                                    (
+                                      row,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex ===
+                                      index
+                                        ? {
+                                            ...row,
+                                            gstType:
+                                              e.target
+                                                .value,
+                                          }
+                                        : row
+                                  )
                               )
-                            )
-                          }
-                        >
-                          <option value="NONE">
-                            None
-                          </option>
+                            }
+                          >
 
-                          <option value="CGST_SGST">
-                            CGST + SGST
-                          </option>
+                            <option value="NONE">
+                              None
+                            </option>
 
-                          <option value="IGST">
-                            IGST
-                          </option>
-                        </select>
-                      </td>
+                            <option value="CGST_SGST">
+                              CGST + SGST
+                            </option>
 
-                      <td>
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={() =>
-                            setSLines((current) =>
-                              current.filter(
-                                (_, rowIndex) =>
-                                  rowIndex !==
-                                  index
+                            <option value="IGST">
+                              IGST
+                            </option>
+
+                          </select>
+
+                        </td>
+
+                        <td>
+
+                          <button
+                            type="button"
+                            className="danger"
+                            onClick={() =>
+                              setSLines(
+                                (current) =>
+                                  current.filter(
+                                    (
+                                      _,
+                                      rowIndex
+                                    ) =>
+                                      rowIndex !==
+                                      index
+                                  )
                               )
-                            )
-                          }
-                        >
-                          ×
-                        </button>
-                      </td>
+                            }
+                          >
+                            ×
+                          </button>
 
-                    </tr>
+                        </td>
 
-                  ))}
+                      </tr>
+
+                    )
+                  )}
 
                 </tbody>
 
@@ -2217,7 +2387,8 @@ export default function Manufacturing() {
                   {
                     ...blank(),
                     gstRate: "",
-                    gstType: "CGST_SGST",
+                    gstType:
+                      "CGST_SGST",
                   },
                 ])
               }
@@ -2241,111 +2412,12 @@ export default function Manufacturing() {
             </div>
 
           </div>
-
-          <div className="card">
-
-            <h3>Sales List</h3>
-
-            <div className="scroll">
-
-              <table>
-
-                <thead>
-                  <tr>
-                    <th>Invoice</th>
-                    <th>Date</th>
-                    <th>Customer</th>
-                    <th>Location</th>
-                    <th>Taxable</th>
-                    <th>CGST</th>
-                    <th>SGST</th>
-                    <th>IGST</th>
-                    <th>Total</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-
-                  {sales.map((item, index) => (
-
-                    <tr
-                      key={
-                        item._id || index
-                      }
-                    >
-                      <td>
-                        {item.invoiceNo}
-                      </td>
-
-                      <td>
-                        {item.date
-                          ? new Date(
-                              item.date
-                            ).toLocaleDateString(
-                              "en-IN"
-                            )
-                          : "-"}
-                      </td>
-
-                      <td>
-                        {item.customerName}
-                      </td>
-
-                      <td>
-                        {item.location}
-                      </td>
-
-                      <td>
-                        ₹{" "}
-                        {money(
-                          item.subtotal
-                        )}
-                      </td>
-
-                      <td>
-                        ₹{" "}
-                        {money(
-                          item.totalCGST
-                        )}
-                      </td>
-
-                      <td>
-                        ₹{" "}
-                        {money(
-                          item.totalSGST
-                        )}
-                      </td>
-
-                      <td>
-                        ₹{" "}
-                        {money(
-                          item.totalIGST
-                        )}
-                      </td>
-
-                      <td>
-                        ₹{" "}
-                        {money(
-                          item.grandTotal
-                        )}
-                      </td>
-                    </tr>
-
-                  ))}
-
-                </tbody>
-
-              </table>
-
-            </div>
-
-          </div>
         </>
       )}
 
-      {/* ===================================================
+      {/* =================================================
           GST
-      =================================================== */}
+      ================================================= */}
 
       {tab === "gst" && (
         <div className="card">
@@ -2356,6 +2428,7 @@ export default function Manufacturing() {
 
           {gst ? (
             <>
+
               <div className="grid">
 
                 <div>
@@ -2474,27 +2547,27 @@ export default function Manufacturing() {
                   <tbody>
 
                     {(gst.rows || []).map(
-                      (item, index) => (
+                      (row, index) => (
 
                         <tr
                           key={
-                            item._id ||
+                            row._id ||
                             index
                           }
                         >
 
                           <td>
-                            {item.sourceType}
+                            {row.sourceType}
                           </td>
 
                           <td>
-                            {item.documentNo}
+                            {row.documentNo}
                           </td>
 
                           <td>
-                            {item.date
+                            {row.date
                               ? new Date(
-                                  item.date
+                                  row.date
                                 ).toLocaleDateString(
                                   "en-IN"
                                 )
@@ -2502,44 +2575,38 @@ export default function Manufacturing() {
                           </td>
 
                           <td>
-                            {item.partyName}
+                            {row.partyName}
                           </td>
 
                           <td>
-                            {item.partyGSTIN ||
+                            {row.partyGSTIN ||
                               "-"}
                           </td>
 
                           <td>
-                            {item.hsn || "-"}
+                            {row.hsn || "-"}
                           </td>
 
                           <td>
                             ₹{" "}
                             {money(
-                              item.taxableAmount
+                              row.taxableAmount
                             )}
                           </td>
 
                           <td>
                             ₹{" "}
-                            {money(
-                              item.cgst
-                            )}
+                            {money(row.cgst)}
                           </td>
 
                           <td>
                             ₹{" "}
-                            {money(
-                              item.sgst
-                            )}
+                            {money(row.sgst)}
                           </td>
 
                           <td>
                             ₹{" "}
-                            {money(
-                              item.igst
-                            )}
+                            {money(row.igst)}
                           </td>
 
                         </tr>
