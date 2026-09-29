@@ -11,19 +11,20 @@ const masterTabs = [
   ["supplier", "Supplier", "F7"],
   ["product", "Product", "F8"],
   ["location", "Location", "F9"],
+  ["unit", "Unit", "F10"],
 ];
 
 const txTabs = [
-  ["purchase", "Purchase", "F10"],
-  ["sale", "Sale", "F11"],
-  ["job", "Job Order", "F12"],
-  ["production", "Production", "F13"],
-  ["grading", "Grading", "F14"],
-  ["pi", "PI", "F15"],
-  ["return", "Return", "F16"],
-  ["damage", "Damage", "F17"],
-  ["repack", "Repacking", "F18"],
-  ["packing", "Packing Conversion", "F19"],
+  ["purchase", "Purchase", "F11"],
+  ["sale", "Sale", "F12"],
+  ["job", "Job Order", "F13"],
+  ["production", "Production", "F14"],
+  ["grading", "Grading", "F15"],
+  ["pi", "PI", "F16"],
+  ["return", "Return", "F17"],
+  ["damage", "Damage", "F18"],
+  ["repack", "Repacking", "F19"],
+  ["packing", "Packing Conversion", "F20"],
   ["bom", "BOM / Costing", ""],
   ["stock", "Stock / Ledger", ""],
   ["documents", "Documents", ""],
@@ -72,17 +73,18 @@ export default function AccountsMasters() {
         F7: "supplier",
         F8: "product",
         F9: "location",
+        F10: "unit",
 
-        F10: "purchase",
-        F11: "sale",
-        F12: "job",
-        F13: "production",
-        F14: "grading",
-        F15: "pi",
-        F16: "return",
-        F17: "damage",
-        F18: "repack",
-        F19: "packing",
+        F11: "purchase",
+        F12: "sale",
+        F13: "job",
+        F14: "production",
+        F15: "grading",
+        F16: "pi",
+        F17: "return",
+        F18: "damage",
+        F19: "repack",
+        F20: "packing",
       };
 
       if (!map[e.key]) return;
@@ -272,7 +274,7 @@ export default function AccountsMasters() {
               }`}
               onClick={() => setSection("master")}
             >
-              Masters <span className="am-key">F4–F9</span>
+              Masters <span className="am-key">F4–F10</span>
             </button>
 
             <button
@@ -282,7 +284,7 @@ export default function AccountsMasters() {
               onClick={() => setSection("transactions")}
             >
               Voucher / Operations{" "}
-              <span className="am-key">F10–F19</span>
+              <span className="am-key">F11–F20</span>
             </button>
 
             <button
