@@ -1,4 +1,3 @@
-```javascript
 import axios from "axios";
 
 const API_URL =
@@ -9,20 +8,19 @@ const API_URL =
  * Download the existing salary-slip PDF from the backend
  * and open WhatsApp with a ready message.
  *
- * Browser WhatsApp cannot silently attach a local PDF file.
- * Therefore this function:
- *   1. Gets the SAME PDF used by Salary Slip
- *   2. Downloads it to the user's device
- *   3. Opens WhatsApp with the salary-slip message
- *
- * The downloaded PDF can then be attached in WhatsApp.
+ * Browser WhatsApp cannot silently attach a local PDF.
+ * This function:
+ * 1. Gets the same PDF used by Salary Slip.
+ * 2. Downloads it to the user's device.
+ * 3. Opens WhatsApp with the salary-slip message.
  */
-export async function shareSalarySlipOnWhatsApp({
+export async function sendSalarySlipToWhatsApp({
   employeeId,
   employeeName = "",
   employeeCode = "",
   month = "",
   phone = "",
+  employeePhone = "",
 }) {
   if (!employeeId) {
     throw new Error("Employee ID is required.");
@@ -59,14 +57,12 @@ export async function shareSalarySlipOnWhatsApp({
     employeeName
       .replace(/[^a-z0-9]/gi, "_")
       .replace(/_+/g, "_")
-      .replace(/^_|_$/g, "") ||
-    "Employee";
+      .replace(/^_|_$/g, "") || "Employee";
 
   const fileName =
     `Salary-Slip-${safeName}-${month || "Salary"}.pdf`;
 
   const link = document.createElement("a");
-
   link.href = url;
   link.download = fileName;
 
@@ -78,11 +74,15 @@ export async function shareSalarySlipOnWhatsApp({
     window.URL.revokeObjectURL(url);
   }, 5000);
 
-  let cleanPhone = String(phone || "")
+  let cleanPhone = String(phone || employeePhone || "")
     .replace(/\D/g, "");
 
   if (cleanPhone.length === 10) {
     cleanPhone = `91${cleanPhone}`;
+  }
+
+  if (cleanPhone.startsWith("0091")) {
+    cleanPhone = cleanPhone.substring(2);
   }
 
   const message = [
@@ -99,7 +99,9 @@ export async function shareSalarySlipOnWhatsApp({
     .join("\n");
 
   const whatsappUrl = cleanPhone
-    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`
+    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
+        message
+      )}`
     : `https://wa.me/?text=${encodeURIComponent(message)}`;
 
   window.open(
@@ -114,4 +116,7 @@ export async function shareSalarySlipOnWhatsApp({
     whatsappUrl,
   };
 }
-```
+
+// Backward-compatible alias
+export const shareSalarySlipOnWhatsApp =
+  sendSalarySlipToWhatsApp;
