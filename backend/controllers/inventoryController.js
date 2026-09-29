@@ -8,6 +8,7 @@ import LocationMaster from "../models/LocationMaster.js";
 import SupplierMaster from "../models/SupplierMaster.js";
 import InventoryItemMaster from "../models/InventoryItemMaster.js";
 import CustomerMaster from "../models/CustomerMaster.js";
+import UnitMaster from "../models/UnitMaster.js";
 import Group from "../models/Group.js";
 import Ledger from "../models/Ledger.js";
 import Voucher from "../models/Voucher.js";
@@ -74,19 +75,48 @@ export async function getPurchaseMasters(req,res){
    : {$or:[{companyId:null},{companyId:{$exists:false}}]};
   const activeScope={$or:[{active:true},{active:{$exists:false}},{active:null}]};
   const masterScope={$and:[companyScope,activeScope]};
-  const [locations,suppliers,items,customers]=await Promise.all([
+  const [locations,suppliers,items,customers,units]=await Promise.all([
    LocationMaster.find(masterScope).sort({name:1}).lean(),
    SupplierMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean(),
-   InventoryItemMaster.find({$and:[companyScope,activeScope,{itemType:"RAW_MATERIAL"}]}).populate("purchaseLedgerId salesLedgerId","name").sort({name:1}).lean(),
-   CustomerMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean()
+   InventoryItemMaster.find({$and:[companyScope,activeScope]}).populate("purchaseLedgerId salesLedgerId","name").sort({itemType:1,name:1}).lean(),
+   CustomerMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean(),
+   UnitMaster.find(masterScope).sort({name:1}).lean()
   ]);
-  return res.json({success:true,locations,suppliers,items,customers});
+  return res.json({success:true,locations,suppliers,items,customers,units});
  }catch(e){return res.status(500).json({success:false,message:e.message||"Master data load failed."})}
 }
 
 export async function createLocationMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Location / Godown name is required."});const code=clean(b.code).toUpperCase()||await next("LOCATION","LOC");const row=await LocationMaster.create({companyId:req.user?.companyId||null,name,code,pin:clean(b.pin),state:clean(b.state),district:clean(b.district),address:clean(b.address),createdBy:req.user._id});return res.status(201).json({success:true,message:"Location / Godown master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Location / Godown already exists.":e.message})}}
 export async function createSupplierMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Supplier name is required."});const row=await SupplierMaster.create({companyId:req.user?.companyId||null,name,gstin:clean(b.gstin).toUpperCase(),state:clean(b.state),district:clean(b.district),pin:clean(b.pin),phone:clean(b.phone),address:clean(b.address),gstStatus:clean(b.gstStatus),createdBy:req.user._id});return res.status(201).json({success:true,message:"Supplier master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Supplier already exists.":e.message})}}
 export async function createInventoryItemMaster(req,res){try{const b=req.body||{},name=clean(b.name);if(!name)return res.status(400).json({success:false,message:"Item name is required."});const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(b.itemType)?b.itemType:"RAW_MATERIAL";const row=await InventoryItemMaster.create({companyId:req.user?.companyId||null,name,itemType,hsn:clean(b.hsn),unit:clean(b.unit)||"KG",defaultGstRate:Math.max(0,Math.min(num(b.defaultGstRate),100)),defaultBarcode:clean(b.defaultBarcode),createdBy:req.user._id});return res.status(201).json({success:true,message:"Item master created.",item:row});}catch(e){return res.status(400).json({success:false,message:e.code===11000?"Item already exists.":e.message})}}
+export async function createUnitMaster(req,res){
+ try{
+  const b=req.body||{}, name=clean(b.name), code=clean(b.code).toUpperCase();
+  if(!name||!code)return res.status(400).json({success:false,message:"Unit name and unit code are required."});
+  const decimalPlaces=Math.max(0,Math.min(6,Number(b.decimalPlaces)||0));
+  const row=await UnitMaster.create({companyId:req.user?.companyId||null,name,code,decimalPlaces,createdBy:req.user._id});
+  return res.status(201).json({success:true,message:"Unit master created.",item:row});
+ }catch(e){return res.status(400).json({success:false,message:e.code===11000?"Unit name or code already exists.":e.message})}
+}
+export async function updateUnitMaster(req,res){
+ try{
+  const b=req.body||{}, name=clean(b.name), code=clean(b.code).toUpperCase();
+  if(!name||!code)return res.status(400).json({success:false,message:"Unit name and unit code are required."});
+  const decimalPlaces=Math.max(0,Math.min(6,Number(b.decimalPlaces)||0));
+  const row=await UnitMaster.findOneAndUpdate({_id:req.params.id,companyId:req.user?.companyId||null},
+   {$set:{name,code,decimalPlaces}},{new:true,runValidators:true});
+  if(!row)return res.status(404).json({success:false,message:"Unit not found."});
+  return res.json({success:true,message:"Unit master updated.",item:row});
+ }catch(e){return res.status(400).json({success:false,message:e.code===11000?"Unit name or code already exists.":e.message})}
+}
+export async function deleteUnitMaster(req,res){
+ try{
+  const row=await UnitMaster.findOneAndUpdate({_id:req.params.id,companyId:req.user?.companyId||null},{$set:{active:false}},{new:true});
+  if(!row)return res.status(404).json({success:false,message:"Unit not found."});
+  return res.json({success:true,message:"Unit master deleted.",item:row});
+ }catch(e){return res.status(400).json({success:false,message:e.message})}
+}
+
 export async function createRawMaterialPurchase(req,res){
   try{
     const b=req.body||{},location=clean(b.location),supplierName=clean(b.supplierName),raw=Array.isArray(b.lines)?b.lines:[];
