@@ -27,6 +27,7 @@ const accountsMasterSchema = new mongoose.Schema({
   itemType: String,
   hsn: String,
   unit: String,
+  decimalPlaces: { type: Number, default: 2 },
   gstRate: { type: Number, default: 0 },
   purchaseRate: { type: Number, default: 0 },
   salesRate: { type: Number, default: 0 },
