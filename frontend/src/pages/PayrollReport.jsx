@@ -6,7 +6,7 @@ const money = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })`;
+  })}`;
 
 const numberValue = (value) => {
   const n = Number(value);
@@ -45,16 +45,12 @@ const getEmployeePhone = (row, detailed) =>
   "";
 
 const normalizePhone = (value) => {
-  if (!value) return "";
+  let phone = String(value || "").replace(/\D/g, "");
 
-  let phone = String(value).replace(/\D/g, "");
-
-  // India: convert 10 digit number to 91XXXXXXXXXX
   if (phone.length === 10) {
     phone = `91${phone}`;
   }
 
-  // If stored as 0091XXXXXXXXXX
   if (phone.startsWith("0091")) {
     phone = phone.substring(2);
   }
@@ -67,13 +63,11 @@ export default function PayrollReport() {
 
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
-
   const [rows, setRows] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-
   const [sharingId, setSharingId] = useState("");
 
   async function load() {
@@ -89,6 +83,8 @@ export default function PayrollReport() {
       setRows(
         Array.isArray(response?.salaries)
           ? response.salaries
+          : Array.isArray(response)
+          ? response
           : []
       );
     } catch (e) {
@@ -97,7 +93,8 @@ export default function PayrollReport() {
       setRows([]);
 
       setError(
-        e?.message ||
+        e?.response?.data?.message ||
+          e?.message ||
           "Unable to load payroll report."
       );
     } finally {
@@ -114,19 +111,31 @@ export default function PayrollReport() {
       (a, x) => ({
         ot:
           a.ot +
-          numberValue(x?.overtimeAmount),
+          numberValue(
+            x?.overtimeAmount ??
+              x?.approvedOvertimeAmount ??
+              x?.otAmount
+          ),
 
         cut:
           a.cut +
-          numberValue(x?.cuttingAmount),
+          numberValue(
+            x?.cuttingAmount ??
+              x?.approvedCuttingAmount ??
+              x?.cutAmount
+          ),
 
         gross:
           a.gross +
-          numberValue(x?.grossSalary),
+          numberValue(x?.grossSalary ?? x?.gross),
 
         net:
           a.net +
-          numberValue(x?.netSalary),
+          numberValue(
+            x?.netSalary ??
+              x?.netPayable ??
+              x?.net
+          ),
       }),
       {
         ot: 0,
@@ -148,55 +157,36 @@ export default function PayrollReport() {
       setError("");
       setMessage("");
 
-      /*
-       * IMPORTANT:
-       * We use the same detailed salary slip data that is already
-       * used by the existing salary-slip/PDF flow.
-       *
-       * No new salary-slip design is generated here.
-       */
-      const detailed = await hrApi.detailedSalarySlip(
-        row._id
-      );
+      const detailed =
+        await hrApi.detailedSalarySlip(row._id);
 
-      const employeeName = getEmployeeName(
-        row,
-        detailed
-      );
+      const employeeName =
+        getEmployeeName(row, detailed);
 
-      const employeeCode = getEmployeeCode(
-        row,
-        detailed
-      );
+      const employeeCode =
+        getEmployeeCode(row, detailed);
 
-      const employeePhone = normalizePhone(
-        getEmployeePhone(row, detailed)
-      );
+      const employeePhone =
+        normalizePhone(
+          getEmployeePhone(row, detailed)
+        );
 
-      /*
-       * Existing WhatsApp helper.
-       *
-       * The helper is responsible for:
-       * 1. generating/downloading the existing salary-slip PDF
-       * 2. opening WhatsApp with the employee message
-       *
-       * We do NOT create another PDF format here.
-       */
+      const employeeId =
+        row?.employeeId?._id ||
+        row?.employeeId ||
+        row?.employee?._id ||
+        detailed?.employee?._id ||
+        detailed?.employeeId ||
+        "";
+
       await sendSalarySlipToWhatsApp({
         salary: row,
         detailed,
-
-        // Additional information for the helper
-        employeeId:
-          row?.employeeId?._id ||
-          row?.employeeId ||
-          row?.employee?._id ||
-          "",
-
+        employeeId,
         employeeName,
         employeeCode,
         employeePhone,
-
+        phone: employeePhone,
         month,
         year,
       });
@@ -211,7 +201,8 @@ export default function PayrollReport() {
       );
 
       setError(
-        e?.message ||
+        e?.response?.data?.message ||
+          e?.message ||
           "Unable to prepare salary slip for WhatsApp."
       );
     } finally {
@@ -219,18 +210,18 @@ export default function PayrollReport() {
     }
   }
 
-  const monthName = new Date(
-    2000,
-    month - 1,
-    1
-  ).toLocaleString("en-IN", {
-    month: "long",
-  });
+  const monthName =
+    new Date(
+      2000,
+      month - 1,
+      1
+    ).toLocaleString("en-IN", {
+      month: "long",
+    });
 
   return (
     <main style={S.page}>
       <div style={S.wrap}>
-        {/* HEADER */}
         <header style={S.head}>
           <div>
             <div style={S.eyebrow}>
@@ -242,8 +233,8 @@ export default function PayrollReport() {
             </h1>
 
             <p style={S.subtitle}>
-              Approved overtime and cutting reflected
-              in salary.
+              Company-wise, monthly and staff-wise
+              payroll report with salary slip sharing.
             </p>
           </div>
 
@@ -317,7 +308,6 @@ export default function PayrollReport() {
           </div>
         </header>
 
-        {/* PERIOD */}
         <div style={S.period}>
           Payroll Period:{" "}
           <strong>
@@ -325,29 +315,18 @@ export default function PayrollReport() {
           </strong>
         </div>
 
-        {/* SUCCESS */}
-        {message ? (
+        {message && (
           <div style={S.success}>
-            <span style={S.messageIcon}>
-              ✓
-            </span>
-
-            <span>{message}</span>
+            ✓ {message}
           </div>
-        ) : null}
+        )}
 
-        {/* ERROR */}
-        {error ? (
+        {error && (
           <div style={S.err}>
-            <span style={S.messageIcon}>
-              !
-            </span>
-
-            <span>{error}</span>
+            ! {error}
           </div>
-        ) : null}
+        )}
 
-        {/* SUMMARY CARDS */}
         <div style={S.cards}>
           <div style={S.card}>
             <span style={S.cardLabel}>
@@ -390,7 +369,6 @@ export default function PayrollReport() {
           </div>
         </div>
 
-        {/* REPORT TABLE */}
         <section style={S.tableWrapper}>
           <div style={S.tableHeader}>
             <div>
@@ -398,7 +376,9 @@ export default function PayrollReport() {
                 Salary Register
               </h2>
 
-              <span style={S.tableSubtitle}>
+              <span
+                style={S.tableSubtitle}
+              >
                 {rows.length} employee
                 {rows.length === 1
                   ? ""
@@ -409,7 +389,6 @@ export default function PayrollReport() {
 
           <div style={S.tableScroll}>
             <div style={S.table}>
-              {/* TABLE HEADER */}
               <div style={S.th}>
                 <span>Employee</span>
                 <span>Present</span>
@@ -421,14 +400,12 @@ export default function PayrollReport() {
                 <span>Action</span>
               </div>
 
-              {/* LOADING */}
-              {loading ? (
+              {loading && (
                 <div style={S.loading}>
                   Loading payroll records...
                 </div>
-              ) : null}
+              )}
 
-              {/* ROWS */}
               {!loading &&
                 rows.map((x) => {
                   const employeeName =
@@ -453,59 +430,97 @@ export default function PayrollReport() {
                       cuttingMinutes / 60
                     );
 
-                  const cuttingRemainingMinutes =
+                  const remainingMinutes =
                     cuttingMinutes % 60;
 
                   const isSharing =
                     sharingId === x._id;
+
+                  const overtimeHours =
+                    numberValue(
+                      x?.overtimeHours ??
+                        x?.otHours
+                    );
+
+                  const overtimeAmount =
+                    numberValue(
+                      x?.overtimeAmount ??
+                        x?.approvedOvertimeAmount ??
+                        x?.otAmount
+                    );
+
+                  const cuttingAmount =
+                    numberValue(
+                      x?.cuttingAmount ??
+                        x?.approvedCuttingAmount ??
+                        x?.cutAmount
+                    );
+
+                  const gross =
+                    numberValue(
+                      x?.grossSalary ??
+                        x?.gross
+                    );
+
+                  const net =
+                    numberValue(
+                      x?.netSalary ??
+                        x?.netPayable ??
+                        x?.net
+                    );
 
                   return (
                     <div
                       style={S.tr}
                       key={x._id}
                     >
-                      {/* EMPLOYEE */}
-                      <span style={S.employeeCell}>
-                        <b style={S.employeeName}>
+                      <span
+                        style={
+                          S.employeeCell
+                        }
+                      >
+                        <b
+                          style={
+                            S.employeeName
+                          }
+                        >
                           {employeeName}
                         </b>
 
-                        {employeeCode ? (
+                        {employeeCode && (
                           <small
-                            style={S.employeeCode}
+                            style={
+                              S.employeeCode
+                            }
                           >
                             {employeeCode}
                           </small>
-                        ) : null}
+                        )}
                       </span>
 
-                      {/* PRESENT */}
                       <span>
                         {numberValue(
                           x?.presentDays
                         )}
                       </span>
 
-                      {/* OT HOURS */}
                       <span>
-                        {numberValue(
-                          x?.overtimeHours
-                        ).toFixed(2)}{" "}
+                        {overtimeHours.toFixed(
+                          2
+                        )}{" "}
                         h
                       </span>
 
-                      {/* OT AMOUNT */}
                       <span>
                         {money(
-                          x?.overtimeAmount
+                          overtimeAmount
                         )}
                       </span>
 
-                      {/* CUTTING */}
                       <span>
                         {cuttingHours}h{" "}
                         {String(
-                          cuttingRemainingMinutes
+                          remainingMinutes
                         ).padStart(
                           2,
                           "0"
@@ -513,21 +528,18 @@ export default function PayrollReport() {
                         m
                       </span>
 
-                      {/* GROSS */}
                       <span>
-                        {money(
-                          x?.grossSalary
-                        )}
+                        {money(gross)}
                       </span>
 
-                      {/* NET */}
-                      <strong style={S.netCell}>
-                        {money(
-                          x?.netSalary
-                        )}
+                      <strong
+                        style={
+                          S.netCell
+                        }
+                      >
+                        {money(net)}
                       </strong>
 
-                      {/* WHATSAPP */}
                       <button
                         type="button"
                         style={{
@@ -542,52 +554,42 @@ export default function PayrollReport() {
                         disabled={
                           isSharing
                         }
-                        title="Prepare the existing salary-slip PDF and open WhatsApp"
                       >
-                        <span
-                          style={
-                            S.whatsappIcon
-                          }
-                        >
-                          {isSharing
-                            ? "..."
-                            : "WA"}
-                        </span>
-
-                        <span>
-                          {isSharing
-                            ? "Preparing..."
-                            : "WhatsApp"}
-                        </span>
+                        {isSharing
+                          ? "Preparing..."
+                          : "WA • WhatsApp"}
                       </button>
                     </div>
                   );
                 })}
 
-              {/* EMPTY */}
               {!loading &&
-              rows.length === 0 ? (
-                <div style={S.empty}>
-                  <div
-                    style={S.emptyTitle}
-                  >
-                    No salary records found
-                  </div>
+                rows.length === 0 && (
+                  <div style={S.empty}>
+                    <div
+                      style={
+                        S.emptyTitle
+                      }
+                    >
+                      No salary records
+                      found
+                    </div>
 
-                  <div
-                    style={
-                      S.emptyText
-                    }
-                  >
-                    No payroll data is
-                    available for{" "}
-                    <strong>
-                      {monthName} {year}
-                    </strong>
-                    .
+                    <div
+                      style={
+                        S.emptyText
+                      }
+                    >
+                      No payroll data is
+                      available for{" "}
+                      <strong>
+                        {monthName}{" "}
+                        {year}
+                      </strong>
+                      .
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                )}
             </div>
           </div>
         </section>
@@ -613,8 +615,7 @@ const S = {
 
   head: {
     display: "flex",
-    justifyContent:
-      "space-between",
+    justifyContent: "space-between",
     alignItems: "flex-end",
     gap: 20,
     flexWrap: "wrap",
@@ -632,13 +633,11 @@ const S = {
   title: {
     margin: 0,
     fontSize: 30,
-    lineHeight: 1.2,
     color: "#101828",
   },
 
   subtitle: {
-    margin:
-      "7px 0 0",
+    margin: "7px 0 0",
     color: "#667085",
     fontSize: 14,
   },
@@ -665,21 +664,16 @@ const S = {
   input: {
     minWidth: 130,
     height: 42,
-    padding:
-      "0 12px",
-    border:
-      "1px solid #d0d5dd",
+    padding: "0 12px",
+    border: "1px solid #d0d5dd",
     borderRadius: 9,
     background: "#fff",
-    color: "#101828",
-    outline: "none",
     boxSizing: "border-box",
   },
 
   refreshButton: {
     height: 42,
-    padding:
-      "0 16px",
+    padding: "0 16px",
     border: 0,
     borderRadius: 9,
     background: "#101828",
@@ -690,24 +684,18 @@ const S = {
 
   period: {
     background: "#fff",
-    border:
-      "1px solid #eaecf0",
+    border: "1px solid #eaecf0",
     borderRadius: 10,
-    padding:
-      "10px 14px",
+    padding: "10px 14px",
     marginBottom: 14,
     color: "#667085",
     fontSize: 13,
   },
 
   success: {
-    display: "flex",
-    alignItems: "center",
-    gap: 9,
     background: "#ecfdf3",
     color: "#027a48",
-    border:
-      "1px solid #abefc6",
+    border: "1px solid #abefc6",
     padding: 12,
     borderRadius: 10,
     marginBottom: 14,
@@ -716,29 +704,14 @@ const S = {
   },
 
   err: {
-    display: "flex",
-    alignItems: "center",
-    gap: 9,
     background: "#fef3f2",
     color: "#b42318",
-    border:
-      "1px solid #fecdca",
+    border: "1px solid #fecdca",
     padding: 12,
     borderRadius: 10,
     marginBottom: 14,
     fontSize: 13,
     fontWeight: 600,
-  },
-
-  messageIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: "50%",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "rgba(255,255,255,.7)",
-    fontWeight: 900,
   },
 
   cards: {
@@ -751,8 +724,7 @@ const S = {
 
   card: {
     background: "#fff",
-    border:
-      "1px solid #eaecf0",
+    border: "1px solid #eaecf0",
     borderRadius: 14,
     padding: 18,
     boxShadow:
@@ -760,8 +732,6 @@ const S = {
     display: "flex",
     flexDirection: "column",
     gap: 7,
-    minHeight: 90,
-    boxSizing: "border-box",
   },
 
   cardLabel: {
@@ -782,23 +752,15 @@ const S = {
 
   tableWrapper: {
     background: "#fff",
-    border:
-      "1px solid #eaecf0",
+    border: "1px solid #eaecf0",
     borderRadius: 14,
     overflow: "hidden",
-    boxShadow:
-      "0 5px 18px rgba(15,23,42,.05)",
   },
 
   tableHeader: {
-    padding:
-      "16px 18px",
+    padding: "16px 18px",
     borderBottom:
       "1px solid #eaecf0",
-    display: "flex",
-    justifyContent:
-      "space-between",
-    alignItems: "center",
   },
 
   tableTitle: {
@@ -847,22 +809,16 @@ const S = {
     alignItems: "center",
     color: "#344054",
     fontSize: 13,
-    minHeight: 66,
-    boxSizing: "border-box",
   },
 
   employeeCell: {
     display: "flex",
     flexDirection: "column",
-    minWidth: 0,
   },
 
   employeeName: {
     color: "#101828",
     fontSize: 13,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
   },
 
   employeeCode: {
@@ -880,16 +836,11 @@ const S = {
     border: 0,
     borderRadius: 8,
     minHeight: 36,
-    padding:
-      "7px 10px",
+    padding: "7px 10px",
     background: "#e9f9ef",
     color: "#16803a",
     cursor: "pointer",
     fontWeight: 800,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
     whiteSpace: "nowrap",
   },
 
@@ -898,16 +849,10 @@ const S = {
     cursor: "wait",
   },
 
-  whatsappIcon: {
-    fontSize: 10,
-    fontWeight: 900,
-  },
-
   loading: {
     padding: 35,
     textAlign: "center",
     color: "#667085",
-    fontSize: 14,
   },
 
   empty: {
