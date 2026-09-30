@@ -1,58 +1,34 @@
-/**
- * WhatsApp Salary Slip Helper
- *
- * File:
- * frontend/src/lib/whatsappSalarySlip.js
- */
-
-/* =========================================================
-   NORMALIZE WHATSAPP NUMBER
-   ========================================================= */
-
 export function normalizeWhatsAppNumber(phone) {
-  if (!phone) {
-    return "";
-  }
+  if (!phone) return "";
 
   let number = String(phone).trim();
 
-  // Remove spaces, +, -, brackets and other characters
-  number = number.replace(/[^\d]/g, "");
+  // Remove +, spaces, -, brackets etc.
+  number = number.replace(/\D/g, "");
 
-  // Example: 919876543210
-  if (number.length === 12 && number.startsWith("91")) {
-    return number;
-  }
-
-  // Example: 9876543210
+  // 10 digit Indian number
   if (number.length === 10) {
     return `91${number}`;
   }
 
-  // Example: 09876543210
+  // 0XXXXXXXXXX
   if (number.length === 11 && number.startsWith("0")) {
-    return `91${number.substring(1)}`;
+    return `91${number.slice(1)}`;
   }
 
-  // International number
+  // Already 91XXXXXXXXXX
+  if (number.length === 12 && number.startsWith("91")) {
+    return number;
+  }
+
   return number;
 }
-
-
-/* =========================================================
-   VALIDATE WHATSAPP NUMBER
-   ========================================================= */
 
 export function isValidWhatsAppNumber(phone) {
   const number = normalizeWhatsAppNumber(phone);
 
   return /^91[6-9]\d{9}$/.test(number);
 }
-
-
-/* =========================================================
-   FORMAT SALARY
-   ========================================================= */
 
 export function formatSalary(amount) {
   const value = Number(amount || 0);
@@ -63,31 +39,20 @@ export function formatSalary(amount) {
   });
 }
 
-
-/* =========================================================
-   CREATE SALARY SLIP MESSAGE
-   ========================================================= */
-
 export function createSalarySlipWhatsAppMessage({
-  employeeName = "",
+  employeeName = "Employee",
   month = "",
   netSalary = 0,
-  companyName = "",
+  companyName = "Company",
   pdfUrl = "",
 }) {
-  const name = employeeName || "Employee";
+  let message = `Hello ${employeeName},
 
-  const salaryMonth = month || "Salary";
+Your salary slip for ${month} is ready.
 
-  const salary = formatSalary(netSalary);
+Company: ${companyName}
 
-  let message = `Hello ${name},
-
-Your salary slip for ${salaryMonth} is ready.
-
-Company: ${companyName || "Company"}
-
-Net Salary: ₹${salary}`;
+Net Salary: ₹${formatSalary(netSalary)}`;
 
   if (pdfUrl) {
     message += `
@@ -99,36 +64,30 @@ ${pdfUrl}`;
   message += `
 
 Regards,
-${companyName || "HR / Accounts"}`;
+${companyName}
+HR / Accounts`;
 
   return message;
 }
 
-
-/* =========================================================
-   OPEN WHATSAPP WITH SALARY MESSAGE
-   ========================================================= */
-
 export function sendSalarySlipWhatsApp({
-  employeeName = "",
+  employeeName = "Employee",
   phone = "",
   month = "",
   netSalary = 0,
-  companyName = "",
+  companyName = "Company",
   pdfUrl = "",
 }) {
   const whatsappNumber = normalizeWhatsAppNumber(phone);
 
   if (!whatsappNumber) {
-    throw new Error(
-      "Employee WhatsApp/mobile number is missing."
-    );
+    alert("Employee WhatsApp/mobile number is missing.");
+    return false;
   }
 
   if (!isValidWhatsAppNumber(phone)) {
-    throw new Error(
-      "Please enter a valid Indian WhatsApp mobile number."
-    );
+    alert("Please enter a valid Indian WhatsApp mobile number.");
+    return false;
   }
 
   const message = createSalarySlipWhatsAppMessage({
@@ -140,8 +99,7 @@ export function sendSalarySlipWhatsApp({
   });
 
   const whatsappUrl =
-    `https://wa.me/${whatsappNumber}` +
-    `?text=${encodeURIComponent(message)}`;
+    `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
 
   window.open(
     whatsappUrl,
@@ -149,49 +107,8 @@ export function sendSalarySlipWhatsApp({
     "noopener,noreferrer"
   );
 
-  return whatsappUrl;
+  return true;
 }
-
-
-/* =========================================================
-   GENERIC WHATSAPP FUNCTION
-   ========================================================= */
-
-export function openWhatsApp({
-  phone = "",
-  message = "",
-}) {
-  const whatsappNumber = normalizeWhatsAppNumber(phone);
-
-  if (!whatsappNumber) {
-    throw new Error(
-      "WhatsApp/mobile number is missing."
-    );
-  }
-
-  if (!isValidWhatsAppNumber(phone)) {
-    throw new Error(
-      "Please enter a valid Indian WhatsApp mobile number."
-    );
-  }
-
-  const whatsappUrl =
-    `https://wa.me/${whatsappNumber}` +
-    `?text=${encodeURIComponent(message || "")}`;
-
-  window.open(
-    whatsappUrl,
-    "_blank",
-    "noopener,noreferrer"
-  );
-
-  return whatsappUrl;
-}
-
-
-/* =========================================================
-   GET EMPLOYEE PHONE NUMBER
-   ========================================================= */
 
 export function getEmployeeWhatsAppNumber(employee = {}) {
   return (
@@ -206,15 +123,8 @@ export function getEmployeeWhatsAppNumber(employee = {}) {
   );
 }
 
-
-/* =========================================================
-   GET EMPLOYEE NAME
-   ========================================================= */
-
 export function getEmployeeName(employee = {}) {
-  if (employee.name) {
-    return employee.name;
-  }
+  if (employee.name) return employee.name;
 
   if (employee.employeeName) {
     return employee.employeeName;
@@ -224,22 +134,13 @@ export function getEmployeeName(employee = {}) {
     return employee.fullName;
   }
 
-  const firstName =
-    employee.firstName || "";
+  const firstName = employee.firstName || "";
+  const lastName = employee.lastName || "";
 
-  const lastName =
-    employee.lastName || "";
-
-  const fullName =
-    `${firstName} ${lastName}`.trim();
+  const fullName = `${firstName} ${lastName}`.trim();
 
   return fullName || "Employee";
 }
-
-
-/* =========================================================
-   GET NET SALARY
-   ========================================================= */
 
 export function getEmployeeNetSalary(
   employee = {},
@@ -257,11 +158,6 @@ export function getEmployeeNetSalary(
   );
 }
 
-
-/* =========================================================
-   PREPARE SALARY SLIP DATA
-   ========================================================= */
-
 export function getSalarySlipWhatsAppData({
   employee = {},
   salary = {},
@@ -269,32 +165,23 @@ export function getSalarySlipWhatsAppData({
   companyName = "",
   pdfUrl = "",
 }) {
-  const phone =
-    getEmployeeWhatsAppNumber(employee);
+  return {
+    employeeName: getEmployeeName(employee),
 
-  const employeeName =
-    getEmployeeName(employee);
+    phone: getEmployeeWhatsAppNumber(employee),
 
-  const netSalary =
-    getEmployeeNetSalary(
+    month,
+
+    netSalary: getEmployeeNetSalary(
       employee,
       salary
-    );
+    ),
 
-  return {
-    employeeName,
-    phone,
-    month,
-    netSalary,
     companyName,
+
     pdfUrl,
   };
 }
-
-
-/* =========================================================
-   SEND EMPLOYEE SALARY SLIP WHATSAPP
-   ========================================================= */
 
 export function sendEmployeeSalarySlipWhatsApp({
   employee = {},
@@ -303,45 +190,44 @@ export function sendEmployeeSalarySlipWhatsApp({
   companyName = "",
   pdfUrl = "",
 }) {
-  const data =
-    getSalarySlipWhatsAppData({
-      employee,
-      salary,
-      month,
-      companyName,
-      pdfUrl,
-    });
+  const data = getSalarySlipWhatsAppData({
+    employee,
+    salary,
+    month,
+    companyName,
+    pdfUrl,
+  });
 
   return sendSalarySlipWhatsApp(data);
 }
 
-
-/* =========================================================
-   SEND SALARY SLIP FROM SIMPLE DATA
-   ========================================================= */
-
-export function sendSimpleSalarySlipWhatsApp({
-  employeeName = "",
+export function openWhatsApp({
   phone = "",
-  month = "",
-  netSalary = 0,
-  companyName = "",
-  pdfUrl = "",
+  message = "",
 }) {
-  return sendSalarySlipWhatsApp({
-    employeeName,
-    phone,
-    month,
-    netSalary,
-    companyName,
-    pdfUrl,
-  });
+  const whatsappNumber = normalizeWhatsAppNumber(phone);
+
+  if (!whatsappNumber) {
+    alert("WhatsApp/mobile number is missing.");
+    return false;
+  }
+
+  if (!isValidWhatsAppNumber(phone)) {
+    alert("Please enter a valid Indian WhatsApp mobile number.");
+    return false;
+  }
+
+  const whatsappUrl =
+    `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+
+  window.open(
+    whatsappUrl,
+    "_blank",
+    "noopener,noreferrer"
+  );
+
+  return true;
 }
-
-
-/* =========================================================
-   DEFAULT EXPORT
-   ========================================================= */
 
 export default {
   normalizeWhatsAppNumber,
@@ -349,11 +235,10 @@ export default {
   formatSalary,
   createSalarySlipWhatsAppMessage,
   sendSalarySlipWhatsApp,
-  openWhatsApp,
   getEmployeeWhatsAppNumber,
   getEmployeeName,
   getEmployeeNetSalary,
   getSalarySlipWhatsAppData,
   sendEmployeeSalarySlipWhatsApp,
-  sendSimpleSalarySlipWhatsApp,
+  openWhatsApp,
 };
