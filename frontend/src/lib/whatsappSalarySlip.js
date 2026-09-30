@@ -1,108 +1,147 @@
-import axios from "axios";
-
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "https://office-management-system-ikx8.onrender.com";
-
 /**
- * Download the existing salary-slip PDF from the backend
- * and open WhatsApp with a ready message.
+ * WhatsApp Salary Slip Helper
  *
- * Browser WhatsApp cannot silently attach a local PDF.
- * This function:
- * 1. Gets the same PDF used by Salary Slip.
- * 2. Downloads it to the user's device.
- * 3. Opens WhatsApp with the salary-slip message.
+ * File:
+ * frontend/src/lib/whatsappSalarySlip.js
  */
-export async function sendSalarySlipToWhatsApp({
-  employeeId,
+
+/* =========================================================
+   NORMALIZE WHATSAPP NUMBER
+   ========================================================= */
+
+export function normalizeWhatsAppNumber(phone) {
+  if (!phone) {
+    return "";
+  }
+
+  let number = String(phone).trim();
+
+  // Remove spaces, +, -, brackets and other characters
+  number = number.replace(/[^\d]/g, "");
+
+  // Example: 919876543210
+  if (number.length === 12 && number.startsWith("91")) {
+    return number;
+  }
+
+  // Example: 9876543210
+  if (number.length === 10) {
+    return `91${number}`;
+  }
+
+  // Example: 09876543210
+  if (number.length === 11 && number.startsWith("0")) {
+    return `91${number.substring(1)}`;
+  }
+
+  // International number
+  return number;
+}
+
+
+/* =========================================================
+   VALIDATE WHATSAPP NUMBER
+   ========================================================= */
+
+export function isValidWhatsAppNumber(phone) {
+  const number = normalizeWhatsAppNumber(phone);
+
+  return /^91[6-9]\d{9}$/.test(number);
+}
+
+
+/* =========================================================
+   FORMAT SALARY
+   ========================================================= */
+
+export function formatSalary(amount) {
+  const value = Number(amount || 0);
+
+  return value.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+
+/* =========================================================
+   CREATE SALARY SLIP MESSAGE
+   ========================================================= */
+
+export function createSalarySlipWhatsAppMessage({
   employeeName = "",
-  employeeCode = "",
   month = "",
-  phone = "",
-  employeePhone = "",
+  netSalary = 0,
+  companyName = "",
+  pdfUrl = "",
 }) {
-  if (!employeeId) {
-    throw new Error("Employee ID is required.");
+  const name = employeeName || "Employee";
+
+  const salaryMonth = month || "Salary";
+
+  const salary = formatSalary(netSalary);
+
+  let message = `Hello ${name},
+
+Your salary slip for ${salaryMonth} is ready.
+
+Company: ${companyName || "Company"}
+
+Net Salary: ₹${salary}`;
+
+  if (pdfUrl) {
+    message += `
+
+Salary Slip PDF:
+${pdfUrl}`;
   }
 
-  const token =
-    localStorage.getItem("token") ||
-    localStorage.getItem("accessToken");
+  message += `
 
-  if (!token) {
-    throw new Error("Login session expired. Please login again.");
+Regards,
+${companyName || "HR / Accounts"}`;
+
+  return message;
+}
+
+
+/* =========================================================
+   OPEN WHATSAPP WITH SALARY MESSAGE
+   ========================================================= */
+
+export function sendSalarySlipWhatsApp({
+  employeeName = "",
+  phone = "",
+  month = "",
+  netSalary = 0,
+  companyName = "",
+  pdfUrl = "",
+}) {
+  const whatsappNumber = normalizeWhatsAppNumber(phone);
+
+  if (!whatsappNumber) {
+    throw new Error(
+      "Employee WhatsApp/mobile number is missing."
+    );
   }
 
-  const response = await axios.get(
-    `${API_URL}/api/hr/salary-slip/${employeeId}/pdf`,
-    {
-      params: {
-        month,
-      },
-      responseType: "blob",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  if (!isValidWhatsAppNumber(phone)) {
+    throw new Error(
+      "Please enter a valid Indian WhatsApp mobile number."
+    );
+  }
 
-  const blob = new Blob([response.data], {
-    type: "application/pdf",
+  const message = createSalarySlipWhatsAppMessage({
+    employeeName,
+    month,
+    netSalary,
+    companyName,
+    pdfUrl,
   });
 
-  const url = window.URL.createObjectURL(blob);
-
-  const safeName =
-    employeeName
-      .replace(/[^a-z0-9]/gi, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_|_$/g, "") || "Employee";
-
-  const fileName =
-    `Salary-Slip-${safeName}-${month || "Salary"}.pdf`;
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  window.setTimeout(() => {
-    window.URL.revokeObjectURL(url);
-  }, 5000);
-
-  let cleanPhone = String(phone || employeePhone || "")
-    .replace(/\D/g, "");
-
-  if (cleanPhone.length === 10) {
-    cleanPhone = `91${cleanPhone}`;
-  }
-
-  if (cleanPhone.startsWith("0091")) {
-    cleanPhone = cleanPhone.substring(2);
-  }
-
-  const message = [
-    `Salary Slip - ${month || ""}`,
-    `Employee: ${employeeName || "-"}`,
-    employeeCode
-      ? `Employee Code: ${employeeCode}`
-      : "",
-    "",
-    "Your salary slip PDF has been prepared.",
-    "Please find the attached salary slip.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const whatsappUrl = cleanPhone
-    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
-        message
-      )}`
-    : `https://wa.me/?text=${encodeURIComponent(message)}`;
+  const whatsappUrl =
+    `https://wa.me/${whatsappNumber}` +
+    `?text=${encodeURIComponent(message)}`;
 
   window.open(
     whatsappUrl,
@@ -110,13 +149,211 @@ export async function sendSalarySlipToWhatsApp({
     "noopener,noreferrer"
   );
 
-  return {
-    success: true,
-    fileName,
+  return whatsappUrl;
+}
+
+
+/* =========================================================
+   GENERIC WHATSAPP FUNCTION
+   ========================================================= */
+
+export function openWhatsApp({
+  phone = "",
+  message = "",
+}) {
+  const whatsappNumber = normalizeWhatsAppNumber(phone);
+
+  if (!whatsappNumber) {
+    throw new Error(
+      "WhatsApp/mobile number is missing."
+    );
+  }
+
+  if (!isValidWhatsAppNumber(phone)) {
+    throw new Error(
+      "Please enter a valid Indian WhatsApp mobile number."
+    );
+  }
+
+  const whatsappUrl =
+    `https://wa.me/${whatsappNumber}` +
+    `?text=${encodeURIComponent(message || "")}`;
+
+  window.open(
     whatsappUrl,
+    "_blank",
+    "noopener,noreferrer"
+  );
+
+  return whatsappUrl;
+}
+
+
+/* =========================================================
+   GET EMPLOYEE PHONE NUMBER
+   ========================================================= */
+
+export function getEmployeeWhatsAppNumber(employee = {}) {
+  return (
+    employee.whatsappNumber ||
+    employee.whatsapp ||
+    employee.mobileNumber ||
+    employee.mobile ||
+    employee.phone ||
+    employee.contactNumber ||
+    employee.contact ||
+    ""
+  );
+}
+
+
+/* =========================================================
+   GET EMPLOYEE NAME
+   ========================================================= */
+
+export function getEmployeeName(employee = {}) {
+  if (employee.name) {
+    return employee.name;
+  }
+
+  if (employee.employeeName) {
+    return employee.employeeName;
+  }
+
+  if (employee.fullName) {
+    return employee.fullName;
+  }
+
+  const firstName =
+    employee.firstName || "";
+
+  const lastName =
+    employee.lastName || "";
+
+  const fullName =
+    `${firstName} ${lastName}`.trim();
+
+  return fullName || "Employee";
+}
+
+
+/* =========================================================
+   GET NET SALARY
+   ========================================================= */
+
+export function getEmployeeNetSalary(
+  employee = {},
+  salary = {}
+) {
+  return (
+    salary.netSalary ??
+    salary.netPay ??
+    salary.netAmount ??
+    salary.net ??
+    employee.netSalary ??
+    employee.netPay ??
+    employee.netAmount ??
+    0
+  );
+}
+
+
+/* =========================================================
+   PREPARE SALARY SLIP DATA
+   ========================================================= */
+
+export function getSalarySlipWhatsAppData({
+  employee = {},
+  salary = {},
+  month = "",
+  companyName = "",
+  pdfUrl = "",
+}) {
+  const phone =
+    getEmployeeWhatsAppNumber(employee);
+
+  const employeeName =
+    getEmployeeName(employee);
+
+  const netSalary =
+    getEmployeeNetSalary(
+      employee,
+      salary
+    );
+
+  return {
+    employeeName,
+    phone,
+    month,
+    netSalary,
+    companyName,
+    pdfUrl,
   };
 }
 
-// Backward-compatible alias
-export const shareSalarySlipOnWhatsApp =
-  sendSalarySlipToWhatsApp;
+
+/* =========================================================
+   SEND EMPLOYEE SALARY SLIP WHATSAPP
+   ========================================================= */
+
+export function sendEmployeeSalarySlipWhatsApp({
+  employee = {},
+  salary = {},
+  month = "",
+  companyName = "",
+  pdfUrl = "",
+}) {
+  const data =
+    getSalarySlipWhatsAppData({
+      employee,
+      salary,
+      month,
+      companyName,
+      pdfUrl,
+    });
+
+  return sendSalarySlipWhatsApp(data);
+}
+
+
+/* =========================================================
+   SEND SALARY SLIP FROM SIMPLE DATA
+   ========================================================= */
+
+export function sendSimpleSalarySlipWhatsApp({
+  employeeName = "",
+  phone = "",
+  month = "",
+  netSalary = 0,
+  companyName = "",
+  pdfUrl = "",
+}) {
+  return sendSalarySlipWhatsApp({
+    employeeName,
+    phone,
+    month,
+    netSalary,
+    companyName,
+    pdfUrl,
+  });
+}
+
+
+/* =========================================================
+   DEFAULT EXPORT
+   ========================================================= */
+
+export default {
+  normalizeWhatsAppNumber,
+  isValidWhatsAppNumber,
+  formatSalary,
+  createSalarySlipWhatsAppMessage,
+  sendSalarySlipWhatsApp,
+  openWhatsApp,
+  getEmployeeWhatsAppNumber,
+  getEmployeeName,
+  getEmployeeNetSalary,
+  getSalarySlipWhatsAppData,
+  sendEmployeeSalarySlipWhatsApp,
+  sendSimpleSalarySlipWhatsApp,
+};
