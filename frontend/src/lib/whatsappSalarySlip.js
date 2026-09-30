@@ -1,15 +1,3 @@
-```javascript
-// frontend/src/lib/whatsappSalarySlip.js
-
-/**
- * Normalize Indian WhatsApp number.
- *
- * Examples:
- * 9876543210      -> 919876543210
- * 09876543210     -> 919876543210
- * +91 9876543210  -> 919876543210
- * 919876543210    -> 919876543210
- */
 export function normalizeWhatsAppNumber(phone) {
   if (!phone) {
     return "";
@@ -322,4 +310,3 @@ export default {
   getSalarySlipWhatsAppData,
   openWhatsApp,
 };
-```
