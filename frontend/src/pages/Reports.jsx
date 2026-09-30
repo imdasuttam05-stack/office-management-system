@@ -1,4 +1,3 @@
-```javascript
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { hrApi } from "../lib/hrApi.js";
@@ -3275,4 +3274,3 @@ const S = {
     fontSize: 12,
   },
 };
-```
