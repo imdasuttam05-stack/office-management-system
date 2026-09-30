@@ -15,6 +15,7 @@ import securityRoutes from "./routes/securityRoutes.js";
 import inventoryRoutes from "./routes/inventoryRoutes.js";
 import accountingRoutes from "./routes/accountingRoutes.js";
 import accountsMasterRoutes from "./routes/accountsMasterRoutes.js";
+import salarySlipPdfRoutes from "./routes/salarySlipPdfRoutes.js";
 
 import {
   ensureBootstrapAdmin,
@@ -164,6 +165,7 @@ if (userRoutes) {
   });
 }
 
+app.use("/api/payroll/salary-slip-pdf", salarySlipPdfRoutes);
 app.use("/api/payroll", hrRoutes);
 app.use("/api/ocr", ocrRoutes);
 
