@@ -49,6 +49,11 @@ function normalizeType(value) {
     .replace(/[\s-]+/g, "_");
 }
 
+function isRawMaterial(product) {
+  const t = getProductType(product);
+  return ["RAW_MATERIAL", "RAW", "RAW_MATERIALS", "MATERIAL", "RM"].includes(t);
+}
+
 function getProductId(product) {
   return (
     product?._id ||
@@ -169,10 +174,13 @@ function Lines({
 }) {
   const normalizedAllowed = allowedTypes.map(normalizeType);
 
-  const sourceList =
-    stockProducts && stockProducts.length > 0
-      ? stockProducts
-      : products;
+  // Show both current stock and Product Master records. This is important
+  // for production: a Raw Material product must appear even when its stock
+  // record has not been created yet (the server will validate quantity).
+  const sourceList = [
+    ...(Array.isArray(products) ? products : []),
+    ...(Array.isArray(stockProducts) ? stockProducts : []),
+  ];
 
   const options = useMemo(() => {
     const seen = new Set();
@@ -1730,12 +1738,10 @@ export default function Manufacturing() {
                * Source Stock always comes from actual RAW MATERIAL stock
                * for both GRADING and FINISHED GOODS production.
                */
-              products={[]}
+              products={products.filter(isRawMaterial)}
               stockProducts={rawStock.map((stock) => ({
                 ...stock,
-                itemType:
-                  getProductType(stock) ||
-                  "RAW_MATERIAL",
+                itemType: getProductType(stock) || "RAW_MATERIAL",
               }))}
               allowedTypes={[
                 "RAW_MATERIAL",
