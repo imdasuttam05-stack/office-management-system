@@ -12,6 +12,8 @@ import UnitMaster from "../models/UnitMaster.js";
 import Group from "../models/Group.js";
 import Ledger from "../models/Ledger.js";
 import Voucher from "../models/Voucher.js";
+import InventoryMovement from "../models/InventoryMovement.js";
+import ProductionEntry from "../models/ProductionEntry.js";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
@@ -148,11 +150,78 @@ async function listModel(req,res,Model,base,searchFields){const page=Math.max(1,
 export async function getRawMaterialStock(req,res){return stockList(req,res,"RAW_MATERIAL")}
 export async function getStock(req,res){return stockList(req,res,clean(req.query.itemType)||"RAW_MATERIAL")}
 async function stockList(req,res,itemType){try{const page=Math.max(1,Number(req.query.page)||1),limit=Math.min(100,Math.max(5,Number(req.query.limit)||25)),filter={itemType,qty:{$gt:0}};if(req.user?.companyId)filter.companyId=req.user.companyId;if(clean(req.query.location))filter.location=clean(req.query.location);if(clean(req.query.search))filter.itemName={$regex:clean(req.query.search),$options:"i"};const [items,total]=await Promise.all([InventoryStock.find(filter).sort({itemName:1}).skip((page-1)*limit).limit(limit).lean(),InventoryStock.countDocuments(filter)]);return res.json({success:true,items,pagination:{page,limit,total,pages:Math.ceil(total/limit)}})}catch(e){return res.status(500).json({success:false,message:e.message})}}
-export async function createJobOrder(req,res){try{const b=req.body||{},type=b.type,location=clean(b.location),sources=Array.isArray(b.sourceItems)?b.sourceItems:[],outputs=Array.isArray(b.outputItems)?b.outputItems:[];if(!["GRADING","FINISHED_GOODS"].includes(type)||!location||!sources.length||!outputs.length)return res.status(400).json({success:false,message:"Type, location, source items and output items are required."});// Both production flows consume RAW MATERIAL.
-    // GRADING: Raw Material -> Grade
-    // FINISHED GOODS: Raw Material -> Finished Goods
-    const allowedIn="RAW_MATERIAL", allowedOut=type==="GRADING"?"GRADE":"FINISHED_GOODS";let sourceValue=0,outputValue=0;for(const x of sources){const q=num(x.qty),rate=num(x.rate);if(q<=0)throw new Error(`Invalid source quantity for ${x.itemName}.`);const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location,itemType:allowedIn,itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});if(!st||num(st.qty)<q)throw new Error(`Insufficient ${allowedIn} stock for ${x.itemName}.`);sourceValue+=q*(rate>0?rate:num(st.averageRate));}for(const x of outputs){if(num(x.qty)<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");outputValue+=num(x.qty)*num(x.rate)}const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other),jobNo=await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");const job=await ManufacturingJobOrder.create({jobNo,companyId:req.user?.companyId||null,date:dt(b.date)||new Date(),type,location,sourceItems:sources.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"PCS",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),labourCost:labour,transportCost:transport,otherCost:other,totalCost,notes:clean(b.notes),createdBy:req.user._id});for(const x of job.sourceItems)await adjustStock({companyId:req.user?.companyId,location,itemType:allowedIn,itemName:x.itemName,unit:x.unit,qty:x.qty,value:x.value,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});const totalOutputQty=outputs.reduce((s,x)=>s+num(x.qty),0)||1;for(const x of job.outputItems){const alloc=r2(totalCost*x.qty/totalOutputQty);await adjustStock({companyId:req.user?.companyId,location,itemType:allowedOut,itemName:x.itemName,unit:x.unit,qty:x.qty,value:alloc,mode:"ADD",hsn:x.hsn||"",batchNo:x.batchNo,barcode:x.barcode,mfgDate:dt(x.mfgDate)||job.date,expiryDate:dt(x.expiryDate)});}return res.status(201).json({success:true,message:`${type} Job Order ${jobNo} posted.`,job});}catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Job order failed."})}}
-export async function getJobs(req,res){try{const filter={status:"POSTED"};if(req.user?.companyId)filter.companyId=req.user.companyId; if(req.query.type)filter.type=req.query.type;const items=await ManufacturingJobOrder.find(filter).sort({date:-1,createdAt:-1}).limit(100).lean();return res.json({success:true,items})}catch(e){return res.status(500).json({success:false,message:e.message})}}
+export async function createJobOrder(req,res){
+ try{
+  const b=req.body||{},type=b.type,location=clean(b.location),sources=Array.isArray(b.sourceItems)?b.sourceItems:[],outputs=Array.isArray(b.outputItems)?b.outputItems:[];
+  if(!["GRADING","FINISHED_GOODS"].includes(type)||!location||!sources.length||!outputs.length)return res.status(400).json({success:false,message:"Type, location, source items and output items are required."});
+  const allowedIn="RAW_MATERIAL", allowedOut=type==="GRADING"?"GRADE":"FINISHED_GOODS";
+  let sourceValue=0;
+  for(const x of sources){
+   const q=num(x.qty),rate=num(x.rate); if(q<=0)throw new Error(`Invalid source quantity for ${x.itemName}.`);
+   const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location,itemType:allowedIn,itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
+   if(!st||num(st.qty)<q)throw new Error(`Insufficient Raw Material stock for ${x.itemName}. Available ${num(st?.qty)}.`);
+   sourceValue+=q*(rate>0?rate:num(st.averageRate));
+  }
+  for(const x of outputs){if(num(x.qty)<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");}
+  const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other);
+  const jobNo=await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");
+  const job=await ManufacturingJobOrder.create({jobNo,companyId:req.user?.companyId||null,date:dt(b.date)||new Date(),type,location,
+   sourceItems:sources.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
+   outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
+   labourCost:labour,transportCost:transport,otherCost:other,totalCost,notes:clean(b.notes),createdBy:req.user._id});
+  for(const x of job.sourceItems){
+   await adjustStock({companyId:req.user?.companyId,location,itemType:allowedIn,itemName:x.itemName,unit:x.unit,qty:x.qty,value:x.value,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});
+   const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location,itemType:allowedIn,itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
+   await InventoryMovement.create({companyId:req.user?.companyId||null,date:job.date,location,itemName:x.itemName,itemType:allowedIn,unit:x.unit||"KG",qtyOut:x.qty,valueOut:x.value,balanceQty:num(st?.qty),sourceType:"JOB_ORDER",sourceNo:job.jobNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Raw Material issued against Job Order ${job.jobNo}`,createdBy:req.user._id});
+  }
+  return res.status(201).json({success:true,message:`Job Order ${jobNo} created. Raw Material stock issued. Production entry is required to increase output stock.`,job});
+ }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Job order failed."})}
+}
+
+export async function createProductionEntry(req,res){
+ try{
+  const b=req.body||{},jobId=clean(b.jobId),outputs=Array.isArray(b.outputItems)?b.outputItems:[];
+  if(!jobId||!outputs.length)return res.status(400).json({success:false,message:"Job Order and output items are required."});
+  const filter={_id:jobId,status:"POSTED"}; if(req.user?.companyId)filter.companyId=req.user.companyId;
+  const job=await ManufacturingJobOrder.findOne(filter); if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
+  const prior=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
+  const used={}; for(const e of prior)for(const x of e.outputItems||[])used[x.itemName]=(used[x.itemName]||0)+num(x.qty);
+  let totalValue=0;
+  for(const x of outputs){
+   const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));
+   if(!planned)throw new Error(`${x.itemName} is not an output of Job Order ${job.jobNo}.`);
+   const qty=num(x.qty),remain=Math.max(0,num(planned.qty)-(used[x.itemName]||0));
+   if(qty<=0||qty>remain+0.000001)throw new Error(`${x.itemName}: production quantity ${qty} exceeds remaining ${remain}.`);
+   totalValue+=qty*(num(x.rate)>0?num(x.rate):num(planned.rate));
+  }
+  const productionNo=await next("PRODUCTION","PROD");
+  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:dt(b.date)||new Date(),location:job.location,outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*(num(x.rate)||0)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),notes:clean(b.notes),createdBy:req.user._id});
+  for(const x of entry.outputItems){
+   const value=r2(num(x.qty)*(num(x.rate)>0?num(x.rate):((job.outputItems||[]).find(o=>o.itemName===x.itemName)?.rate||0)));
+   await adjustStock({companyId:req.user?.companyId,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:entry.date});
+   const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
+   await InventoryMovement.create({companyId:req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
+  }
+  const all=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
+  const done={}; for(const e of all)for(const x of e.outputItems||[])done[x.itemName]=(done[x.itemName]||0)+num(x.qty);
+  const complete=(job.outputItems||[]).every(x=>(done[x.itemName]||0)>=num(x.qty)-0.000001);
+  if(complete){job.status="COMPLETED";await job.save();}
+  return res.status(201).json({success:true,message:`Production ${productionNo} posted against Job Order ${job.jobNo}. Finished Goods stock increased.`,production:entry,jobStatus:job.status});
+ }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Production entry failed."})}
+}
+
+export async function getProductionEntries(req,res){try{const filter={};if(req.user?.companyId)filter.companyId=req.user.companyId;if(req.query.jobId)filter.jobId=req.query.jobId;const items=await ProductionEntry.find(filter).sort({date:-1,createdAt:-1}).limit(300).lean();return res.json({success:true,items})}catch(e){return res.status(500).json({success:false,message:e.message})}}
+
+export async function getJobs(req,res){
+ try{
+  const filter={};if(req.user?.companyId)filter.companyId=req.user.companyId;if(req.query.type)filter.type=req.query.type;
+  const items=await ManufacturingJobOrder.find(filter).sort({date:-1,createdAt:-1}).limit(300).lean();
+  const ids=items.map(x=>x._id); const entries=ids.length?await ProductionEntry.find({jobId:{$in:ids},status:"POSTED"}).lean():[];
+  const byJob={}; for(const e of entries){const k=String(e.jobId);byJob[k]??={};for(const x of e.outputItems||[])byJob[k][x.itemName]=(byJob[k][x.itemName]||0)+num(x.qty);}
+  const enriched=items.map(j=>({...j,producedItems:Object.entries(byJob[String(j._id)]||{}).map(([itemName,qty])=>({itemName,qty})),remainingOutputItems:(j.outputItems||[]).map(x=>({...x,producedQty:byJob[String(j._id)]?.[x.itemName]||0,remainingQty:Math.max(0,num(x.qty)-(byJob[String(j._id)]?.[x.itemName]||0))}))}));
+  return res.json({success:true,items:enriched});
+ }catch(e){return res.status(500).json({success:false,message:e.message})}
+}
 export async function createSale(req,res){
   try{
     const b=req.body||{},location=clean(b.location),customerName=clean(b.customerName),lines=Array.isArray(b.lines)?b.lines:[];
