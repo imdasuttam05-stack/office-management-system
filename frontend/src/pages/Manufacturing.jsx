@@ -281,7 +281,7 @@ function Lines({
                 >
 
                   <option value="">
-                    Select Product
+                    Select Raw Material Stock
                   </option>
 
                   {options.map((product, productIndex) => {
@@ -1726,14 +1726,25 @@ export default function Manufacturing() {
             <Lines
               items={sources}
               setItems={setSources}
-              products={rawProducts}
-              stockProducts={rawStock}
+              /*
+               * Source Stock always comes from actual RAW MATERIAL stock
+               * for both GRADING and FINISHED GOODS production.
+               */
+              products={[]}
+              stockProducts={rawStock.map((stock) => ({
+                ...stock,
+                itemType:
+                  getProductType(stock) ||
+                  "RAW_MATERIAL",
+              }))}
               allowedTypes={[
                 "RAW_MATERIAL",
                 "RAW",
               ]}
               emptyMessage={
-                "No Raw Material stock available."
+                rawStock.length
+                  ? "No Raw Material stock available."
+                  : "No Raw Material stock found. Post a Raw Material Purchase first."
               }
             />
 
