@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const purchaseLineSchema = new mongoose.Schema(
   {
+    itemId: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryItemMaster", default: null, index: true },
     itemName: { type: String, required: true, trim: true, maxlength: 180 },
     hsn: { type: String, trim: true, default: "", maxlength: 30 },
     unit: { type: String, required: true, trim: true, maxlength: 30 },
