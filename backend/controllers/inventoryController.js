@@ -14,6 +14,7 @@ import Ledger from "../models/Ledger.js";
 import Voucher from "../models/Voucher.js";
 import InventoryMovement from "../models/InventoryMovement.js";
 import ProductionEntry from "../models/ProductionEntry.js";
+import BOM from "../models/BOM.js";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
@@ -27,7 +28,7 @@ async function adjustStock({companyId,location,itemType,itemName,unit,qty,value,
  const nq=r2(oq+q), nv=r2(Math.max(0,ov+v));
  await InventoryStock.findOneAndUpdate(filter,{$set:{hsn,unit,mfgDate,expiryDate,averageRate:nq?r2(nv/nq):0,lastPurchaseRate:mode==="ADD"?r2(value/(qty||1)):undefined,lastPurchaseDate:mode==="ADD"?new Date():undefined},$inc:{qty:q,stockValue:v},$setOnInsert:{companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""}},{upsert:true,new:true});
 }
-function buildLine(x){const qty=num(x.qty),rate=num(x.purchaseRate),gross=qty*rate,discount=Math.min(Math.max(num(x.discount),0),gross),taxable=r2(gross-discount),gstRate=Math.max(0,Math.min(num(x.gstRate),100)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),cgst=gstType==="CGST_SGST"?r2(gst/2):0,sgst=gstType==="CGST_SGST"?r2(gst-cgst):0,igst=gstType==="IGST"?gst:0;return {itemName:clean(x.itemName),hsn:clean(x.hsn),unit:clean(x.unit)||"KG",batchNo:clean(x.batchNo),barcode:clean(x.barcode),mfgDate:dt(x.mfgDate),expiryDate:dt(x.expiryDate),qty,purchaseRate:rate,discount:r2(discount),taxableAmount:taxable,gstRate,gstType,cgst,sgst,igst,lineTotal:r2(taxable+cgst+sgst+igst),landedCost:0}}
+function buildLine(x){const qty=num(x.qty),rate=num(x.purchaseRate),gross=qty*rate,discount=Math.min(Math.max(num(x.discount),0),gross),taxable=r2(gross-discount),gstRate=Math.max(0,Math.min(num(x.gstRate),100)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),cgst=gstType==="CGST_SGST"?r2(gst/2):0,sgst=gstType==="CGST_SGST"?r2(gst-cgst):0,igst=gstType==="IGST"?gst:0;return {itemId:clean(x.itemId)||null,itemName:clean(x.itemName),hsn:clean(x.hsn),unit:clean(x.unit)||"KG",batchNo:clean(x.batchNo),barcode:clean(x.barcode),mfgDate:dt(x.mfgDate),expiryDate:dt(x.expiryDate),qty,purchaseRate:rate,discount:r2(discount),taxableAmount:taxable,gstRate,gstType,cgst,sgst,igst,lineTotal:r2(taxable+cgst+sgst+igst),landedCost:0}}
 export async function lookupPincode(req,res){
   try{
     const pin=clean(req.params.pin).replace(/\D/g,"");
@@ -131,6 +132,12 @@ export async function createRawMaterialPurchase(req,res){
     const purchaseLedger=await ensureLedger({name:"Purchase",groupName:"Purchase",nature:"Expense",req});
     const inputCgst=await ensureGstLedger("Input CGST",req),inputSgst=await ensureGstLedger("Input SGST",req),inputIgst=await ensureGstLedger("Input IGST",req);
     const lines=raw.map(buildLine);
+    for(const x of lines){
+      if(!x.itemId){
+        const item=await InventoryItemMaster.findOne({name:x.itemName,companyId});
+        if(item)x.itemId=item._id;
+      }
+    }
     if(lines.some(x=>!x.itemName||x.qty<=0||x.purchaseRate<0))return res.status(400).json({success:false,message:"Each raw material needs item, quantity and rate."});
     const subtotal=r2(lines.reduce((s,x)=>s+x.taxableAmount,0)),cg=r2(lines.reduce((s,x)=>s+x.cgst,0)),sg=r2(lines.reduce((s,x)=>s+x.sgst,0)),ig=r2(lines.reduce((s,x)=>s+x.igst,0)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),extra=transport+other,totalQty=lines.reduce((s,x)=>s+x.qty,0)||1;
     lines.forEach(x=>x.landedCost=r2(x.taxableAmount+extra*x.qty/totalQty));
@@ -150,6 +157,63 @@ async function listModel(req,res,Model,base,searchFields){const page=Math.max(1,
 export async function getRawMaterialStock(req,res){return stockList(req,res,"RAW_MATERIAL")}
 export async function getStock(req,res){return stockList(req,res,clean(req.query.itemType)||"RAW_MATERIAL")}
 async function stockList(req,res,itemType){try{const page=Math.max(1,Number(req.query.page)||1),limit=Math.min(100,Math.max(5,Number(req.query.limit)||25)),filter={itemType,qty:{$gt:0}};if(req.user?.companyId)filter.companyId=req.user.companyId;if(clean(req.query.location))filter.location=clean(req.query.location);if(clean(req.query.search))filter.itemName={$regex:clean(req.query.search),$options:"i"};const [items,total]=await Promise.all([InventoryStock.find(filter).sort({itemName:1}).skip((page-1)*limit).limit(limit).lean(),InventoryStock.countDocuments(filter)]);return res.json({success:true,items,pagination:{page,limit,total,pages:Math.ceil(total/limit)}})}catch(e){return res.status(500).json({success:false,message:e.message})}}
+async function getPurchaseAllocation({companyId,location,itemId,itemName,requiredQty}){
+  const purchaseFilter={status:"POSTED"};
+  if(companyId) purchaseFilter.companyId=companyId;
+  const purchases=await RawMaterialPurchase.find(purchaseFilter).sort({date:1,createdAt:1}).lean();
+  const jobsFilter={status:{$ne:"CANCELLED"}};
+  if(companyId) jobsFilter.companyId=companyId;
+  if(location) jobsFilter.location=location;
+  const jobs=await ManufacturingJobOrder.find(jobsFilter).sort({date:1,createdAt:1}).lean();
+  const usedByPurchase={};
+  for(const j of jobs){
+    for(const line of j.sourceItems||[]){
+      if(String(line.itemId||"")!==String(itemId||"") && clean(line.itemName).toLowerCase()!==clean(itemName).toLowerCase()) continue;
+      for(const a of line.purchaseAllocations||[]){
+        const k=String(a.purchaseId||"")+":"+String(a.lineId||"");
+        usedByPurchase[k]=(usedByPurchase[k]||0)+num(a.qty);
+      }
+    }
+  }
+  let remain=Math.max(0,num(requiredQty));
+  const allocations=[];
+  for(const p of purchases){
+    for(const line of p.lines||[]){
+      const same=String(line.itemId||"")===String(itemId||"") || clean(line.itemName).toLowerCase()===clean(itemName).toLowerCase();
+      if(!same) continue;
+      const key=String(p._id)+":"+String(line._id);
+      const already=usedByPurchase[key]||0;
+      const pending=Math.max(0,num(line.qty)-already);
+      if(pending<=0) continue;
+      const take=Math.min(remain,pending);
+      allocations.push({purchaseId:p._id,lineId:line._id,purchaseNo:p.purchaseNo,date:p.date,supplierName:p.supplierName,qty:take,purchaseQty:num(line.qty),pendingAfter:r2(pending-take),rate:num(line.purchaseRate),unit:line.unit||"KG"});
+      remain=r2(remain-take);
+      if(remain<=0.000001) break;
+    }
+    if(remain<=0.000001) break;
+  }
+  const allocated=r2(num(requiredQty)-remain);
+  const weightedRate=allocated>0?r2(allocations.reduce((sum,a)=>sum+a.qty*a.rate,0)/allocated):0;
+  return {requiredQty:num(requiredQty),allocatedQty:allocated,shortQty:r2(remain),weightedRate,allocations};
+}
+
+export async function getBomProductionRequirements(req,res){
+ try{
+  const outputItemId=clean(req.query.outputItemId), location=clean(req.query.location), qty=num(req.query.qty);
+  if(!outputItemId||qty<=0) return res.status(400).json({success:false,message:"Output product and production quantity are required."});
+  const filter={_id:outputItemId,active:true}; if(req.user?.companyId) filter.companyId=req.user.companyId;
+  const bom=await BOM.findOne(filter).lean(); if(!bom) return res.status(404).json({success:false,message:"Active BOM not found for this Finished Good."});
+  const scale=qty/num(bom.outputQty||1);
+  const materials=[];
+  for(const m of bom.materials||[]){
+    const required=r2(num(m.qtyPerUnit)*scale);
+    const allocation=await getPurchaseAllocation({companyId:req.user?.companyId||null,location,itemId:m.itemId,itemName:m.itemName,requiredQty:required});
+    materials.push({...m,requiredQty:required,rate:allocation.weightedRate||num(m.rate),value:r2(required*(allocation.weightedRate||num(m.rate))),purchaseAllocation:allocation.allocations,shortQty:allocation.shortQty});
+  }
+  return res.json({success:true,bom,outputQty:qty,materials,totalMaterialCost:r2(materials.reduce((s,x)=>s+x.value,0)),ready:materials.every(x=>x.shortQty<=0.000001)});
+ }catch(e){return res.status(500).json({success:false,message:e.message})}
+}
+
 export async function createJobOrder(req,res){
  try{
   const b=req.body||{},type=b.type,location=clean(b.location),sources=Array.isArray(b.sourceItems)?b.sourceItems:[],outputs=Array.isArray(b.outputItems)?b.outputItems:[];
@@ -166,7 +230,7 @@ export async function createJobOrder(req,res){
   const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other);
   const jobNo=await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");
   const job=await ManufacturingJobOrder.create({jobNo,companyId:req.user?.companyId||null,date:dt(b.date)||new Date(),type,location,
-   sourceItems:sources.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
+   sourceItems:sources.map(x=>({...x,itemId:clean(x.itemId)||null,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode),purchaseAllocations:Array.isArray(x.purchaseAllocations)?x.purchaseAllocations.map(a=>({...a,qty:num(a.qty),rate:num(a.rate),pendingAfter:num(a.pendingAfter)})):[]})),
    outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
    labourCost:labour,transportCost:transport,otherCost:other,totalCost,notes:clean(b.notes),createdBy:req.user._id});
   for(const x of job.sourceItems){
