@@ -254,7 +254,7 @@ export async function createProductionEntry(req,res){
  try{
   const b=req.body||{},jobId=clean(b.jobId),outputs=Array.isArray(b.outputItems)?b.outputItems:[];
   if(!jobId||!outputs.length)return res.status(400).json({success:false,message:"Job Order and output items are required."});
-  const filter={_id:jobId,status:"POSTED"}; if(req.user?.companyId)filter.companyId=req.user.companyId;
+  const filter={_id:jobId,status:{$in:["POSTED","COMPLETED"]}}; if(req.user?.companyId)filter.companyId=req.user.companyId;
   const job=await ManufacturingJobOrder.findOne(filter); if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
   const prior=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
   const used={}; for(const e of prior)for(const x of e.outputItems||[])used[x.itemName]=(used[x.itemName]||0)+num(x.qty);
@@ -267,12 +267,12 @@ export async function createProductionEntry(req,res){
    totalValue+=qty*(num(x.rate)>0?num(x.rate):num(planned.rate));
   }
   const productionNo=await next("PRODUCTION","PROD");
-  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:dt(b.date)||new Date(),location:job.location,outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*(num(x.rate)||0)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),notes:clean(b.notes),createdBy:req.user._id});
+  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:dt(b.date)||new Date(),location:job.location,outputItems:outputs.map(x=>{const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));const rate=num(x.rate)>0?num(x.rate):num(planned?.rate);return {...x,itemName:clean(x.itemName),unit:clean(x.unit)||planned?.unit||"KG",qty:num(x.qty),rate,value:r2(num(x.qty)*rate),batchNo:clean(x.batchNo)||clean(planned?.batchNo),barcode:clean(x.barcode)||clean(planned?.barcode)}}),notes:clean(b.notes),createdBy:req.user._id});
   for(const x of entry.outputItems){
    const value=r2(num(x.qty)*(num(x.rate)>0?num(x.rate):((job.outputItems||[]).find(o=>o.itemName===x.itemName)?.rate||0)));
-   await adjustStock({companyId:req.user?.companyId,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:entry.date});
-   const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
-   await InventoryMovement.create({companyId:req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
+   await adjustStock({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:entry.date});
+   const st=await InventoryStock.findOne({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
+   await InventoryMovement.create({companyId:job.companyId||req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
   }
   const all=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
   const done={}; for(const e of all)for(const x of e.outputItems||[])done[x.itemName]=(done[x.itemName]||0)+num(x.qty);
