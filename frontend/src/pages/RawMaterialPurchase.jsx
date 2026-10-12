@@ -49,6 +49,10 @@ export default function RawMaterialPurchase() {
   const [lines, setLines] = useState([blankLine()]);
   const [purchases, setPurchases] = useState([]);
   const [stock, setStock] = useState([]);
+  const [selectedStock, setSelectedStock] = useState(null);
+  const [stockMovements, setStockMovements] = useState([]);
+  const [loadingMovements, setLoadingMovements] = useState(false);
+  const [movementError, setMovementError] = useState("");
 
   const [masters, setMasters] = useState({
     locations: [],
@@ -356,6 +360,50 @@ export default function RawMaterialPurchase() {
     }
   }
 
+  async function showStockMovements(item) {
+    setSelectedStock(item);
+    setStockMovements([]);
+    setMovementError("");
+    setLoadingMovements(true);
+
+    try {
+      const params = new URLSearchParams({
+        itemType: "RAW_MATERIAL",
+        itemName: item.itemName,
+        location: item.location,
+        batchNo: item.batchNo || "",
+        barcode: item.barcode || "",
+      });
+      const response = await fetch(
+        `${API_URL}/api/inventory/workflow/stock-ledger?${params}`,
+        { headers: headers() }
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Stock history load failed.");
+      }
+
+      setStockMovements(data.items || []);
+    } catch (e) {
+      setMovementError(e.message || "Stock history load failed.");
+    } finally {
+      setLoadingMovements(false);
+    }
+  }
+
+  const movementTotals = stockMovements.reduce(
+    (totals, movement) => ({
+      qtyIn: totals.qtyIn + Number(movement.qtyIn || 0),
+      qtyOut: totals.qtyOut + Number(movement.qtyOut || 0),
+    }),
+    { qtyIn: 0, qtyOut: 0 }
+  );
+
+  function movementLabel(type) {
+    return String(type || "OTHER").replaceAll("_", " ");
+  }
+
   function setField(name, value) {
     setForm((f) => ({
       ...f,
@@ -630,6 +678,79 @@ export default function RawMaterialPurchase() {
           align-items:center
         }
 
+        .rmp-qty-link{
+          border:0;
+          padding:2px 4px;
+          background:transparent;
+          color:#175cd3;
+          font:inherit;
+          font-weight:700;
+          text-decoration:underline;
+          text-underline-offset:3px;
+          cursor:pointer
+        }
+
+        .rmp-modal-backdrop{
+          position:fixed;
+          inset:0;
+          z-index:1000;
+          display:grid;
+          place-items:center;
+          padding:20px;
+          background:rgba(16,24,40,.56)
+        }
+
+        .rmp-modal{
+          width:min(1040px,100%);
+          max-height:min(86vh,760px);
+          overflow:auto;
+          padding:20px;
+          border:1px solid #d0d5dd;
+          border-radius:10px;
+          background:#fff;
+          box-shadow:0 24px 64px rgba(16,24,40,.22)
+        }
+
+        .rmp-modal-header{
+          display:flex;
+          align-items:flex-start;
+          justify-content:space-between;
+          gap:16px;
+          margin-bottom:16px
+        }
+
+        .rmp-modal-header h2{
+          margin:0 0 5px;
+          font-size:20px
+        }
+
+        .rmp-modal-header p{
+          margin:0;
+          color:#667085;
+          font-size:13px
+        }
+
+        .rmp-movement-summary{
+          display:flex;
+          gap:22px;
+          flex-wrap:wrap;
+          padding:12px 0;
+          margin-bottom:12px;
+          border-top:1px solid #eaecf0;
+          border-bottom:1px solid #eaecf0;
+          color:#475467;
+          font-size:13px
+        }
+
+        .rmp-movement-summary strong{
+          margin-left:5px;
+          color:#101828
+        }
+
+        .rmp-movement-table{
+          min-width:900px
+        }
+
         @media(max-width:900px){
           .rmp-grid{
             grid-template-columns:repeat(2,minmax(0,1fr))
@@ -647,6 +768,19 @@ export default function RawMaterialPurchase() {
 
           .rmp-page{
             padding:12px
+          }
+
+          .rmp-modal-backdrop{
+            padding:8px
+          }
+
+          .rmp-modal{
+            max-height:92vh;
+            padding:14px
+          }
+
+          .rmp-modal-header{
+            flex-direction:column
           }
         }
       `}</style>
@@ -1337,7 +1471,16 @@ export default function RawMaterialPurchase() {
                         {s.barcode || "-"}
                       </td>
 
-                      <td>{s.qty}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="rmp-qty-link"
+                          onClick={() => showStockMovements(s)}
+                          title="View stock movement breakdown"
+                        >
+                          {s.qty}
+                        </button>
+                      </td>
 
                       <td>{s.unit}</td>
 
@@ -1421,6 +1564,82 @@ export default function RawMaterialPurchase() {
               Next
             </button>
           </div>
+        </div>
+      )}
+
+      {selectedStock && (
+        <div
+          className="rmp-modal-backdrop"
+          onClick={() => setSelectedStock(null)}
+        >
+          <section
+            className="rmp-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rmp-movement-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="rmp-modal-header">
+              <div>
+                <h2 id="rmp-movement-title">Stock Movement</h2>
+                <p>
+                  {selectedStock.itemName} · {selectedStock.location}
+                  {selectedStock.batchNo ? ` · Batch ${selectedStock.batchNo}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rmp-btn rmp-secondary"
+                onClick={() => setSelectedStock(null)}
+                aria-label="Close stock movement"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="rmp-movement-summary">
+              <span>Current stock <strong>{selectedStock.qty} {selectedStock.unit}</strong></span>
+              <span>Added <strong>{money(movementTotals.qtyIn)} {selectedStock.unit}</strong></span>
+              <span>Reduced <strong>{money(movementTotals.qtyOut)} {selectedStock.unit}</strong></span>
+            </div>
+
+            {loadingMovements ? (
+              <div>Loading stock history...</div>
+            ) : movementError ? (
+              <div className="rmp-error">{movementError}</div>
+            ) : stockMovements.length ? (
+              <div className="rmp-scroll">
+                <table className="rmp-table rmp-movement-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Reason</th>
+                      <th>Document</th>
+                      <th>Added</th>
+                      <th>Reduced</th>
+                      <th>Balance after</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockMovements.map((movement) => (
+                      <tr key={movement._id}>
+                        <td>{new Date(movement.date).toLocaleDateString("en-IN")}</td>
+                        <td>{movementLabel(movement.sourceType)}</td>
+                        <td>{movement.sourceNo || movement.referenceNo || "-"}</td>
+                        <td>{Number(movement.qtyIn || 0) || "-"}</td>
+                        <td>{Number(movement.qtyOut || 0) || "-"}</td>
+                        <td>{movement.balanceQty ?? "-"} {movement.unit || selectedStock.unit}</td>
+                        <td>{movement.narration || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div>No movement history found for this stock batch.</div>
+            )}
+          </section>
         </div>
       )}
     </div>
