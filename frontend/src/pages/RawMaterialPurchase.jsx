@@ -48,6 +48,7 @@ export default function RawMaterialPurchase() {
 
   const [lines, setLines] = useState([blankLine()]);
   const [purchases, setPurchases] = useState([]);
+  const [editingPurchaseId, setEditingPurchaseId] = useState("");
   const [stock, setStock] = useState([]);
   const [selectedStock, setSelectedStock] = useState(null);
   const [stockMovements, setStockMovements] = useState([]);
@@ -425,6 +426,7 @@ export default function RawMaterialPurchase() {
   }
 
   function reset() {
+    setEditingPurchaseId("");
     setForm({
       date: today(),
       location: "",
@@ -440,6 +442,62 @@ export default function RawMaterialPurchase() {
     setLines([blankLine()]);
   }
 
+  function editPurchase(purchase) {
+    setEditingPurchaseId(purchase._id);
+    setForm({
+      date: String(purchase.date || today()).slice(0, 10),
+      location: purchase.location || "",
+      supplierName: purchase.supplierName || "",
+      supplierGSTIN: purchase.supplierGSTIN || "",
+      supplierInvoiceNo: purchase.supplierInvoiceNo || "",
+      supplierInvoiceDate: purchase.supplierInvoiceDate
+        ? String(purchase.supplierInvoiceDate).slice(0, 10)
+        : "",
+      transportCost: String(purchase.transportCost || ""),
+      otherCost: String(purchase.otherCost || ""),
+      remarks: purchase.remarks || "",
+    });
+    setLines((purchase.lines || []).map((line) => ({
+      itemName: line.itemName || "",
+      hsn: line.hsn || "",
+      unit: line.unit || "KG",
+      batchNo: line.batchNo || "",
+      barcode: line.barcode || "",
+      mfgDate: line.mfgDate ? String(line.mfgDate).slice(0, 10) : "",
+      expiryDate: line.expiryDate ? String(line.expiryDate).slice(0, 10) : "",
+      qty: String(line.qty ?? ""),
+      purchaseRate: String(line.purchaseRate ?? ""),
+      discount: String(line.discount ?? ""),
+      gstRate: String(line.gstRate ?? ""),
+      gstType: line.gstType || "NONE",
+    })));
+    setTab("purchase");
+    setError("");
+    setMessage("");
+  }
+
+  async function deletePurchase(purchase) {
+    if (!window.confirm(`Delete purchase ${purchase.purchaseNo}? Its stock entry and accounting records will also be removed.`)) return;
+
+    setLoadingList(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(
+        `${API_URL}/api/inventory/raw-material-purchases/${purchase._id}`,
+        { method: "DELETE", headers: headers() }
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Purchase delete failed.");
+      setMessage(data.message || "Purchase deleted.");
+      await loadPurchases();
+    } catch (e) {
+      setError(e.message || "Purchase delete failed.");
+    } finally {
+      setLoadingList(false);
+    }
+  }
+
   async function save() {
     setLoading(true);
     setError("");
@@ -447,9 +505,9 @@ export default function RawMaterialPurchase() {
 
     try {
       const r = await fetch(
-        `${API_URL}/api/inventory/raw-material-purchases`,
+        `${API_URL}/api/inventory/raw-material-purchases${editingPurchaseId ? `/${editingPurchaseId}` : ""}`,
         {
-          method: "POST",
+          method: editingPurchaseId ? "PUT" : "POST",
           headers: headers(),
           body: JSON.stringify({
             ...form,
@@ -466,9 +524,7 @@ export default function RawMaterialPurchase() {
         );
       }
 
-      setMessage(
-        d.message || "Purchase saved successfully."
-      );
+      setMessage(d.message || (editingPurchaseId ? "Purchase updated successfully." : "Purchase saved successfully."));
 
       reset();
       setTab("purchase");
@@ -676,6 +732,11 @@ export default function RawMaterialPurchase() {
           gap:8px;
           margin-top:12px;
           align-items:center
+        }
+
+        .rmp-row-actions{
+          display:flex;
+          gap:6px
         }
 
         .rmp-qty-link{
@@ -1341,9 +1402,18 @@ export default function RawMaterialPurchase() {
                 onClick={save}
               >
                 {loading
-                  ? "Posting..."
-                  : "Post Purchase & Update Stock"}
+                  ? (editingPurchaseId ? "Updating..." : "Posting...")
+                  : (editingPurchaseId ? "Update Purchase" : "Post Purchase & Update Stock")}
               </button>
+              {editingPurchaseId && (
+                <button
+                  type="button"
+                  className="rmp-btn rmp-secondary"
+                  onClick={reset}
+                >
+                  Cancel Edit
+                </button>
+              )}
             </div>
           </div>
         </>
@@ -1392,6 +1462,7 @@ export default function RawMaterialPurchase() {
                     <th>Location</th>
                     <th>Items</th>
                     <th>Total</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
 
@@ -1430,6 +1501,26 @@ export default function RawMaterialPurchase() {
                         {money(
                           p.grandTotal
                         )}
+                      </td>
+
+                      <td>
+                        <div className="rmp-row-actions">
+                          <button
+                            type="button"
+                            className="rmp-btn rmp-secondary"
+                            onClick={() => editPurchase(p)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="rmp-btn rmp-danger"
+                            onClick={() => deletePurchase(p)}
+                            disabled={loadingList}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
