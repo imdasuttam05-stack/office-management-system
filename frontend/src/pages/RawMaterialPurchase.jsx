@@ -543,6 +543,27 @@ export default function RawMaterialPurchase() {
   return (
     <div className="rmp-page">
       <style>{`
+        .rmp-modal-backdrop{
+          position:fixed;inset:0;background:rgba(10,20,40,.62);backdrop-filter:blur(5px);
+          z-index:1000;display:flex;align-items:center;justify-content:center;padding:18px
+        }
+        .rmp-modal{
+          width:min(1250px,98vw);max-height:92vh;overflow:auto;background:#fff;border-radius:20px;
+          box-shadow:0 24px 80px rgba(0,0,0,.28);padding:24px;border:1px solid #e5eaf2
+        }
+        .rmp-modal-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+        .rmp-modal-header h2{font-size:24px;color:#12213b;margin:0 0 6px}
+        .rmp-modal-header p{color:#64748b;margin:0}
+        .rmp-movement-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+        .rmp-movement-summary span{padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:linear-gradient(135deg,#f8fafc,#eef4ff);color:#475569}
+        .rmp-movement-summary strong{display:block;font-size:20px;color:#14213d;margin-top:5px}
+        .rmp-scroll{overflow:auto;border:1px solid #e5eaf2;border-radius:12px}
+        .rmp-movement-table{min-width:1250px}.rmp-source-pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#eaf1ff;color:#214ea0;font-size:11px;font-weight:800;white-space:nowrap}
+        .rmp-movement-table th{position:sticky;top:0;background:#eef3fb;color:#334155;z-index:1}
+        .rmp-movement-table td,.rmp-movement-table th{padding:11px 12px;border-bottom:1px solid #edf0f5;text-align:left;font-size:13px}
+        .rmp-movement-table tbody tr:hover{background:#f8fbff}
+        .rmp-qty-link{font-weight:800;color:#2459c4;text-decoration:underline;text-underline-offset:3px}
+        @media(max-width:700px){.rmp-modal{padding:14px}.rmp-movement-summary{grid-template-columns:1fr}.rmp-modal-header h2{font-size:20px}}
         .rmp-page{
           padding:22px;
           max-width:1400px;
@@ -1672,7 +1693,7 @@ export default function RawMaterialPurchase() {
           >
             <div className="rmp-modal-header">
               <div>
-                <h2 id="rmp-movement-title">Stock Movement</h2>
+                <h2 id="rmp-movement-title">Stock Ledger & Drill-down</h2>
                 <p>
                   {selectedStock.itemName} · {selectedStock.location}
                   {selectedStock.batchNo ? ` · Batch ${selectedStock.batchNo}` : ""}
@@ -1704,24 +1725,30 @@ export default function RawMaterialPurchase() {
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Reason</th>
-                      <th>Document</th>
-                      <th>Added</th>
-                      <th>Reduced</th>
-                      <th>Balance after</th>
-                      <th>Details</th>
+                      <th>Transaction</th>
+                      <th>Document / Ref</th>
+                      <th>Supplier / Party</th>
+                      <th>Qty In</th>
+                      <th>Qty Out</th>
+                      <th>Rate / Unit</th>
+                      <th>Value</th>
+                      <th>Running Balance</th>
+                      <th>Full Details</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stockMovements.map((movement) => (
                       <tr key={movement._id}>
                         <td>{new Date(movement.date).toLocaleDateString("en-IN")}</td>
-                        <td>{movementLabel(movement.sourceType)}</td>
-                        <td>{movement.sourceNo || movement.referenceNo || "-"}</td>
+                        <td><span className="rmp-source-pill">{movementLabel(movement.sourceType)}</span></td>
+                        <td><strong>{movement.sourceNo || movement.referenceNo || "-"}</strong>{movement.supplierInvoiceNo ? <div>Inv: {movement.supplierInvoiceNo}</div> : null}</td>
+                        <td>{movement.supplierName || movement.partyName || "-"}</td>
                         <td>{Number(movement.qtyIn || 0) || "-"}</td>
                         <td>{Number(movement.qtyOut || 0) || "-"}</td>
-                        <td>{movement.balanceQty ?? "-"} {movement.unit || selectedStock.unit}</td>
-                        <td>{movement.narration || "-"}</td>
+                        <td>{movement.purchaseRate ? `₹ ${money(movement.purchaseRate)}` : "-"}</td>
+                        <td>₹ {money(movement.valueIn || movement.valueOut || movement.lineTotal || 0)}</td>
+                        <td><strong>{movement.balanceQty ?? "-"} {movement.unit || selectedStock.unit}</strong></td>
+                        <td>{movement.narration || "-"}{movement.gstRate ? <div>GST: {movement.gstRate}%</div> : null}{movement.batchNo ? <div>Batch: {movement.batchNo}</div> : null}</td>
                       </tr>
                     ))}
                   </tbody>
