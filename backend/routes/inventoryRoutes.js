@@ -1,3 +1,4 @@
+import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,createSupplierMaster,createCustomerMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,getJobs,createProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
 import express from "express";
 import {getWorkflowMasters,listBoms,getPurchaseRate,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
 import auth from "../middleware/auth.js";
@@ -24,6 +25,8 @@ router.put("/masters/units/:id",auth,requireRole("Admin","Manager"),updateUnitMa
 router.delete("/masters/units/:id",auth,requireRole("Admin","Manager"),deleteUnitMaster);
 router.get("/raw-material-purchases",auth,getRawMaterialPurchases);
 router.post("/raw-material-purchases",auth,requireRole("Admin","Manager"),createRawMaterialPurchase);
+router.put("/raw-material-purchases/:id",auth,requireRole("Admin","Manager"),updateRawMaterialPurchase);
+router.delete("/raw-material-purchases/:id",auth,requireRole("Admin","Manager"),deleteRawMaterialPurchase);
 router.get("/raw-material-stock",auth,getRawMaterialStock);
 router.get("/stock",auth,getStock);
 router.post("/job-orders",auth,requireRole("Admin","Manager"),createJobOrder);
