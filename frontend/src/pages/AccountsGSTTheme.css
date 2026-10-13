@@ -1,0 +1,50 @@
+/* Shared GST Reports visual theme for every Accounts screen. UI-only overrides. */
+.am-shell, .accounts-workspace {
+  background:#f2f6f8 !important; color:#152a3a !important;
+  font-family:"Segoe UI",Arial,sans-serif !important;
+}
+.am-shell-head, .accounts-workspace .accounts-top {
+  background:#123c55 !important; color:#fff !important;
+  border-bottom:1px solid #0d3044 !important; box-shadow:none !important;
+}
+.am-shell-head-inner, .accounts-workspace .accounts-top-inner { max-width:none !important; padding:14px 28px !important; }
+.am-shell-title h1, .accounts-workspace .accounts-title h1 { color:#fff !important; font-size:21px !important; }
+.am-shell-title p, .accounts-workspace .accounts-title p { color:#c8d9e2 !important; }
+.am-shell-logo, .accounts-workspace .accounts-logo { background:#f0b83f !important; color:#17364a !important; border-radius:3px !important; box-shadow:none !important; }
+.am-shell-subnav, .accounts-workspace .accounts-nav {
+  background:#e5eff4 !important; border-color:#d0dfe6 !important; box-shadow:none !important;
+}
+.am-shell-subnav { padding:18px 12px !important; }
+.am-navbtn, .accounts-workspace .accounts-nav button {
+  border:1px solid transparent !important; border-left:3px solid transparent !important;
+  border-radius:2px !important; background:transparent !important; color:#1a3446 !important;
+  box-shadow:none !important; font-family:inherit !important; transform:none !important;
+}
+.am-navbtn:hover, .accounts-workspace .accounts-nav button:hover { background:#d6e7ef !important; border-color:#9bbbc8 !important; color:#1a3446 !important; }
+.am-navbtn.active, .accounts-workspace .accounts-nav button.active {
+  border-left-color:#edb62e !important; background:#f4c648 !important; color:#183348 !important; font-weight:700 !important; box-shadow:none !important;
+}
+.am-back { border-radius:2px !important; color:#27786e !important; background:#fff !important; }
+.am-content, .accounts-workspace .accounts-content { background:#f2f6f8 !important; color:#152a3a !important; }
+.am-info, .accounts-workspace .accounts-sectionbar { background:#e9f5f1 !important; border-color:#cde4dc !important; color:#27786e !important; border-radius:2px !important; box-shadow:none !important; }
+/* Consistent GST report-style controls, panels and tables across all nested Accounts pages. */
+.am-shell input, .am-shell select, .am-shell textarea, .am-shell .accounts-workspace input,
+.accounts-workspace input, .accounts-workspace select, .accounts-workspace textarea {
+  border-radius:2px !important; border-color:#cbd8df !important; color:#203c4e;
+}
+.am-shell button, .accounts-workspace button { font-family:"Segoe UI",Arial,sans-serif; }
+.am-shell table, .accounts-workspace table { border-collapse:collapse; }
+.am-shell th, .accounts-workspace th { background:#f1f6f8 !important; color:#526a77 !important; border-color:#dfe7eb !important; }
+.am-shell td, .accounts-workspace td { border-color:#edf1f3 !important; color:#2f4654; }
+.am-shell tr:hover td, .accounts-workspace tr:hover td { background:#f8fbfc; }
+.am-shell .am-content > *, .accounts-workspace .accounts-content > * { min-width:0; }
+@media(max-width:700px) {
+ .am-shell { display:block !important; }
+ .am-shell-head-inner { padding:12px 14px !important; }
+ .am-shell-subnav { display:flex !important; flex-direction:row !important; gap:8px !important; padding:10px 12px !important; overflow-x:auto !important; border-right:0 !important; border-bottom:1px solid #d0dfe6 !important; white-space:nowrap !important; }
+ .am-navbtn { flex:0 0 auto !important; border-left:0 !important; border-bottom:2px solid transparent !important; }
+ .am-navbtn.active { border-bottom-color:#d19a17 !important; }
+ .am-content { padding:18px 13px !important; }
+ .accounts-workspace .accounts-top-inner { padding:12px 14px !important; }
+ .accounts-workspace .accounts-nav { padding:10px 12px !important; }
+}
