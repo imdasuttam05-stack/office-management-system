@@ -2,7 +2,7 @@ import express from "express";
 import {getWorkflowMasters,listBoms,getPurchaseRate,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
 import auth from "../middleware/auth.js";
 import requireRole from "../middleware/role.js";
-import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,updateLocationMaster,deleteLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,getJobs,createProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
+import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,updateLocationMaster,deleteLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,createJobOrderReturn,getJobs,createProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
 const router=express.Router();
 router.get("/raw-material-masters",auth,getPurchaseMasters);
 router.get("/masters/pincode/:pin",auth,lookupPincode);
@@ -29,6 +29,7 @@ router.delete("/raw-material-purchases/:id",auth,requireRole("Admin","Manager"),
 router.get("/raw-material-stock",auth,getRawMaterialStock);
 router.get("/stock",auth,getStock);
 router.post("/job-orders",auth,requireRole("Admin","Manager"),createJobOrder);
+router.post("/job-orders/:id/returns",auth,requireRole("Admin","Manager"),createJobOrderReturn);
 router.get("/job-orders",auth,getJobs);
 router.post("/production",auth,requireRole("Admin","Manager"),createProductionEntry);
 router.get("/production-requirements",auth,getBomProductionRequirements);
