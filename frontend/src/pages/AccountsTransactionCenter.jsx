@@ -5,6 +5,7 @@ const auth = () => ({"Content-Type":"application/json", Authorization: `Bearer $
 const today = () => new Date().toISOString().slice(0,10);
 const money = v => Number(v || 0).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2});
 const n = v => Number(v || 0);
+const round2 = v => Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100;
 
 const txTabs = [
   ["purchase","Purchase"],["sale","Sale"],["job","Job Order"],["production","Production"],
@@ -77,7 +78,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const customerOpts=m.customers||[];
   const itemOptions=(type)=>type==="RAW_MATERIAL"?rawItems:type==="GRADE"?gradeItems:type==="FINISHED_GOODS"?fgItems:allItems;
   const setLine=(setter,index,key,value)=>setter(a=>a.map((x,i)=>i===index?{...x,[key]:value}:x));
-  const chooseItem=(setter,i,id)=>{const item=m.items.find(x=>x._id===id); if(!item)return; setter(a=>a.map((x,j)=>j===i?{...x,itemId:item._id,itemName:item.name,itemType:item.itemType,unit:item.unit||"KG",rate:x.rate||0,gstRate:item.defaultGstRate||0}:x))};
+  const chooseItem=(setter,i,id)=>{const item=m.items.find(x=>x._id===id); if(!item)return; setter(a=>a.map((x,j)=>j===i?{...x,itemId:item._id,itemName:item.name,itemType:item.itemType,unit:item.unit||"KG",rate:x.rate||0,gstRate:item.defaultGstRate||0,gstType:n(item.defaultGstRate)>0&&x.gstType==="NONE"?"CGST_SGST":x.gstType}:x))};
   async function chooseBomMaterial(i,id){
     const item=m.items.find(x=>x._id===id);
     if(!item)return;
@@ -171,9 +172,30 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     return()=>{clearTimeout(timer);jobBomRequest.current+=1};
   },[job.type,job.location,outputs[0]?.itemId,bomOutputQty]);
   const lineValue=x=>n(x.qty)*n(x.rate);
+  const purchaseTaxForLine=line=>{
+    const taxable=round2(n(line.qty)*n(line.rate));
+    const gst= line.gstType==="NONE"?0:round2(taxable*n(line.gstRate)/100);
+    const cgst=line.gstType==="CGST_SGST"?round2(gst/2):0;
+    const sgst=line.gstType==="CGST_SGST"?round2(gst-cgst):0;
+    const igst=line.gstType==="IGST"?gst:0;
+    return {taxable,cgst,sgst,igst,gst,total:round2(taxable+cgst+sgst+igst)};
+  };
+  const purchaseTotals=useMemo(()=>{
+    const totals=pLines.reduce((sum,line)=>{
+      const tax=purchaseTaxForLine(line);
+      return {taxable:sum.taxable+tax.taxable,cgst:sum.cgst+tax.cgst,sgst:sum.sgst+tax.sgst,igst:sum.igst+tax.igst};
+    },{taxable:0,cgst:0,sgst:0,igst:0});
+    const subtotal=round2(totals.taxable),cgst=round2(totals.cgst),sgst=round2(totals.sgst),igst=round2(totals.igst),transport=n(purchase.transportCost),other=n(purchase.otherCost);
+    return {subtotal,cgst,sgst,igst,transport,other,grandTotal:round2(subtotal+cgst+sgst+igst+transport+other)};
+  },[pLines,purchase.transportCost,purchase.otherCost]);
   const lineTableHelpers=useRef({});
-  lineTableHelpers.current={itemOptions,chooseItem,setLine,lineValue};
-  const LineTable=useMemo(()=>function LineTable({lines,setter,allowedTypes,title}){const {itemOptions,chooseItem,setLine,lineValue}=lineTableHelpers.current;const options=[...new Map(allowedTypes.flatMap(t=>itemOptions(t)).map(x=>[x._id,x])).values()];return <div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>{title||"Item"}</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Batch</th><th>Barcode</th><th>Value</th><th></th></tr></thead><tbody>{lines.map((x,i)=><tr key={i}><td><select value={x.itemId||""} onChange={e=>chooseItem(setter,i,e.target.value)}><option value="">Select item</option>{options.map(o=><option key={o._id} value={o._id}>{o.name} · {o.itemType}</option>)}</select></td><td><input type="number" min="0" step="0.001" inputMode="decimal" value={x.qty ?? ""} onChange={e=>setLine(setter,i,"qty",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td><input value={x.unit||"KG"} onChange={e=>setLine(setter,i,"unit",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td><input type="number" min="0" step="0.01" inputMode="decimal" value={x.rate ?? ""} onChange={e=>setLine(setter,i,"rate",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td><input value={x.batchNo||""} onChange={e=>setLine(setter,i,"batchNo",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td><input value={x.barcode||""} onChange={e=>setLine(setter,i,"barcode",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td>₹ {money(lineValue(x))}</td><td><button type="button" className="tx-mini-danger" onClick={()=>setter(a=>a.filter((_,j)=>j!==i))}>×</button></td></tr>)}</tbody></table></div>},[]);
+  lineTableHelpers.current={itemOptions,chooseItem,setLine,lineValue,purchaseTaxForLine,purchaseTotals};
+  const LineTable=useMemo(()=>function LineTable({lines,setter,allowedTypes,title}){
+    const {itemOptions,chooseItem,setLine,lineValue,purchaseTaxForLine,purchaseTotals}=lineTableHelpers.current;
+    const showGst=setter===setPLines;
+    const options=[...new Map(allowedTypes.flatMap(t=>itemOptions(t)).map(x=>[x._id,x])).values()];
+    return <><div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>{title||"Item"}</th><th>Qty</th><th>Unit</th><th>Rate</th>{showGst&&<><th>GST %</th><th>GST Type</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total GST</th></>}<th>Value</th><th></th></tr></thead><tbody>{lines.map((x,i)=>{const tax=showGst?purchaseTaxForLine(x):null;return <tr key={i}><td><select value={x.itemId||""} onChange={e=>chooseItem(setter,i,e.target.value)}><option value="">Select item</option>{options.map(o=><option key={o._id} value={o._id}>{o.name} · {o.itemType}</option>)}</select></td><td><input type="number" min="0" step="0.001" inputMode="decimal" value={x.qty ?? ""} onChange={e=>setLine(setter,i,"qty",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td><input value={x.unit||"KG"} onChange={e=>setLine(setter,i,"unit",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td><td><input type="number" min="0" step="0.01" inputMode="decimal" value={x.rate ?? ""} onChange={e=>setLine(setter,i,"rate",e.target.value)} style={{color:"#172b4d",background:"#fff"}}/></td>{showGst&&<><td><input type="number" min="0" max="100" step="0.01" value={x.gstRate??""} onChange={e=>setLine(setter,i,"gstRate",e.target.value)}/></td><td><select value={x.gstType||"NONE"} onChange={e=>setLine(setter,i,"gstType",e.target.value)}><option value="NONE">None</option><option value="CGST_SGST">CGST + SGST</option><option value="IGST">IGST</option></select></td><td>₹ {money(tax.cgst)}</td><td>₹ {money(tax.sgst)}</td><td>₹ {money(tax.igst)}</td><td><b>₹ {money(tax.gst)}</b></td></>}<td>₹ {money(lineValue(x))}</td><td><button type="button" className="tx-mini-danger" onClick={()=>setter(a=>a.filter((_,j)=>j!==i))}>×</button></td></tr>})}</tbody></table></div>{showGst&&<div className="tx-kpis" style={{marginTop:12}}><div className="tx-kpi"><b>Subtotal</b><strong>₹ {money(purchaseTotals.subtotal)}</strong></div><div className="tx-kpi"><b>Total CGST</b><strong>₹ {money(purchaseTotals.cgst)}</strong></div><div className="tx-kpi"><b>Total SGST</b><strong>₹ {money(purchaseTotals.sgst)}</strong></div><div className="tx-kpi"><b>Total IGST</b><strong>₹ {money(purchaseTotals.igst)}</strong></div><div className="tx-kpi"><b>Transport + Other</b><strong>₹ {money(purchaseTotals.transport+purchaseTotals.other)}</strong></div><div className="tx-kpi"><b>Grand Total</b><strong>₹ {money(purchaseTotals.grandTotal)}</strong></div></div>}</>
+  },[]);
   function addLine(setter,type){setter(a=>[...a,blankLine(type)])}
   const commonSelect=(value,onChange,opts,placeholder)=> {const choices=placeholder==="Select customer / party"?m.jobParties||opts:opts;return <select value={value||""} onChange={onChange}><option value="">{placeholder}</option>{choices.map(x=><option key={x._id} value={x._id}>{x.name}</option>)}</select>};
   const bomHistoryContent=<div className="tx-card"><div className="tx-title"><div><h3>BOM History</h3><p>Saved product recipes and costing</p></div><button type="button" className="tx-btn" onClick={loadMasters}>Refresh</button></div><div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>BOM</th><th>Output Product</th><th>Output Qty</th><th>Materials</th><th>Cost / Unit</th><th></th></tr></thead><tbody>{boms.map(row=><tr key={row._id}><td><b>{row.name}</b></td><td>{row.outputItemName}</td><td>{row.outputQty} {row.outputUnit||""}</td><td>{(row.materials||[]).map(line=><div key={line.itemId||line.itemName}>{line.itemName}: {line.qtyPerUnit} {line.unit||"KG"} @ ₹ {money(line.rate)}</div>)}</td><td>₹ {money(row.costPerUnit)}</td><td><button type="button" className="tx-btn" onClick={()=>editBom(row)}>Edit</button></td></tr>)}{!boms.length&&<tr><td colSpan="6">No BOM records found.</td></tr>}</tbody></table></div></div>;
