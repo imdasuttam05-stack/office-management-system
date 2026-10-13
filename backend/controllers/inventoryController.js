@@ -220,10 +220,18 @@ async function getPurchaseAllocation({companyId,location,itemId,itemName,require
 
 export async function getBomProductionRequirements(req,res){
  try{
-  const outputItemId=clean(req.query.outputItemId), location=clean(req.query.location), qty=num(req.query.qty);
-  if(!outputItemId||qty<=0) return res.status(400).json({success:false,message:"Output product and production quantity are required."});
-  const filter={_id:outputItemId,active:true}; if(req.user?.companyId) filter.companyId=req.user.companyId;
-  const bom=await BOM.findOne(filter).lean(); if(!bom) return res.status(404).json({success:false,message:"Active BOM not found for this Finished Good."});
+  const outputItemId=clean(req.query.outputItemId),location=clean(req.query.location),qty=num(req.query.qty),companyId=req.user?.companyId||null;
+  if(!outputItemId||qty<=0)return res.status(400).json({success:false,message:"Output product and production quantity are required."});
+  const output=await InventoryItemMaster.findOne({_id:outputItemId,companyId,active:true}).select("name").lean();
+  if(!output)return res.status(404).json({success:false,message:"Selected Finished Good was not found in this company."});
+  const bomScope={companyId,active:true};
+  let bom=await BOM.findOne({...bomScope,outputItemId}).lean();
+  if(!bom){
+   const sameNameBoms=await BOM.find({...bomScope,outputItemName:output.name}).sort({updatedAt:-1}).limit(2).lean();
+   if(sameNameBoms.length===1)bom=sameNameBoms[0];
+   else if(sameNameBoms.length>1)return res.status(409).json({success:false,message:`More than one active BOM matches ${output.name}. Edit the BOM and select this Finished Good again.`});
+  }
+  if(!bom)return res.status(404).json({success:false,message:`Active BOM not found for ${output.name}. Check that BOM History uses the same Finished Good and company.`});
   const scale=qty/num(bom.outputQty||1);
   const materials=[];
   for(const m of bom.materials||[]){
