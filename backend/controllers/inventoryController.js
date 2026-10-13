@@ -79,14 +79,16 @@ export async function getPurchaseMasters(req,res){
    : {$or:[{companyId:null},{companyId:{$exists:false}}]};
   const activeScope={$or:[{active:true},{active:{$exists:false}},{active:null}]};
   const masterScope={$and:[companyScope,activeScope]};
-  const [locations,suppliers,items,customers,units]=await Promise.all([
+  const creditorGroup=await Group.findOne({name:"Sundry Creditors",parent:null}).select("_id").lean();
+  const [locations,suppliers,items,customers,units,creditorLedgers]=await Promise.all([
    LocationMaster.find(masterScope).sort({name:1}).lean(),
    SupplierMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean(),
    InventoryItemMaster.find({$and:[companyScope,activeScope]}).populate("purchaseLedgerId salesLedgerId","name").sort({itemType:1,name:1}).lean(),
    CustomerMaster.find(masterScope).populate("ledgerId","name").sort({name:1}).lean(),
-   UnitMaster.find(masterScope).sort({name:1}).lean()
+  UnitMaster.find(masterScope).sort({name:1}).lean(),
+  creditorGroup?Ledger.find({group:creditorGroup._id,isActive:true}).sort({name:1}).lean():[]
   ]);
-  return res.json({success:true,locations,suppliers,items,customers,units});
+  return res.json({success:true,locations,suppliers,items,customers,units,creditorLedgers});
  }catch(e){return res.status(500).json({success:false,message:e.message||"Master data load failed."})}
 }
 
@@ -126,9 +128,19 @@ export async function createRawMaterialPurchase(req,res){
     const b=req.body||{},location=clean(b.location),supplierName=clean(b.supplierName),raw=Array.isArray(b.lines)?b.lines:[];
     if(!location||!supplierName||!raw.length)return res.status(400).json({success:false,message:"Location, Supplier and at least one line are required."});
     const companyId=req.user?.companyId||null;
-    const supplier=await SupplierMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:supplierName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]});
-    if(!supplier)return res.status(400).json({success:false,message:"Supplier master not found. Create the supplier first."});
-    const supplierLedger=supplier.ledgerId?await Ledger.findById(supplier.ledgerId):await ensureLedger({name:supplier.name,groupName:"Sundry Creditors",nature:"Liability",req,gstin:supplier.gstin,address:supplier.address,phone:supplier.phone});
+    const supplierScope={$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]};
+    let supplier=b.supplierId?await SupplierMaster.findOne({$and:[{_id:b.supplierId},...supplierScope.$and]}):await SupplierMaster.findOne({$and:[{name:supplierName},...supplierScope.$and]});
+    let creditorLedger=null;
+    const selectedLedgerId=b.supplierLedgerId||(!supplier?b.supplierId:"");
+    if(selectedLedgerId){
+      creditorLedger=await Ledger.findById(selectedLedgerId).populate("group","name");
+      if(!creditorLedger||!creditorLedger.isActive||creditorLedger.group?.name!=="Sundry Creditors")throw new Error("Selected ledger must be an active Sundry Creditors ledger.");
+    }
+    if(!supplier&&creditorLedger){
+      supplier=await SupplierMaster.findOneAndUpdate({companyId,name:supplierName},{$set:{gstin:clean(b.supplierGSTIN||creditorLedger.gstin).toUpperCase(),address:creditorLedger.address||"",phone:creditorLedger.phone||"",ledgerId:creditorLedger._id,active:true,createdBy:req.user._id},$setOnInsert:{companyId,name:supplierName}},{new:true,upsert:true,setDefaultsOnInsert:true});
+    }
+    if(!supplier)return res.status(400).json({success:false,message:"Select a Supplier or an active Sundry Creditors ledger."});
+    const supplierLedger=supplier.ledgerId?await Ledger.findById(supplier.ledgerId):creditorLedger||await ensureLedger({name:supplier.name,groupName:"Sundry Creditors",nature:"Liability",req,gstin:supplier.gstin,address:supplier.address,phone:supplier.phone});
     if(!supplier.ledgerId){supplier.ledgerId=supplierLedger._id;await supplier.save();}
     const purchaseLedger=await ensureLedger({name:"Purchase",groupName:"Purchase",nature:"Expense",req});
     const inputCgst=await ensureGstLedger("Input CGST",req),inputSgst=await ensureGstLedger("Input SGST",req),inputIgst=await ensureGstLedger("Input IGST",req);
