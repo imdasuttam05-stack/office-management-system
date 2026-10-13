@@ -43,6 +43,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const [cost,setCost]=useState({outputQty:1,labourCost:0,packingCost:0,otherCost:0,materials:[{name:"",qty:1,rate:0}]});
   const [costResult,setCostResult]=useState(null);
   const [boms,setBoms]=useState([]), [bomOutputQty,setBomOutputQty]=useState(1), [bomLoading,setBomLoading]=useState(false), [bomAllocations,setBomAllocations]=useState([]);
+  const jobBomRequest=useRef(0);
 
   useEffect(()=>{setTab(initialTab || "purchase")},[initialTab]);
   useEffect(()=>{loadMasters();},[]);
@@ -73,7 +74,42 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const setLine=(setter,index,key,value)=>setter(a=>a.map((x,i)=>i===index?{...x,[key]:value}:x));
   const chooseItem=(setter,i,id)=>{const item=m.items.find(x=>x._id===id); if(!item)return; setter(a=>a.map((x,j)=>j===i?{...x,itemId:item._id,itemName:item.name,itemType:item.itemType,unit:item.unit||"KG",rate:x.rate||0,gstRate:item.defaultGstRate||0}:x))};
   async function chooseBomMaterial(i,id){const item=m.items.find(x=>x._id===id);if(!item)return;let rate=0;try{const d=await get(`/api/inventory/workflow/purchase-rate?itemId=${encodeURIComponent(id)}&itemName=${encodeURIComponent(item.name)}`);rate=n(d.rate)}catch{}setBom(b=>({...b,materials:b.materials.map((q,j)=>j===i?{...q,itemId:id,itemName:item.name,qtyPerUnit:q.qtyPerUnit||1,rate}:q)}))}
-  async function loadBomForJob(){if(!job.location)return setErr("Select Location first.");const out=outputs[0]?.itemId;if(!out)return setErr("Select Finished Good in Planned Output first.");const qty=n(bomOutputQty);if(qty<=0)return setErr("Enter production quantity.");setBomLoading(true);resetFeedback();try{const d=await get(`/api/inventory/production-requirements?outputItemId=${encodeURIComponent(out)}&qty=${encodeURIComponent(qty)}&location=${encodeURIComponent(job.location)}`);setSources((d.materials||[]).map(x=>({...blankLine("RAW_MATERIAL"),itemId:x.itemId||"",itemName:x.itemName,itemType:"RAW_MATERIAL",unit:x.unit||"KG",qty:x.requiredQty,rate:x.rate||0,value:x.value,purchaseAllocations:x.purchaseAllocation||[]})));setOutputs(a=>a.map((x,i)=>i===0?{...x,qty,unit:d.bom?.outputUnit||x.unit||"PCS"}:x));setBomAllocations(d.materials||[]);if(!d.ready)setErr("BOM loaded, but some Raw Material quantity is pending/short.");else setMsg(`BOM ${d.bom?.name||""} loaded. Raw quantity and purchase-wise rate allocated automatically.`)}catch(e){setErr(e.message)}finally{setBomLoading(false)}};
+  async function loadBomForJob({silent=false}={}){
+    const outputId=outputs[0]?.itemId,qty=n(bomOutputQty);
+    if(!job.location||!outputId||qty<=0){if(!silent)setErr(!job.location?"Select Location first.":!outputId?"Select Finished Good in Planned Output first.":"Enter production quantity.");return}
+    const requestId=++jobBomRequest.current;
+    setBomLoading(true);
+    if(!silent)resetFeedback();
+    try{
+      const d=await get(`/api/inventory/production-requirements?outputItemId=${encodeURIComponent(outputId)}&qty=${encodeURIComponent(qty)}&location=${encodeURIComponent(job.location)}`);
+      if(requestId!==jobBomRequest.current)return;
+      setSources((d.materials||[]).map(x=>({...blankLine("RAW_MATERIAL"),itemId:x.itemId||"",itemName:x.itemName,itemType:"RAW_MATERIAL",unit:x.unit||"KG",qty:x.requiredQty,rate:x.rate||0,value:x.value,purchaseAllocations:x.purchaseAllocation||[]})));
+      setOutputs(a=>a.map((x,i)=>i===0?{...x,qty,unit:d.bom?.outputUnit||x.unit||"PCS"}:x));
+      setBomAllocations(d.materials||[]);
+      if(!d.ready)setErr("BOM loaded, but some Raw Material quantity is pending/short.");
+      else setMsg(`BOM ${d.bom?.name||""} loaded. Raw quantity and purchase-wise rate allocated automatically.`);
+    }catch(e){
+      if(requestId!==jobBomRequest.current)return;
+      const output=m.items.find(x=>String(x._id)===String(outputId));
+      const weight=e.message.includes("Active BOM not found")?output?.name?.match(/(\d+(?:\.\d+)?)\s*(?:g|gm|grams?)\b/i):null;
+      const rawName=weight?output.name.replace(weight[0],"").replace(/[\s-]+$/," ").trim():"";
+      const rawItem=rawName?rawItems.find(x=>x.name.trim().toLowerCase()===rawName.toLowerCase()):null;
+      if(rawItem&&weight){
+        const requiredQty=Math.round((Number(weight[1])*qty/1000+Number.EPSILON)*1000)/1000;
+        setSources([{...blankLine("RAW_MATERIAL"),itemId:rawItem._id,itemName:rawItem.name,itemType:"RAW_MATERIAL",unit:"KG",qty:requiredQty,rate:0,value:0}]);
+        setBomAllocations([]);
+        setMsg(`Source quantity calculated from ${weight[1]} g × ${qty} units = ${requiredQty} KG.`);
+      }else{
+        setErr(e.message);
+      }
+    }finally{if(requestId===jobBomRequest.current)setBomLoading(false)}
+  }
+  useEffect(()=>{
+    if(job.type!=="FINISHED_GOODS")return;
+    if(!job.location||!outputs[0]?.itemId||n(bomOutputQty)<=0){jobBomRequest.current+=1;return}
+    const timer=setTimeout(()=>loadBomForJob({silent:true}),200);
+    return()=>{clearTimeout(timer);jobBomRequest.current+=1};
+  },[job.type,job.location,outputs[0]?.itemId,bomOutputQty]);
   const lineValue=x=>n(x.qty)*n(x.rate);
   const lineTableHelpers=useRef({});
   lineTableHelpers.current={itemOptions,chooseItem,setLine,lineValue};
