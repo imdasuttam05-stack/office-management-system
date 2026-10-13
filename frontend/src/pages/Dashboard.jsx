@@ -449,7 +449,7 @@ export default function Dashboard() {
               type="button"
               className="side-item"
               onClick={() =>
-                goTo("/accounts/workspace")
+                goTo("/accounts")
               }
             >
               <Icon>₹</Icon>
