@@ -621,6 +621,20 @@ export default function Dashboard() {
               </span>
             </button>
 
+            <button
+              type="button"
+              className="side-item"
+              onClick={() =>
+                goTo("/gst")
+              }
+            >
+              <Icon>₹</Icon>
+
+              <span className="side-label">
+                GST Reports
+              </span>
+            </button>
+
           </div>
         </div>
 
