@@ -15,6 +15,7 @@ import Voucher from "../models/Voucher.js";
 import InventoryMovement from "../models/InventoryMovement.js";
 import ProductionEntry from "../models/ProductionEntry.js";
 import BOM from "../models/BOM.js";
+import InventoryWorkflow from "../models/InventoryWorkflow.js";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
@@ -251,6 +252,40 @@ export async function createJobOrder(req,res){
   }
   return res.status(201).json({success:true,message:`Job Order ${jobNo} created. Raw Material stock issued. Production entry is required to increase output stock.`,job});
  }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Job order failed."})}
+}
+
+export async function createJobOrderReturn(req,res){
+ try{
+  const body=req.body||{},jobId=clean(req.params.id||body.jobId),lines=Array.isArray(body.lines)?body.lines:[];
+  if(!jobId||!lines.length)throw new Error("Select a Job Order and at least one raw material to return.");
+  const jobFilter={_id:jobId};if(req.user?.companyId)jobFilter.companyId=req.user.companyId;
+  const job=await ManufacturingJobOrder.findOne(jobFilter).lean();
+  if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
+  const existingReturns=await InventoryWorkflow.find({companyId:req.user?.companyId||null,docType:"JOB_ORDER_RETURN","meta.jobId":job._id,status:"POSTED"}).lean();
+  const keyOf=x=>`${clean(x.itemName).toLowerCase()}|${clean(x.batchNo)}|${clean(x.barcode)}`;
+  const returned={};
+  for(const document of existingReturns)for(const line of document.sourceLines||[])returned[keyOf(line)]=(returned[keyOf(line)]||0)+num(line.qty);
+  const normalized=[];
+  for(const line of lines){
+   const key=keyOf(line),issued=job.sourceItems.filter(x=>keyOf(x)===key),qty=num(line.qty);
+   const issuedQty=issued.reduce((sum,x)=>sum+num(x.qty),0),issuedValue=issued.reduce((sum,x)=>sum+num(x.qty)*num(x.rate),0);
+   if(!issued.length||qty<=0)throw new Error(`Invalid returned raw material: ${clean(line.itemName)}.`);
+   const available=Math.max(0,issuedQty-(returned[key]||0));
+   if(qty>available+0.000001)throw new Error(`${clean(line.itemName)}: return quantity exceeds unreturned issued quantity ${available}.`);
+   returned[key]=(returned[key]||0)+qty;
+   const rate=issuedQty?issuedValue/issuedQty:0;
+   normalized.push({itemId:issued[0].itemId||null,itemName:clean(issued[0].itemName),itemType:"RAW_MATERIAL",unit:clean(issued[0].unit)||"KG",qty,rate,value:r2(qty*rate),batchNo:clean(issued[0].batchNo),barcode:clean(issued[0].barcode)});
+  }
+  const totalValue=r2(normalized.reduce((sum,line)=>sum+line.value,0));
+  const returnNo=await next("JOB_ORDER_RETURN","JOR");
+  const document=await InventoryWorkflow.create({companyId:req.user?.companyId||null,docNo:returnNo,docType:"JOB_ORDER_RETURN",date:dt(body.date)||new Date(),location:job.location,partyId:job.partyId||null,partyName:job.partyName||"",referenceNo:job.jobNo,sourceLines:normalized,totalValue,notes:clean(body.notes),meta:{jobId:job._id,jobNo:job.jobNo},createdBy:req.user._id});
+  for(const line of normalized){
+   await adjustStock({companyId:job.companyId,location:job.location,itemType:"RAW_MATERIAL",itemName:line.itemName,unit:line.unit,qty:line.qty,value:line.value,mode:"ADD",batchNo:line.batchNo,barcode:line.barcode});
+   const stock=await InventoryStock.findOne({companyId:job.companyId||null,location:job.location,itemType:"RAW_MATERIAL",itemName:line.itemName,batchNo:line.batchNo||"",barcode:line.barcode||""}).lean();
+   await InventoryMovement.create({companyId:job.companyId||null,date:document.date,location:job.location,itemName:line.itemName,itemType:"RAW_MATERIAL",unit:line.unit,qtyIn:line.qty,valueIn:line.value,balanceQty:num(stock?.qty),sourceType:"JOB_ORDER_RETURN",sourceNo:returnNo,referenceNo:job.jobNo,batchNo:line.batchNo,barcode:line.barcode,narration:`Raw material returned from Job Order ${job.jobNo}`,createdBy:req.user._id});
+  }
+  return res.status(201).json({success:true,message:`Raw material return ${returnNo} posted against ${job.jobNo}.`,item:document});
+ }catch(error){return res.status(400).json({success:false,message:error.message||"Job Order return failed."})}
 }
 
 export async function createProductionEntry(req,res){
