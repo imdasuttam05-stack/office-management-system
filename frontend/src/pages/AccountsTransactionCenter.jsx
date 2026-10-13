@@ -21,7 +21,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const [stockDetail,setStockDetail]=useState(null), [stockMovements,setStockMovements]=useState([]), [stockDetailLoading,setStockDetailLoading]=useState(false);
   const [jobHistoryLoading,setJobHistoryLoading]=useState(false);
   const [msg,setMsg]=useState(""), [err,setErr]=useState(""), [busy,setBusy]=useState(false);
-  const [purchase,setPurchase]=useState({date:today(),location:"",supplierId:"",supplierName:"",supplierGSTIN:"",supplierInvoiceNo:"",supplierInvoiceDate:"",transportCost:0,otherCost:0,remarks:""});
+  const [purchase,setPurchase]=useState({date:today(),location:"",supplierId:"",supplierLedgerId:"",supplierName:"",supplierGSTIN:"",supplierInvoiceNo:"",supplierInvoiceDate:"",transportCost:0,otherCost:0,remarks:""});
   const [pLines,setPLines]=useState([blankLine()]);
   const [purchaseEditId,setPurchaseEditId]=useState("");
   const [purchaseEditNo,setPurchaseEditNo]=useState("");
@@ -54,7 +54,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   async function get(path){const r=await fetch(`${API}${path}`,{headers:auth()});const d=await r.json();if(!r.ok)throw Error(d.message||"Request failed");return d;}
   async function post(path,body){const r=await fetch(`${API}${path}`,{method:"POST",headers:auth(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.message||"Save failed");return d;}
   async function put(path,body){const r=await fetch(`${API}${path}`,{method:"PUT",headers:auth(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.message||"Update failed");return d;}
-  async function loadMasters(){try{const [d,b]=await Promise.all([get("/api/inventory/workflow/masters"),get("/api/inventory/workflow/boms")]);const accountMasters=await Promise.allSettled(["party","supplier","ledger"].map(type=>get(`/api/accounts-masters?type=${type}`)));const options=new Map();for(const row of [...(d.customers||[]),...(d.suppliers||[]),...accountMasters.flatMap(result=>result.status==="fulfilled"?(result.value.data||result.value.masters||[]):[])]){const name=String(row.name||"").trim(),key=name.toLowerCase();if(name&&key&&!options.has(key))options.set(key,{...row,name})}setM({...d,jobParties:[...options.values()]});setBoms(b.items||[])}catch(e){setErr(e.message)}}
+  async function loadMasters(){try{const [d,b,p]=await Promise.all([get("/api/inventory/workflow/masters"),get("/api/inventory/workflow/boms"),get("/api/inventory/raw-material-masters")]);const accountMasters=await Promise.allSettled(["party","supplier","ledger"].map(type=>get(`/api/accounts-masters?type=${type}`)));const options=new Map();for(const row of [...(d.customers||[]),...(d.suppliers||[]),...accountMasters.flatMap(result=>result.status==="fulfilled"?(result.value.data||result.value.masters||[]):[])]){const name=String(row.name||"").trim(),key=name.toLowerCase();if(name&&key&&!options.has(key))options.set(key,{...row,name})}setM({...d,creditorLedgers:p.creditorLedgers||[],jobParties:[...options.values()]});setBoms(b.items||[])}catch(e){setErr(e.message)}}
   async function loadPurchaseHistory(){setPurchaseHistoryLoading(true);try{const d=await get("/api/inventory/raw-material-purchases?page=1&limit=100");setPurchaseRows(d.items||[])}catch(e){setErr(e.message)}finally{setPurchaseHistoryLoading(false)}}
   async function loadStock(){try{const d=await get(`/api/inventory/stock?itemType=${encodeURIComponent(stockType)}${stockLocation?`&location=${encodeURIComponent(stockLocation)}`:""}&limit=200`);setStock(d.items||[])}catch(e){setErr(e.message)}}
   async function showStockMovements(item){setStockDetail(item);setStockMovements([]);setStockDetailLoading(true);try{const params=new URLSearchParams({itemType:item.itemType,itemName:item.itemName,location:item.location,batchNo:item.batchNo||"",barcode:item.barcode||""});const d=await get(`/api/inventory/workflow/stock-ledger?${params}`);setStockMovements(d.items||[])}catch(e){setErr(e.message)}finally{setStockDetailLoading(false)}}
@@ -70,7 +70,10 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const fgItems=useMemo(()=>m.items.filter(x=>["FINISHED_GOODS","FINISHED_PRODUCT","FINISHED","PACKED_GOODS"].includes(String(x.itemType||x.type||"").toUpperCase())),[m.items]);
   const allItems=m.items;
   const locOpts=m.locations||[];
-  const supplierOpts=m.suppliers||[];
+  const supplierRows=m.suppliers||[];
+  const creditorLedgerOpts=m.creditorLedgers||[];
+  const purchasePartyOpts=[...supplierRows,...creditorLedgerOpts.filter(ledger=>!supplierRows.some(supplier=>supplier.name.trim().toLowerCase()===ledger.name.trim().toLowerCase()))];
+  const supplierOpts=tab==="purchase"||tab==="purchase-history"?purchasePartyOpts:supplierRows;
   const customerOpts=m.customers||[];
   const itemOptions=(type)=>type==="RAW_MATERIAL"?rawItems:type==="GRADE"?gradeItems:type==="FINISHED_GOODS"?fgItems:allItems;
   const setLine=(setter,index,key,value)=>setter(a=>a.map((x,i)=>i===index?{...x,[key]:value}:x));
