@@ -44,6 +44,8 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const [costResult,setCostResult]=useState(null);
   const [boms,setBoms]=useState([]), [bomOutputQty,setBomOutputQty]=useState(1), [bomLoading,setBomLoading]=useState(false), [bomAllocations,setBomAllocations]=useState([]);
   const jobBomRequest=useRef(0);
+  const bomPurchaseRequest=useRef(0);
+  const [bomPurchasePicker,setBomPurchasePicker]=useState(null);
 
   useEffect(()=>{setTab(initialTab || "purchase")},[initialTab]);
   useEffect(()=>{loadMasters();},[]);
@@ -73,7 +75,59 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const itemOptions=(type)=>type==="RAW_MATERIAL"?rawItems:type==="GRADE"?gradeItems:type==="FINISHED_GOODS"?fgItems:allItems;
   const setLine=(setter,index,key,value)=>setter(a=>a.map((x,i)=>i===index?{...x,[key]:value}:x));
   const chooseItem=(setter,i,id)=>{const item=m.items.find(x=>x._id===id); if(!item)return; setter(a=>a.map((x,j)=>j===i?{...x,itemId:item._id,itemName:item.name,itemType:item.itemType,unit:item.unit||"KG",rate:x.rate||0,gstRate:item.defaultGstRate||0}:x))};
-  async function chooseBomMaterial(i,id){const item=m.items.find(x=>x._id===id);if(!item)return;let rate=0;try{const d=await get(`/api/inventory/workflow/purchase-rate?itemId=${encodeURIComponent(id)}&itemName=${encodeURIComponent(item.name)}`);rate=n(d.rate)}catch{}setBom(b=>({...b,materials:b.materials.map((q,j)=>j===i?{...q,itemId:id,itemName:item.name,qtyPerUnit:q.qtyPerUnit||1,rate}:q)}))}
+  async function chooseBomMaterial(i,id){
+    const item=m.items.find(x=>x._id===id);
+    if(!item)return;
+    const requestId=++bomPurchaseRequest.current;
+    setBom(b=>({...b,materials:b.materials.map((q,j)=>j===i?{...q,itemId:id,itemName:item.name,unit:item.unit||"KG",rate:0}:q)}));
+    setBomPurchasePicker({index:i,itemId:id,itemName:item.name,loading:true,options:[]});
+    try{
+      const [purchaseData,jobData]=await Promise.all([
+        get(`/api/inventory/raw-material-purchases?page=1&limit=100&search=${encodeURIComponent(item.name)}`),
+        get("/api/inventory/job-orders")
+      ]);
+      const matchingLines=(purchaseData.items||[]).flatMap(purchase=>(purchase.lines||[])
+        .filter(line=>String(line.itemId||"")===String(id)||line.itemName?.trim().toLowerCase()===item.name.trim().toLowerCase())
+        .map(line=>({purchase,line,remainingQty:n(line.qty)})));
+      const lotByKey=new Map(matchingLines.map(lot=>[`${lot.purchase._id}:${lot.line._id}`,lot]));
+      const unallocatedIssues=[];
+      const jobs=[...(jobData.items||[])].filter(job=>job.status!=="CANCELLED").sort((a,b)=>new Date(a.date)-new Date(b.date));
+      for(const job of jobs){
+        for(const source of job.sourceItems||[]){
+          if(String(source.itemId||"")!==String(id)&&source.itemName?.trim().toLowerCase()!==item.name.trim().toLowerCase())continue;
+          const allocations=source.purchaseAllocations||[];
+          let returned=n(source.returnedQty);
+          for(const allocation of [...allocations].reverse()){
+            const lot=lotByKey.get(`${allocation.purchaseId}:${allocation.lineId}`);
+            const returnedFromLot=Math.min(returned,n(allocation.qty));
+            if(lot)lot.remainingQty=Math.max(0,lot.remainingQty-n(allocation.qty)+returnedFromLot);
+            returned-=returnedFromLot;
+          }
+          const allocatedQty=allocations.reduce((sum,allocation)=>sum+n(allocation.qty),0);
+          const manualQty=Math.max(0,n(source.qty)-allocatedQty-returned);
+          if(manualQty>0)unallocatedIssues.push({location:job.location,qty:manualQty});
+        }
+      }
+      for(const issue of unallocatedIssues){
+        let remaining=issue.qty;
+        for(const lot of matchingLines.filter(x=>x.purchase.location===issue.location).sort((a,b)=>new Date(a.purchase.date)-new Date(b.purchase.date))){
+          const used=Math.min(remaining,lot.remainingQty);
+          lot.remainingQty-=used;
+          remaining-=used;
+          if(remaining<=0.000001)break;
+        }
+      }
+      if(requestId===bomPurchaseRequest.current)setBomPurchasePicker(current=>current?.itemId===id?{...current,loading:false,options:matchingLines.map(({purchase,line,remainingQty})=>({purchaseId:purchase._id,lineId:line._id,purchaseNo:purchase.purchaseNo,date:purchase.date,supplierName:purchase.supplierName,location:purchase.location,unit:line.unit||"KG",purchaseQty:n(line.qty),remainingQty:Math.round((remainingQty+Number.EPSILON)*1000)/1000,rate:n(line.purchaseRate),batchNo:line.batchNo||"",barcode:line.barcode||""}))}:current);
+    }catch(e){
+      if(requestId===bomPurchaseRequest.current)setBomPurchasePicker(current=>current?.itemId===id?{...current,loading:false,error:e.message}:current);
+    }
+  }
+  function chooseBomPurchase(option){
+    const index=bomPurchasePicker?.index;
+    if(index==null)return;
+    setBom(b=>({...b,materials:b.materials.map((line,i)=>i===index?{...line,rate:option.rate,unit:option.unit,purchaseId:option.purchaseId,purchaseLineId:option.lineId,purchaseNo:option.purchaseNo,supplierName:option.supplierName,purchaseDate:option.date}:line)}));
+    setBomPurchasePicker(null);
+  }
   async function loadBomForJob({silent=false}={}){
     const outputId=outputs[0]?.itemId,qty=n(bomOutputQty);
     if(!job.location||!outputId||qty<=0){if(!silent)setErr(!job.location?"Select Location first.":!outputId?"Select Finished Good in Planned Output first.":"Enter production quantity.");return}
@@ -121,6 +175,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const jobReturnContent=<div className="tx-card"><div className="tx-title"><div><h3>Return Raw Material from Job Order</h3><p>Returned quantity is limited to raw material issued and not previously returned.</p></div></div><div className="tx-grid"><div className="tx-field"><label>Job Order</label><select value={jobReturn.jobId} onChange={e=>selectJobForReturn(e.target.value)}><option value="">Select Job Order</option>{allJobs.filter(x=>x.status!=="CANCELLED"&&(x.sourceItems||[]).some(line=>n(line.remainingReturnQty)>0)).map(x=><option key={x._id} value={x._id}>{x.jobNo} · {x.partyName||"No party"} · {x.location}</option>)}</select></div><div className="tx-field"><label>Return Date</label><input type="date" value={jobReturn.date} onChange={e=>setJobReturn({...jobReturn,date:e.target.value})}/></div><div className="tx-field"><label>Notes</label><input value={jobReturn.notes} onChange={e=>setJobReturn({...jobReturn,notes:e.target.value})}/></div></div>{jobReturn.jobId&&<><h4>Returnable Raw Materials</h4>{jobReturnLines.length?<LineTable lines={jobReturnLines} setter={setJobReturnLines} allowedTypes={["RAW_MATERIAL"]}/>:<div className="tx-note">No raw material remains available to return for this job order.</div>}<div className="tx-actions"><button className="tx-btn primary" disabled={busy||!jobReturnLines.some(x=>n(x.qty)>0)} onClick={()=>submit(`/api/inventory/job-orders/${jobReturn.jobId}/returns`,{date:jobReturn.date,notes:jobReturn.notes,lines:jobReturnLines.filter(x=>n(x.qty)>0).map(x=>({...x,qty:n(x.qty)}))})}>{busy?"Posting return...":"Post Raw Material Return"}</button></div></>}</div>;
 
   return <div className="tx-center">
+    {bomPurchasePicker&&<div role="presentation" onClick={()=>setBomPurchasePicker(null)} style={{position:"fixed",inset:0,zIndex:1300,background:"rgba(13,31,33,.58)",display:"grid",placeItems:"center",padding:16}}><section role="dialog" aria-modal="true" aria-labelledby="bom-purchase-title" onClick={e=>e.stopPropagation()} style={{width:"min(900px,100%)",maxHeight:"85vh",overflow:"auto",background:"#fff",borderRadius:8,padding:18,boxShadow:"0 24px 70px rgba(0,0,0,.25)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}><div><h3 id="bom-purchase-title" style={{margin:"0 0 4px"}}>Select Purchase Lot</h3><div style={{fontSize:13,color:"#667085"}}>{bomPurchasePicker.itemName} · choose rate and unit; enter BOM quantity manually</div></div><button type="button" className="tx-btn" onClick={()=>setBomPurchasePicker(null)}>Close</button></div>{bomPurchasePicker.loading?<p>Loading purchase details...</p>:bomPurchasePicker.error?<div className="tx-note err">{bomPurchasePicker.error}</div>:<div className="tx-table-wrap" style={{marginTop:14}}><table className="tx-table"><thead><tr><th>Purchase</th><th>Date</th><th>Supplier</th><th>Location</th><th>Batch</th><th>Purchased</th><th>Balance</th><th>Unit</th><th>Rate</th><th></th></tr></thead><tbody>{bomPurchasePicker.options.map(option=><tr key={`${option.purchaseId}:${option.lineId}`}><td>{option.purchaseNo}</td><td>{option.date?new Date(option.date).toLocaleDateString("en-IN"):"-"}</td><td>{option.supplierName||"-"}</td><td>{option.location||"-"}</td><td>{option.batchNo||"-"}</td><td>{money(option.purchaseQty)}</td><td><b>{money(option.remainingQty)}</b></td><td>{option.unit}</td><td>₹ {money(option.rate)}</td><td><button type="button" className="tx-btn primary" disabled={option.remainingQty<=0} onClick={()=>chooseBomPurchase(option)}>Select</button></td></tr>)}{!bomPurchasePicker.options.length&&<tr><td colSpan="10">No purchase records found for this material.</td></tr>}</tbody></table></div>}</section></div>}
     <style>{`
       .tx-center{font-family:Inter,Segoe UI,sans-serif;color:#182b3b;background:linear-gradient(135deg,#f2f7f5 0%,#f4f7fb 52%,#f8f6f1 100%);min-height:100%;padding:10px;--tx-ink:#182b3b;--tx-muted:#667085;--tx-green:#176b55;--tx-border:#dce5e2;--tx-surface:#fff}
       .tx-center .tx-card{border-color:var(--tx-border);border-radius:8px;box-shadow:0 8px 22px rgba(24,43,59,.045)}.tx-center .tx-title h2,.tx-center h3{color:var(--tx-ink)}.tx-center h4{color:#31584f}.tx-center .tx-btn{transition:background .16s ease,border-color .16s ease,transform .16s ease}.tx-center .tx-btn:hover:not(:disabled){border-color:#176b55;transform:translateY(-1px)}.tx-center .tx-btn.primary{background:var(--tx-green);border-color:var(--tx-green)}.tx-center .tx-table tbody tr:hover{background:#f3f8f6}.tx-center .tx-table th{color:#36594f;background:#eff5f2}.tx-stock-qty{border:0;background:transparent;color:#176b55;font:inherit;font-weight:800;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:4px 6px}.tx-stock-overlay{position:fixed;inset:0;z-index:1200;background:rgba(13,31,33,.58);display:grid;place-items:center;padding:18px}.tx-stock-dialog{width:min(1080px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:10px;padding:20px;box-shadow:0 28px 80px rgba(0,0,0,.24)}.tx-stock-dialog-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.tx-stock-dialog-head h2{margin:0;font-size:20px}.tx-stock-detail-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.tx-ledger-link{border:0;background:transparent;color:#176b55;font:inherit;font-weight:800;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
