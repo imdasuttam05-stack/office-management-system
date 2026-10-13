@@ -15,7 +15,6 @@ import Voucher from "../models/Voucher.js";
 import InventoryMovement from "../models/InventoryMovement.js";
 import ProductionEntry from "../models/ProductionEntry.js";
 import BOM from "../models/BOM.js";
-import InventoryWorkflow from "../models/InventoryWorkflow.js";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
@@ -228,12 +227,12 @@ export async function createJobOrder(req,res){
   const b=req.body||{},type=b.type,location=clean(b.location),sources=Array.isArray(b.sourceItems)?b.sourceItems:[],outputs=Array.isArray(b.outputItems)?b.outputItems:[];
   if(!["GRADING","FINISHED_GOODS"].includes(type)||!location||!sources.length||!outputs.length)return res.status(400).json({success:false,message:"Type, location, source items and output items are required."});
   const allowedIn="RAW_MATERIAL", allowedOut=type==="GRADING"?"GRADE":"FINISHED_GOODS";
-  let sourceValue=0;const sourceLines=[];
+  let sourceValue=0;
   for(const x of sources){
    const q=num(x.qty),rate=num(x.rate); if(q<=0)throw new Error(`Invalid source quantity for ${x.itemName}.`);
    const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location,itemType:allowedIn,itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
    if(!st||num(st.qty)<q)throw new Error(`Insufficient Raw Material stock for ${x.itemName}. Available ${num(st?.qty)}.`);
-   const sourceRate=rate>0?rate:num(st.averageRate);sourceValue+=q*sourceRate;sourceLines.push({...x,rate:sourceRate,value:r2(q*sourceRate)});
+   sourceValue+=q*(rate>0?rate:num(st.averageRate));
   }
   for(const x of outputs){if(num(x.qty)<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");}
   const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other);
@@ -241,8 +240,8 @@ export async function createJobOrder(req,res){
   const companyId=req.user?.companyId||null;
   const party=b.partyId?await CustomerMaster.findOne({$and:[{_id:b.partyId},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}):null;
   if(b.partyId&&!party)throw new Error("Selected party was not found.");
-  const job=await ManufacturingJobOrder.create({jobNo,companyId:req.user?.companyId||null,date:dt(b.date)||new Date(),type,location,partyId:party?._id||null,partyName:party?.name||clean(b.partyName),
-  sourceItems:sourceLines.map(x=>({...x,itemId:clean(x.itemId)||null,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode),purchaseAllocations:Array.isArray(x.purchaseAllocations)?x.purchaseAllocations.map(a=>({...a,qty:num(a.qty),rate:num(a.rate),pendingAfter:num(a.pendingAfter)})):[]})),
+  const job=await ManufacturingJobOrder.create({jobNo,companyId,date:dt(b.date)||new Date(),type,location,partyId:party?._id||null,partyName:party?.name||clean(b.partyName),
+   sourceItems:sources.map(x=>({...x,itemId:clean(x.itemId)||null,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode),purchaseAllocations:Array.isArray(x.purchaseAllocations)?x.purchaseAllocations.map(a=>({...a,qty:num(a.qty),rate:num(a.rate),pendingAfter:num(a.pendingAfter)})):[]})),
    outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
    labourCost:labour,transportCost:transport,otherCost:other,totalCost,notes:clean(b.notes),createdBy:req.user._id});
   for(const x of job.sourceItems){
@@ -250,50 +249,15 @@ export async function createJobOrder(req,res){
    const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location,itemType:allowedIn,itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
    await InventoryMovement.create({companyId:req.user?.companyId||null,date:job.date,location,itemName:x.itemName,itemType:allowedIn,unit:x.unit||"KG",qtyOut:x.qty,valueOut:x.value,balanceQty:num(st?.qty),sourceType:"JOB_ORDER",sourceNo:job.jobNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Raw Material issued against Job Order ${job.jobNo}`,createdBy:req.user._id});
   }
-
   return res.status(201).json({success:true,message:`Job Order ${jobNo} created. Raw Material stock issued. Production entry is required to increase output stock.`,job});
  }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Job order failed."})}
-}
-
-export async function createJobOrderReturn(req,res){
- try{
-  const body=req.body||{},jobId=clean(req.params.id||body.jobId),lines=Array.isArray(body.lines)?body.lines:[];
-  if(!jobId||!lines.length)throw new Error("Select a Job Order and at least one raw material to return.");
-  const jobFilter={_id:jobId};if(req.user?.companyId)jobFilter.companyId=req.user.companyId;
-  const job=await ManufacturingJobOrder.findOne(jobFilter).lean();
-  if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
-  const existingReturns=await InventoryWorkflow.find({companyId:req.user?.companyId||null,docType:"JOB_ORDER_RETURN","meta.jobId":job._id,status:"POSTED"}).lean();
-  const keyOf=x=>`${clean(x.itemName).toLowerCase()}|${clean(x.batchNo)}|${clean(x.barcode)}`;
-  const returned={};
-  for(const document of existingReturns)for(const line of document.sourceLines||[])returned[keyOf(line)]=(returned[keyOf(line)]||0)+num(line.qty);
-  const normalized=[];
-  for(const line of lines){
-   const key=keyOf(line),issued=job.sourceItems.filter(x=>keyOf(x)===key),qty=num(line.qty);
-   const issuedQty=issued.reduce((sum,x)=>sum+num(x.qty),0),issuedValue=issued.reduce((sum,x)=>sum+num(x.qty)*num(x.rate),0);
-   if(!issued.length||qty<=0)throw new Error(`Invalid returned raw material: ${clean(line.itemName)}.`);
-   const available=Math.max(0,issuedQty-(returned[key]||0));
-   if(qty>available+0.000001)throw new Error(`${clean(line.itemName)}: return quantity exceeds unreturned issued quantity ${available}.`);
-   returned[key]=(returned[key]||0)+qty;
-   const rate=issuedQty?issuedValue/issuedQty:0;
-   normalized.push({itemId:issued[0].itemId||null,itemName:clean(issued[0].itemName),itemType:"RAW_MATERIAL",unit:clean(issued[0].unit)||"KG",qty,rate,value:r2(qty*rate),batchNo:clean(issued[0].batchNo),barcode:clean(issued[0].barcode)});
-  }
-  const totalValue=r2(normalized.reduce((sum,line)=>sum+line.value,0));
-  const returnNo=await next("JOB_ORDER_RETURN","JOR");
-  const document=await InventoryWorkflow.create({companyId:req.user?.companyId||null,docNo:returnNo,docType:"JOB_ORDER_RETURN",date:dt(body.date)||new Date(),location:job.location,partyId:job.partyId||null,partyName:job.partyName||"",referenceNo:job.jobNo,sourceLines:normalized,totalValue,notes:clean(body.notes),meta:{jobId:job._id,jobNo:job.jobNo},createdBy:req.user._id});
-  for(const line of normalized){
-   await adjustStock({companyId:job.companyId,location:job.location,itemType:"RAW_MATERIAL",itemName:line.itemName,unit:line.unit,qty:line.qty,value:line.value,mode:"ADD",batchNo:line.batchNo,barcode:line.barcode});
-   const stock=await InventoryStock.findOne({companyId:job.companyId||null,location:job.location,itemType:"RAW_MATERIAL",itemName:line.itemName,batchNo:line.batchNo||"",barcode:line.barcode||""}).lean();
-   await InventoryMovement.create({companyId:job.companyId||null,date:document.date,location:job.location,itemName:line.itemName,itemType:"RAW_MATERIAL",unit:line.unit,qtyIn:line.qty,valueIn:line.value,balanceQty:num(stock?.qty),sourceType:"JOB_ORDER_RETURN",sourceNo:returnNo,referenceNo:job.jobNo,batchNo:line.batchNo,barcode:line.barcode,narration:`Raw material returned from Job Order ${job.jobNo}`,createdBy:req.user._id});
-  }
-  return res.status(201).json({success:true,message:`Raw material return ${returnNo} posted against ${job.jobNo}.`,item:document});
- }catch(error){return res.status(400).json({success:false,message:error.message||"Job Order return failed."})}
 }
 
 export async function createProductionEntry(req,res){
  try{
   const b=req.body||{},jobId=clean(b.jobId),outputs=Array.isArray(b.outputItems)?b.outputItems:[];
   if(!jobId||!outputs.length)return res.status(400).json({success:false,message:"Job Order and output items are required."});
-  const filter={_id:jobId,status:"POSTED"}; if(req.user?.companyId)filter.companyId=req.user.companyId;
+  const filter={_id:jobId,status:{$in:["POSTED","COMPLETED"]}}; if(req.user?.companyId)filter.companyId=req.user.companyId;
   const job=await ManufacturingJobOrder.findOne(filter); if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
   const prior=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
   const used={}; for(const e of prior)for(const x of e.outputItems||[])used[x.itemName]=(used[x.itemName]||0)+num(x.qty);
@@ -306,12 +270,12 @@ export async function createProductionEntry(req,res){
    totalValue+=qty*(num(x.rate)>0?num(x.rate):num(planned.rate));
   }
   const productionNo=await next("PRODUCTION","PROD");
-  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:dt(b.date)||new Date(),location:job.location,outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*(num(x.rate)||0)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),notes:clean(b.notes),createdBy:req.user._id});
+  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:dt(b.date)||new Date(),location:job.location,outputItems:outputs.map(x=>{const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));const rate=num(x.rate)>0?num(x.rate):num(planned?.rate);return {...x,itemName:clean(x.itemName),unit:clean(x.unit)||planned?.unit||"KG",qty:num(x.qty),rate,value:r2(num(x.qty)*rate),batchNo:clean(x.batchNo)||clean(planned?.batchNo),barcode:clean(x.barcode)||clean(planned?.barcode)}}),notes:clean(b.notes),createdBy:req.user._id});
   for(const x of entry.outputItems){
    const value=r2(num(x.qty)*(num(x.rate)>0?num(x.rate):((job.outputItems||[]).find(o=>o.itemName===x.itemName)?.rate||0)));
-   await adjustStock({companyId:req.user?.companyId,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:entry.date});
-   const st=await InventoryStock.findOne({companyId:req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
-   await InventoryMovement.create({companyId:req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
+   await adjustStock({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:entry.date});
+   const st=await InventoryStock.findOne({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
+   await InventoryMovement.create({companyId:job.companyId||req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
   }
   const all=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
   const done={}; for(const e of all)for(const x of e.outputItems||[])done[x.itemName]=(done[x.itemName]||0)+num(x.qty);
@@ -328,14 +292,8 @@ export async function getJobs(req,res){
   const filter={};if(req.user?.companyId)filter.companyId=req.user.companyId;if(req.query.type)filter.type=req.query.type;
   const items=await ManufacturingJobOrder.find(filter).sort({date:-1,createdAt:-1}).limit(300).lean();
   const ids=items.map(x=>x._id); const entries=ids.length?await ProductionEntry.find({jobId:{$in:ids},status:"POSTED"}).lean():[];
-  const returns=ids.length?await InventoryWorkflow.find({companyId:req.user?.companyId||null,docType:"JOB_ORDER_RETURN","meta.jobId":{$in:ids},status:"POSTED"}).lean():[];
   const byJob={}; for(const e of entries){const k=String(e.jobId);byJob[k]??={};for(const x of e.outputItems||[])byJob[k][x.itemName]=(byJob[k][x.itemName]||0)+num(x.qty);}
-  const returnedByJob={};for(const document of returns){const k=String(document.meta?.jobId);returnedByJob[k]??={};for(const line of document.sourceLines||[]){const itemKey=`${clean(line.itemName).toLowerCase()}|${clean(line.batchNo)}|${clean(line.barcode)}`;returnedByJob[k][itemKey]=(returnedByJob[k][itemKey]||0)+num(line.qty);}}
-  const enriched=items.map(j=>{
-   const returnedRemaining={...(returnedByJob[String(j._id)]||{})};
-   const sourceItems=(j.sourceItems||[]).map(x=>{const itemKey=`${clean(x.itemName).toLowerCase()}|${clean(x.batchNo)}|${clean(x.barcode)}`,returnedQty=Math.min(num(x.qty),returnedRemaining[itemKey]||0);returnedRemaining[itemKey]=Math.max(0,(returnedRemaining[itemKey]||0)-returnedQty);return {...x,returnedQty,remainingReturnQty:Math.max(0,num(x.qty)-returnedQty)}});
-   return {...j,producedItems:Object.entries(byJob[String(j._id)]||{}).map(([itemName,qty])=>({itemName,qty})),remainingOutputItems:(j.outputItems||[]).map(x=>({...x,producedQty:byJob[String(j._id)]?.[x.itemName]||0,remainingQty:Math.max(0,num(x.qty)-(byJob[String(j._id)]?.[x.itemName]||0))})),sourceItems};
-  });
+  const enriched=items.map(j=>({...j,producedItems:Object.entries(byJob[String(j._id)]||{}).map(([itemName,qty])=>({itemName,qty})),remainingOutputItems:(j.outputItems||[]).map(x=>({...x,producedQty:byJob[String(j._id)]?.[x.itemName]||0,remainingQty:Math.max(0,num(x.qty)-(byJob[String(j._id)]?.[x.itemName]||0))}))}));
   return res.json({success:true,items:enriched});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
@@ -354,7 +312,7 @@ export async function createSale(req,res){
     for(const x of lines){const qty=num(x.qty),rate=num(x.rate),discount=Math.min(Math.max(num(x.discount),0),qty*rate),taxable=r2(qty*rate-discount),gstRate=Math.max(0,num(x.gstRate)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),c=gstType==="CGST_SGST"?r2(gst/2):0,s=gstType==="CGST_SGST"?r2(gst-c):0,i=gstType==="IGST"?gst:0;const requestedItemType=["FINISHED_GOODS","PACKED_GOODS"].includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";let st=await InventoryStock.findOne({companyId,location,itemType:requestedItemType,itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});if(!st && requestedItemType==="PACKED_GOODS") st=await InventoryStock.findOne({companyId,location,itemType:"FINISHED_GOODS",itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});if(!st||num(st.qty)<qty)throw new Error(`Insufficient ${requestedItemType===`PACKED_GOODS`?"packing":"finished goods"} stock for ${x.itemName}.`);built.push({...x,itemName:clean(x.itemName),itemType:st.itemType,stockId:st._id,unit:clean(x.unit)||st.unit,qty,rate,discount,taxableAmount:taxable,hsn:clean(x.hsn)||st.hsn,gstRate,gstType,cgst:c,sgst:s,igst:i,lineTotal:r2(taxable+c+s+i),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});subtotal+=taxable;cg+=c;sg+=s;ig+=i;}
     const invoiceNo=await next("SALE","SAL");
     const inv=await SalesInvoice.create({invoiceNo,companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName,customerGSTIN:clean(b.customerGSTIN||customer.gstin).toUpperCase(),customerState:clean(b.customerState||customer.state),supplierState:clean(b.supplierState),supplyType:clean(b.customerGSTIN||customer.gstin)?"B2B":"B2C",placeOfSupply:clean(b.placeOfSupply),lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig),remarks:clean(b.remarks),createdBy:req.user._id});
-    for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});const balance=await InventoryStock.findById(x.stockId).select("qty").lean();await InventoryMovement.create({companyId,date:inv.date,location,itemName:x.itemName,itemType:x.itemType||"FINISHED_GOODS",unit:x.unit||"KG",qtyOut:x.qty,valueOut:cost,balanceQty:num(balance?.qty),sourceType:"SALE",sourceNo:invoiceNo,referenceNo:invoiceNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Finished Goods sold to ${customerName} on invoice ${invoiceNo}`,createdBy:req.user._id});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
+    for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
     const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal,narration:`Sales ${invoiceNo}`}];
     if(cg)voucherLines.push({ledger:outputCgst._id,debit:0,credit:cg,narration:`Output CGST ${invoiceNo}`});
     if(sg)voucherLines.push({ledger:outputSgst._id,debit:0,credit:sg,narration:`Output SGST ${invoiceNo}`});
