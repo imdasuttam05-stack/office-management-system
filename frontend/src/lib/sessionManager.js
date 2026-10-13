@@ -224,6 +224,56 @@ function installAxiosInterceptors() {
   );
 }
 
+function installFetchInterceptor() {
+  const originalFetch = window.fetch.bind(window);
+  const apiOrigin = new URL(API_URL).origin;
+
+  window.fetch = async (input, init) => {
+    const requestUrl = new URL(
+      input instanceof Request ? input.url : String(input),
+      window.location.href
+    );
+
+    if (requestUrl.origin !== apiOrigin || isPublicAuthUrl(requestUrl.href)) {
+      return originalFetch(input, init);
+    }
+
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+    const token = localStorage.getItem("token");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+
+    const request = new Request(input, {
+      ...init,
+      headers,
+      credentials: "include",
+    });
+    const retryRequest = request.clone();
+    const response = await originalFetch(request);
+
+    if (response.status !== 401 || !hasSession()) return response;
+
+    const payload = await response.clone().json().catch(() => null);
+    if (payload?.message !== "Authentication token expired.") return response;
+
+    if (isSessionIdle()) {
+      logoutDueToInactivity();
+      return response;
+    }
+
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) return response;
+
+    const retryHeaders = new Headers(retryRequest.headers);
+    const refreshedToken = localStorage.getItem("token");
+    if (refreshedToken) {
+      retryHeaders.set("Authorization", `Bearer ${refreshedToken}`);
+    }
+
+    return originalFetch(new Request(retryRequest, {headers:retryHeaders}));
+  };
+}
+
 function installActivityListeners() {
   const events = [
     "click",
@@ -284,6 +334,7 @@ export function startSessionManager() {
   started = true;
 
   installAxiosInterceptors();
+  installFetchInterceptor();
   installActivityListeners();
   startIdleMonitor();
 
