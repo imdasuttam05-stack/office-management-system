@@ -121,18 +121,31 @@ export default function AccountsMasters() {
       <style>{`
         .am-shell{
           min-height:100vh;
-          background:#f5f7fb;
-          color:#172b4d;
+          background:#edf3f6;
+          color:#1a3446;
           font-family:Arial,sans-serif
         }
+        /* GST-style workspace: dark teal header, pale blue sidebar */
+        .am-shell{display:grid;grid-template-columns:250px minmax(0,1fr);align-content:start}
+        .am-shell-head{grid-column:1/-1}
+        .am-shell-subnav{grid-column:1;grid-row:auto;display:flex;flex-direction:column;align-items:stretch;gap:5px;min-width:0;padding:18px 12px;background:#e5eff4;border-right:1px solid #d0dfe6;border-bottom:0;overflow:visible;white-space:normal}
+        .am-content{grid-column:2;grid-row:2 / span 2;min-width:0;width:100%;max-width:none;padding:22px 26px}
+        .am-shell-mainnav .am-navbtn{border-radius:2px}
+        .am-navbtn{border-radius:2px;text-align:left;border-color:#d0dfe6;color:#1a3446}
+        .am-navbtn:hover{background:#d6e7ef;border-color:#9bbbc8}
+        .am-navbtn.active{background:#f4c648;color:#183348;border-color:#edb62e;box-shadow:none}
+        .am-back{border-radius:2px;color:#27786e;border-color:#cbd8df}
+        .am-shell-logo{border-radius:3px;background:#173b50}
+        .am-info{border-radius:2px;background:#e9f5f1;border-color:#cde4dc;color:#27786e}
+
 
         .am-shell-head{
           position:sticky;
           top:0;
           z-index:100;
-          background:#fff;
-          border-bottom:1px solid #e4e7ec;
-          box-shadow:0 2px 12px rgba(23,43,77,.06)
+          background:#ffffff;
+          border-bottom:1px solid #d0dfe6;
+          box-shadow:0 2px 12px rgba(23,52,70,.06)
         }
 
         .am-shell-head-inner{
@@ -151,7 +164,7 @@ export default function AccountsMasters() {
           width:42px;
           height:42px;
           border-radius:10px;
-          background:#245a96;
+          background:#173b50;
           color:#fff;
           display:grid;
           place-items:center;
@@ -182,16 +195,16 @@ export default function AccountsMasters() {
 
         .am-shell-subnav{
           padding:10px 20px;
-          background:#f8fafc;
-          border-bottom:1px solid #e4e7ec;
+          background:#e5eff4;
+          border-bottom:1px solid #d0dfe6;
           overflow:auto;
           flex-wrap:nowrap
         }
 
         .am-navbtn{
-          border:1px solid #d0d5dd;
-          background:#fff;
-          color:#344054;
+          border:1px solid #cbd8df;
+          background:#ffffff;
+          color:#1a3446;
           border-radius:8px;
           padding:8px 11px;
           font-weight:800;
@@ -200,7 +213,7 @@ export default function AccountsMasters() {
         }
 
         .am-navbtn.active{
-          background:#245a96;
+          background:#173b50;
           color:#fff;
           border-color:#245a96
         }
@@ -218,8 +231,8 @@ export default function AccountsMasters() {
         }
 
         .am-back{
-          border:1px solid #d0d5dd;
-          background:#fff;
+          border:1px solid #cbd8df;
+          background:#ffffff;
           border-radius:8px;
           padding:8px 11px;
           font-weight:700;
@@ -227,9 +240,9 @@ export default function AccountsMasters() {
         }
 
         .am-info{
-          background:#eef6ff;
-          border:1px solid #cfe2ff;
-          color:#245a96;
+          background:#e9f5f1;
+          border:1px solid #cde4dc;
+          color:#27786e;
           border-radius:9px;
           padding:9px 12px;
           font-size:12px;
@@ -237,18 +250,13 @@ export default function AccountsMasters() {
         }
 
         @media(max-width:700px){
-          .am-shell-head-inner,
-          .am-content{
-            padding:12px 10px
-          }
-
-          .am-shell-subnav{
-            padding:8px 10px
-          }
-
-          .am-shell-title h1{
-            font-size:18px
-          }
+          .am-shell{display:block}
+          .am-shell-head-inner,.am-content{padding:12px 10px}
+          .am-shell-mainnav{overflow-x:auto;flex-wrap:nowrap}
+          .am-shell-subnav{display:flex;flex-direction:row;align-items:center;gap:6px;padding:10px;overflow-x:auto;border-right:0;border-bottom:1px solid #d0dfe6;white-space:nowrap}
+          .am-navbtn{flex:0 0 auto}
+          .am-content{padding:14px 10px}
+          .am-shell-title h1{font-size:18px}
         }
       `}</style>
 
