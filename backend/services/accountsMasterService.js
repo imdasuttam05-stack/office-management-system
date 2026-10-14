@@ -134,7 +134,8 @@ async function syncTransactionMaster(master, ctx) {
   }
 
   if (master.masterType === "location") {
-    await LocationMaster.findOneAndUpdate({companyId,name:master.name},{$set:{code:clean(master.code).toUpperCase(),pin:clean(master.pin),state:clean(master.state),district:clean(master.district),address:clean(master.address),active:true,createdBy},$setOnInsert:{companyId,name:master.name}},{upsert:true,new:true,setDefaultsOnInsert:true});
+    const code = clean(master.code).toUpperCase() || clean(master.name).toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30) || "LOCATION";
+    await LocationMaster.findOneAndUpdate({companyId,name:master.name},{$set:{code,pin:clean(master.pin)||null,state:clean(master.state),district:clean(master.district),address:clean(master.address),active:true,createdBy},$setOnInsert:{companyId,name:master.name}},{upsert:true,new:true,setDefaultsOnInsert:true});
     return;
   }
 
@@ -180,6 +181,10 @@ export async function createMaster(payload = {}, ctx = {}) {
   if (masterType === "party") { data.under=data.under||"Sundry Debtors"; data.partyType=data.partyType||"CUSTOMER"; data.nature=data.nature||"Current Assets"; }
   if (masterType === "supplier") { data.under=data.under||"Sundry Creditors"; data.partyType=data.partyType||"SUPPLIER"; data.nature=data.nature||"Current Liabilities"; }
   if (masterType === "product") { data.under=data.under||"Stock-in-Hand"; data.itemType=data.itemType||"RAW_MATERIAL"; data.unit=data.unit||"KG"; }
+  if (masterType === "location") {
+    data.code=data.code||name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
+    if (data.pin && !/^\d{6}$/.test(data.pin)) throw new Error("PIN must be exactly 6 digits.");
+  }
   if (masterType === "unit") { data.code=data.code||name.toUpperCase().replace(/\s+/g,"_"); data.decimalPlaces=Math.max(0, Math.min(6, Number(data.decimalPlaces ?? 2))); }
 
   const created = await AccountsMaster.create(data);
@@ -194,6 +199,10 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
   const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
   for (const key of allowed) if (payload[key] !== undefined) existing[key]=payload[key];
   existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
+  if (existing.masterType==="location") {
+    existing.code=clean(existing.code).toUpperCase()||existing.name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
+    if (clean(existing.pin) && !/^\d{6}$/.test(clean(existing.pin))) throw new Error("PIN must be exactly 6 digits.");
+  }
   await existing.save();
   await syncTransactionMaster(existing.toObject(), ctx);
   return existing.toObject();
