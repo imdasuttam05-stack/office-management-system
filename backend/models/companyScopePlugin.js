@@ -12,7 +12,9 @@ export default function companyScopePlugin(schema, options = {}) {
     if (!scope) return;
     const match = { companyId: new mongoose.Types.ObjectId(scope.companyId) };
     if (yearScoped) match.financialYear = scope.financialYear;
-    this.setQuery({ $and: [this.getQuery(), match] });
+    const query = { ...this.getQuery() };
+    for (const key of Object.keys(match)) delete query[key];
+    this.setQuery({ $and: [query, match] });
     const update = this.getUpdate();
     if (update && typeof update === "object") {
       const scopedValues = { companyId: match.companyId, ...(yearScoped ? { financialYear: scope.financialYear } : {}) };
