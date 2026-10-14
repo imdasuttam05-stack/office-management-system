@@ -21,7 +21,22 @@ const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
 "01":"Jammu and Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh","05":"Uttarakhand","06":"Haryana","07":"Delhi","08":"Rajasthan","09":"Uttar Pradesh","10":"Bihar","11":"Sikkim","12":"Arunachal Pradesh","13":"Nagaland","14":"Manipur","15":"Mizoram","16":"Tripura","17":"Meghalaya","18":"Assam","19":"West Bengal","20":"Jharkhand","21":"Odisha","22":"Chhattisgarh","23":"Madhya Pradesh","24":"Gujarat","26":"Dadra and Nagar Haveli and Daman and Diu","27":"Maharashtra","28":"Andhra Pradesh","29":"Karnataka","30":"Goa","31":"Lakshadweep","32":"Kerala","33":"Tamil Nadu","34":"Puducherry","35":"Andaman and Nicobar Islands","36":"Telangana","37":"Andhra Pradesh","38":"Ladakh"
 };
-async function next(key,prefix){const y=new Date().getFullYear();const c=await InventoryCounter.findOneAndUpdate({key:`${key}_${y}`},{$inc:{seq:1}},{upsert:true,new:true,setDefaultsOnInsert:true});return `${prefix}-${y}-${String(c.seq).padStart(5,"0")}`}
+async function next(key,prefix){
+ const y=new Date().getFullYear();
+ const counterKey=`${key}_${y}`;
+ // Use the native collection here: the legacy unique index key_1 is still present
+ // in production, while the company-scope plugin adds companyId to the query.
+ // That combination can hide the existing counter and make upsert hit E11000.
+ // Updating by the globally unique key reuses/increments the existing counter.
+ await InventoryCounter.collection.updateOne(
+  {key:counterKey},
+  {$inc:{seq:1},$setOnInsert:{key:counterKey}},
+  {upsert:true}
+ );
+ const c=await InventoryCounter.collection.findOne({key:counterKey});
+ if(!c)throw new Error(`Unable to create or update inventory counter ${counterKey}.`);
+ return `${prefix}-${y}-${String(c.seq).padStart(5,"0")}`;
+}
 async function adjustStock({companyId,location,itemType,itemName,unit,qty,value,mode="ADD",hsn="",batchNo="",barcode="",mfgDate=null,expiryDate=null}){
  const filter={companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""};
  const old=await InventoryStock.findOne(filter).select("qty stockValue").lean(); const oq=num(old?.qty), ov=num(old?.stockValue); const q=mode==="ADD"?qty:-qty; const v=mode==="ADD"?value:-value;
