@@ -62,6 +62,8 @@ import {
 
 const router = express.Router();
 
+import { carryForwardOpeningBalances, getOpeningBalanceSnapshot } from "../controllers/openingBalanceController.js";
+
 // All HR/payroll business endpoints are company + financial-year scoped.
 // Company list/create must remain available before the first selection.
 router.use((req, res, next) => {
@@ -165,6 +167,12 @@ router.put("/options", saveOptions);
 router.get("/payroll/options", getOptions);
 router.post("/payroll/options", saveOptions);
 
+
+/* =========================================================
+   FINANCIAL YEAR OPENING BALANCE CARRY FORWARD
+========================================================= */
+router.post("/financial-year/carry-forward", carryForwardOpeningBalances);
+router.get("/financial-year/opening-balances", getOpeningBalanceSnapshot);
 
 /* =========================================================
    COMPANY
