@@ -41,7 +41,8 @@ const blank = {
   ledger: {
     name:"", alias:"", under:"Sundry Debtors", openingBalance:"", openingType:"Dr",
     gstApplicable:false, gstin:"", pan:"", address:"", state:"", pin:"",
-    mobile:"", email:"", creditLimit:"", creditDays:"", locationId:"", masterType:"LEDGER"
+    mobile:"", email:"", creditLimit:"", creditDays:"", locationId:"",
+    bankDetailsProvided:false, bankAccountName:"", bankName:"", bankBranch:"", bankAccountNumber:"", bankIfsc:"", masterType:"LEDGER"
   },
   group: { name:"", under:"", nature:"Liability", masterType:"GROUP" },
   party: {
@@ -171,6 +172,8 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
   const [error, setError] = useState("");
   const [pinLookup, setPinLookup] = useState("");
   const pinLookupRef = useRef(0);
+  const [gstLookup, setGstLookup] = useState("");
+  const gstLookupRef = useRef(0);
 
   useEffect(() => {
     if (initialType && initialType !== type && blank[initialType]) {
@@ -292,7 +295,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
 
   useEffect(() => {
     const pin = String(form.pin || "");
-    if (type !== "location" || !/^\d{6}$/.test(pin)) {
+    if (!(["location","ledger"].includes(type)) || !/^\d{6}$/.test(pin)) {
       setPinLookup("");
       return;
     }
@@ -323,6 +326,45 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
     lookup();
     return () => { cancelled = true; };
   }, [type, form.pin]);
+
+  useEffect(() => {
+    const gstin = String(form.gstin || "").trim().toUpperCase();
+    if (type !== "ledger" || gstin.length !== 15) {
+      setGstLookup("");
+      return;
+    }
+
+    const lookupId = ++gstLookupRef.current;
+    let cancelled = false;
+    setGstLookup("Verifying GSTIN...");
+
+    async function lookup() {
+      try {
+        const r = await fetch(`${API_URL}/api/inventory/masters/gstin/${gstin}`, {headers:headers()});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.message || "GSTIN lookup failed.");
+        if (cancelled || lookupId !== gstLookupRef.current) return;
+        setForm(current => current.gstin?.toUpperCase() !== gstin ? current : ({
+          ...current,
+          name:current.name || d.name || d.legalName || "",
+          pan:current.pan || gstin.slice(2,12),
+          state:current.state || d.state || "",
+          district:current.district || d.district || "",
+          pin:current.pin || d.pincode || "",
+          address:current.address || d.address || "",
+          mobile:current.mobile || d.phone || "",
+          gstApplicable:true,
+          gstStateCode:GST_STATE_CODES[d.state] || current.gstStateCode,
+        }));
+        setGstLookup(d.verified ? "GST details filled from verified registration." : (d.message || "GSTIN format checked; full registration details are unavailable."));
+      } catch (e) {
+        if (!cancelled && lookupId === gstLookupRef.current) setGstLookup(e.message);
+      }
+    }
+
+    lookup();
+    return () => { cancelled = true; };
+  }, [type, form.gstin]);
 
   async function save() {
     if (!String(form.name || "").trim()) {
@@ -473,7 +515,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
                   <div className="section-heading"><h3>Mailing Details</h3></div>
                   <div className="section-grid">
                     <div className="field"><label>State</label><SearchableSelect value={form.state||""} options={asOptions([{value:"",label:"Select State"},...STATES])} onChange={value=>update("state",value)} placeholder="Search states..." /></div>
-                    <div className="field"><label>PIN</label><input maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
+                    <div className="field"><label>PIN</label><input inputMode="numeric" maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/>{pinLookup && <div className={`hint ${pinLookup !== "Looking up PIN..." && pinLookup !== "State, district and address filled from PIN." ? "pin-lookup-error" : ""}`}>{pinLookup}</div>}</div>
                     <div className="field"><label>Location</label><SearchableSelect value={form.locationId||""} options={asOptions([{value:"",label:"Select Location"},...locations.map(x=>({value:x._id,label:x.name}))])} onChange={value=>update("locationId",value)} placeholder="Search locations..." /></div>
                     <div className="field"><label>Mobile</label><input value={form.mobile||""} onChange={e=>update("mobile",e.target.value)}/></div>
                     <div className="field"><label>Email</label><input type="email" value={form.email||""} onChange={e=>update("email",e.target.value)}/></div>
@@ -484,8 +526,21 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
                   <div className="section-heading"><h3>Tax Registration Details</h3></div>
                   <div className="section-grid">
                     <div className="field check"><input type="checkbox" checked={!!form.gstApplicable} onChange={e=>update("gstApplicable",e.target.checked)}/><label>GST Applicable</label></div>
-                    <div className="field"><label>GSTIN</label><input maxLength="15" value={form.gstin||""} onChange={e=>update("gstin",e.target.value.toUpperCase())}/></div>
+                    <div className="field"><label>GSTIN</label><input maxLength="15" value={form.gstin||""} onChange={e=>update("gstin",e.target.value.toUpperCase())}/>{gstLookup && <div className={`hint ${/failed|unavailable|valid .*GSTIN/i.test(gstLookup) ? "pin-lookup-error" : ""}`}>{gstLookup}</div>}</div>
                     <div className="field"><label>PAN / IT No.</label><input maxLength="10" value={form.pan||""} onChange={e=>update("pan",e.target.value.toUpperCase())}/></div>
+                  </div>
+                </section>
+                <section className="field-section">
+                  <div className="section-heading"><h3>Banking Details</h3></div>
+                  <div className="section-grid">
+                    <div className="field check"><input type="checkbox" checked={!!form.bankDetailsProvided} onChange={e=>update("bankDetailsProvided",e.target.checked)}/><label>Provide bank details</label></div>
+                    {form.bankDetailsProvided && <>
+                      <div className="field"><label>Account Name</label><input value={form.bankAccountName||""} onChange={e=>update("bankAccountName",e.target.value)}/></div>
+                      <div className="field"><label>Bank Name</label><input value={form.bankName||""} onChange={e=>update("bankName",e.target.value)}/></div>
+                      <div className="field"><label>Branch</label><input value={form.bankBranch||""} onChange={e=>update("bankBranch",e.target.value)}/></div>
+                      <div className="field"><label>Account Number</label><input inputMode="numeric" value={form.bankAccountNumber||""} onChange={e=>update("bankAccountNumber",e.target.value)}/></div>
+                      <div className="field"><label>IFSC</label><input maxLength="11" value={form.bankIfsc||""} onChange={e=>update("bankIfsc",e.target.value.toUpperCase())}/></div>
+                    </>}
                   </div>
                 </section>
                 <section className="field-section">
