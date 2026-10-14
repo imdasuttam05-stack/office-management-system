@@ -664,6 +664,15 @@ export async function saveOptions(req, res) {
   }
 }
 
+export async function listCompanies(req, res) {
+  try {
+    const companies = await Company.find({ status: { $ne: "Inactive" } }).sort({ name: 1 }).lean();
+    res.json({ success: true, companies });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
 export async function createCompany(req, res) {
   try {
     const name = clean(req.body?.name);
