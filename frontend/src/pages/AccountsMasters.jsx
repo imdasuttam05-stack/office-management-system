@@ -1,4 +1,3 @@
-import "./AccountsGSTTheme.css";
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import AccountsMasterCatalog from "./AccountsMasterCatalog.jsx";
@@ -122,32 +121,18 @@ export default function AccountsMasters() {
       <style>{`
         .am-shell{
           min-height:100vh;
-          background:#edf3f6;
-          color:#1a3446;
+          background:#f5f7fb;
+          color:#172b4d;
           font-family:Arial,sans-serif
         }
-        /* GST-style workspace: dark teal header, pale blue sidebar */
-        .am-shell{display:grid;grid-template-columns:250px minmax(0,1fr);align-content:start}
-        .am-shell-head{grid-column:1/-1}
-        .am-shell-subnav{grid-column:1;grid-row:auto;display:flex;flex-direction:column;align-items:stretch;gap:5px;min-width:0;padding:18px 12px;background:#e5eff4;border-right:1px solid #d0dfe6;border-bottom:0;overflow:visible;white-space:normal}
-        .am-content{grid-column:2;grid-row:2 / span 2;min-width:0;width:100%;max-width:none;padding:22px 26px}
-        .am-shell-mainnav .am-navbtn{border-radius:2px}
-        .am-navbtn{border-radius:2px;text-align:left;border-color:#d0dfe6;color:#1a3446}
-        .am-navbtn:hover{background:#d6e7ef;border-color:#9bbbc8}
-        .am-navbtn.active{background:#f4c648;color:#183348;border-color:#edb62e;box-shadow:none}
-        .am-back{border-radius:2px;color:#27786e;border-color:#cbd8df}
-        .am-shell-logo{border-radius:3px;background:#173b50}
-        .am-info{border-radius:2px;background:#e9f5f1;border-color:#cde4dc;color:#27786e}
-
 
         .am-shell-head{
           position:sticky;
           top:0;
           z-index:100;
-          background:#123c55;
-          color:#ffffff;
-          border-bottom:1px solid #0d3044;
-          box-shadow:0 2px 12px rgba(23,52,70,.12)
+          background:#fff;
+          border-bottom:1px solid #e4e7ec;
+          box-shadow:0 2px 12px rgba(23,43,77,.06)
         }
 
         .am-shell-head-inner{
@@ -165,9 +150,9 @@ export default function AccountsMasters() {
         .am-shell-logo{
           width:42px;
           height:42px;
-          border-radius:3px;
-          background:#f0b83f;
-          color:#17364a;
+          border-radius:10px;
+          background:#245a96;
+          color:#fff;
           display:grid;
           place-items:center;
           font-weight:900
@@ -175,69 +160,117 @@ export default function AccountsMasters() {
 
         .am-shell-title h1{
           margin:0;
-          font-size:21px;
-          color:#ffffff
+          font-size:21px
         }
 
         .am-shell-title p{
           margin:4px 0 0;
           font-size:11px;
-          color:#c8d9e2
-        }
-
-        .am-shell-mainnav,
-        .am-shell-subnav{
-          display:flex;
-          gap:7px;
-          flex-wrap:wrap
+          color:#667085
         }
 
         .am-shell-mainnav{
+          display:flex;
+          gap:7px;
+          flex-wrap:wrap;
           margin-top:12px
         }
 
-        .am-shell-subnav{
-          padding:10px 20px;
-          background:#e5eff4;
-          border-bottom:1px solid #d0dfe6;
-          overflow:auto;
-          flex-wrap:nowrap
+        /* Main navigation stays at the top; module submenus live only in the left sidebar. */
+        .am-shell-mainnav .am-navbtn{
+          border:1px solid #e5eaf1;
+          background:#f7f9fc;
+          color:#718096;
+          border-radius:8px;
+          padding:8px 11px;
+          font-weight:800;
+          cursor:pointer;
+          white-space:nowrap;
+          transition:background .15s ease,color .15s ease,border-color .15s ease
         }
 
-        .am-navbtn{
-          border:1px solid #668194;
-          background:transparent;
-          color:#ffffff;
-          border-radius:2px;
-          padding:8px 11px;
+        .am-shell-mainnav .am-navbtn:hover{
+          background:#edf3fa;
+          color:#52657d
+        }
+
+        .am-shell-mainnav .am-navbtn.active{
+          background:#eaf2ff;
+          color:#58708e;
+          border-color:#d8e5f6
+        }
+
+        .am-layout{
+          display:grid;
+          grid-template-columns:230px minmax(0,1fr);
+          align-items:start;
+          min-height:calc(100vh - 120px)
+        }
+
+        .am-shell-subnav{
+          position:sticky;
+          top:0;
+          min-height:calc(100vh - 120px);
+          padding:14px 11px;
+          display:flex;
+          flex-direction:column;
+          align-items:stretch;
+          gap:7px;
+          background:#ffef9c;
+          border-right:1px solid #ead36a;
+          overflow-y:auto
+        }
+
+        .am-sidebar-heading{
+          padding:5px 9px 9px;
+          color:#79651b;
+          font-size:11px;
+          font-weight:900;
+          letter-spacing:.07em;
+          text-transform:uppercase
+        }
+
+        .am-shell-subnav .am-navbtn{
+          width:100%;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:8px;
+          text-align:left;
+          border:1px solid transparent;
+          background:rgba(255,255,255,.52);
+          color:#66571b;
+          border-radius:8px;
+          padding:10px 11px;
           font-weight:800;
           cursor:pointer;
           white-space:nowrap
         }
 
-        .am-navbtn.active{
-          background:#f4c648;
-          color:#183348;
-          border-color:#edb62e;
-          box-shadow:none
+        .am-shell-subnav .am-navbtn:hover{
+          background:rgba(255,255,255,.82);
+          border-color:#f0d85d
         }
 
-        .am-navbtn:hover{
-          background:#1d506b;
-          border-color:#668194;
-          color:#ffffff
+        .am-shell-subnav .am-navbtn.active{
+          background:#f4d84f;
+          color:#44380b;
+          border-color:#dfc12d;
+          box-shadow:0 2px 5px rgba(117,91,0,.09)
         }
 
-        .am-navbtn.active:hover{
-          background:#f4c648;
-          border-color:#edb62e;
-          color:#183348
+        .am-shell-subnav .am-key{
+          color:inherit;
+          opacity:.65
         }
 
-        .am-back:hover{
-          background:#e5eff4;
-          color:#27786e;
-          border-color:#9bbbc8
+        .am-shell-subnav .am-back{
+          width:100%;
+          margin-top:8px;
+          border-color:#ead36a;
+          background:rgba(255,255,255,.55);
+          color:#66571b;
+          text-align:left
         }
 
         .am-key{
@@ -247,38 +280,48 @@ export default function AccountsMasters() {
         }
 
         .am-content{
+          width:100%;
           max-width:1650px;
+          min-width:0;
           margin:0 auto;
           padding:16px 20px
         }
 
         .am-back{
-          border:1px solid #cbd8df;
-          background:#ffffff;
-          border-radius:2px;
+          border:1px solid #d0d5dd;
+          background:#fff;
+          border-radius:8px;
           padding:8px 11px;
           font-weight:700;
           cursor:pointer
         }
 
         .am-info{
-          background:#e9f5f1;
-          border:1px solid #cde4dc;
-          color:#27786e;
-          border-radius:2px;
+          background:#eef6ff;
+          border:1px solid #cfe2ff;
+          color:#245a96;
+          border-radius:9px;
           padding:9px 12px;
           font-size:12px;
           margin-bottom:10px
         }
 
+        @media(max-width:900px){
+          .am-layout{grid-template-columns:190px minmax(0,1fr)}
+          .am-content{padding:14px 12px}
+          .am-shell-subnav{padding:12px 8px}
+          .am-shell-subnav .am-navbtn{padding:9px 8px;font-size:12px}
+        }
+
         @media(max-width:700px){
-          .am-shell{display:block}
-          .am-shell-head-inner,.am-content{padding:12px 10px}
-          .am-shell-mainnav{overflow-x:auto;flex-wrap:nowrap}
-          .am-shell-subnav{display:flex;flex-direction:row;align-items:center;gap:6px;padding:10px;overflow-x:auto;border-right:0;border-bottom:1px solid #d0dfe6;white-space:nowrap}
-          .am-navbtn{flex:0 0 auto}
-          .am-content{padding:14px 10px}
+          .am-shell-head-inner{padding:12px 10px}
           .am-shell-title h1{font-size:18px}
+          .am-layout{grid-template-columns:132px minmax(0,1fr)}
+          .am-content{padding:12px 8px}
+          .am-shell-subnav{padding:10px 5px}
+          .am-sidebar-heading{padding:5px 5px 8px;font-size:9px}
+          .am-shell-subnav .am-navbtn{white-space:normal;font-size:11px;gap:3px;padding:9px 6px}
+          .am-shell-subnav .am-key{font-size:9px}
         }
       `}</style>
 
@@ -336,58 +379,58 @@ export default function AccountsMasters() {
         </div>
       </header>
 
-      {section === "master" && (
-        <div className="am-shell-subnav">
-          {masterTabs.map(([id, label, key]) => (
-            <button
-              key={id}
-              className={`am-navbtn ${
-                master === id ? "active" : ""
-              }`}
-              onClick={() => {
-                setMaster(id);
-                setSection("master");
-              }}
-            >
-              {label} <span className="am-key">{key}</span>
-            </button>
-          ))}
+      <div className="am-layout">
+        <aside className="am-shell-subnav" aria-label="Accounts submenu">
+          {section === "master" && (
+            <>
+              <div className="am-sidebar-heading">Masters Menu</div>
+              {masterTabs.map(([id, label, key]) => (
+                <button
+                  key={id}
+                  className={`am-navbtn ${master === id ? "active" : ""}`}
+                  onClick={() => {
+                    setMaster(id);
+                    setSection("master");
+                  }}
+                >
+                  <span>{label}</span><span className="am-key">{key}</span>
+                </button>
+              ))}
+              <button className="am-back" onClick={() => setSection("transactions")}>
+                Open Vouchers →
+              </button>
+            </>
+          )}
 
-          <button
-            className="am-back"
-            onClick={() => setSection("transactions")}
-          >
-            Open Vouchers →
-          </button>
-        </div>
-      )}
+          {section === "transactions" && (
+            <>
+              <div className="am-sidebar-heading">Voucher / Operations</div>
+              {txTabs.map(([id, label, key]) => (
+                <button
+                  key={id}
+                  className={`am-navbtn ${tx === id ? "active" : ""}`}
+                  onClick={() => {
+                    setTx(id);
+                    setSection("transactions");
+                  }}
+                >
+                  <span>{label}</span>{key && <span className="am-key">{key}</span>}
+                </button>
+              ))}
+              <button className="am-back" onClick={() => setSection("master")}>
+                ← Masters
+              </button>
+            </>
+          )}
 
-      {section === "transactions" && (
-        <div className="am-shell-subnav">
-          {txTabs.map(([id, label, key]) => (
-            <button
-              key={id}
-              className={`am-navbtn ${
-                tx === id ? "active" : ""
-              }`}
-              onClick={() => {
-                setTx(id);
-                setSection("transactions");
-              }}
-            >
-              {label}{" "}
-              {key && <span className="am-key">{key}</span>}
-            </button>
-          ))}
-
-          <button
-            className="am-back"
-            onClick={() => setSection("master")}
-          >
-            ← Masters
-          </button>
-        </div>
-      )}
+          {section === "ledger" && (
+            <>
+              <div className="am-sidebar-heading">Accounts Ledger</div>
+              <button className="am-navbtn active" onClick={() => setSection("ledger")}>Ledger Workspace</button>
+              <button className="am-back" onClick={() => setSection("master")}>← Masters</button>
+            </>
+          )}
+        </aside>
 
       <main className="am-content">
         {section === "master" && (
@@ -414,6 +457,7 @@ export default function AccountsMasters() {
 
         {section === "ledger" && <Accounting />}
       </main>
+      </div>
     </div>
   );
 }

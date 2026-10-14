@@ -265,9 +265,6 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
         .am-title{display:flex;align-items:center;gap:12px}.am-logo{width:42px;height:42px;border-radius:10px;background:#245a96;color:#fff;display:grid;place-items:center;font-weight:800}
         h1{font-size:21px;margin:0}.sub{font-size:11px;color:#667085;margin-top:4px}
         .shortcuts{margin-top:12px;display:flex;gap:7px;flex-wrap:wrap}.kbd{font-size:10px;color:#667085}.kbd b{background:#fff;border:1px solid #d0d5dd;border-bottom-width:2px;border-radius:5px;padding:4px 7px;color:#344054;margin-right:4px}
-        .am-tabs{display:flex;gap:7px;overflow:auto;padding:10px 20px;background:#f8fafc;border-bottom:1px solid #e4e7ec}
-        .am-tabs button{white-space:nowrap;border:1px solid #dfe4ea;background:#fff;border-radius:8px;padding:9px 12px;font-weight:700;color:#475467;cursor:pointer}
-        .am-tabs button.active{background:#245a96;color:#fff;border-color:#245a96}
         .am-body{max-width:1500px;margin:auto;padding:18px 20px}.toolbar{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-bottom:12px}
         input,select,textarea{width:100%;border:1px solid #d0d5dd;border-radius:7px;padding:9px 10px;font:inherit;background:#fff}
         textarea{min-height:72px;resize:vertical}.search{max-width:360px}.btn{border:1px solid #d0d5dd;background:#fff;border-radius:7px;padding:9px 13px;font-weight:700;cursor:pointer}.primary{background:#245a96;color:#fff;border-color:#245a96}
@@ -290,22 +287,6 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
           <span className="kbd"><b>Esc</b>Clear focus</span>
         </div>
       </header>
-
-      <nav className="am-tabs">
-        {[
-          ["group","Group","F4"],
-          ["ledger","Ledger","F5"],
-          ["party","Party","F6"],
-          ["supplier","Supplier","F7"],
-          ["product","Product","F8"],
-          ["location","Location","F9"],
-          ["unit","Unit","F10"]
-        ].map(([id,label,key]) =>
-          <button key={id} className={type===id ? "active":""} onClick={()=>{setType(id);setMode("list");setEditing(null);setForm({...blank[id]});setError("");setMessage("");}}>
-            {label} <span style={{fontSize:10,opacity:.7,marginLeft:4}}>{key}</span>
-          </button>
-        )}
-      </nav>
 
       <main className="am-body">
         {message && <div className="msg">{message}</div>}
