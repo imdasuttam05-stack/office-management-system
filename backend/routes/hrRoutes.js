@@ -10,6 +10,7 @@ import {
   getOptions,
   saveOptions,
   createCompany,
+  listCompanies,
 
   getAttendance,
   saveAttendance,
@@ -160,6 +161,8 @@ router.post("/payroll/options", saveOptions);
    COMPANY
 ========================================================= */
 
+router.get("/companies", listCompanies);
+router.get("/company", listCompanies);
 router.post("/company", createCompany);
 router.post("/companies", createCompany);
 
