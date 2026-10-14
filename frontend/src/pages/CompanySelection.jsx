@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Building2, CalendarDays, Plus, ArrowRight, RefreshCw } from "lucide-react";
 import "./GSTReports.css";
 import "./CompanySelection.css";
@@ -20,6 +20,7 @@ function financialYears() {
 
 export default function CompanySelection() {
   const navigate = useNavigate();
+  const location = useLocation();
   const years = useMemo(financialYears, []);
   const [companies, setCompanies] = useState([]);
   const [selectedCompany, setSelectedCompany] = useState(() => {
@@ -69,7 +70,9 @@ export default function CompanySelection() {
     localStorage.setItem(FY_KEY, fy.label);
     localStorage.setItem("oms_active_financial_year_start", fy.start);
     localStorage.setItem("oms_active_financial_year_end", fy.end);
-    navigate("/dashboard", { replace: true });
+    const requestedPath = location.state?.from;
+    const safePath = requestedPath && requestedPath.startsWith("/") && requestedPath !== "/company-selection" ? requestedPath : "/dashboard";
+    navigate(safePath, { replace: true });
   }
 
   return <main className="gst-page oms-company-page">
