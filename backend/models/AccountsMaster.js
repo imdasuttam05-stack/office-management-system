@@ -1,226 +1,45 @@
-import AccountsMaster from "../models/AccountsMaster.js";
-import Group from "../models/Group.js";
-import Ledger from "../models/Ledger.js";
-import CustomerMaster from "../models/CustomerMaster.js";
-import SupplierMaster from "../models/SupplierMaster.js";
-import UnitMaster from "../models/UnitMaster.js";
-import LocationMaster from "../models/LocationMaster.js";
-import InventoryItemMaster from "../models/InventoryItemMaster.js";
+import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
-const clean = (v) => String(v ?? "").trim();
-const num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
-const objectIdOrNull = (v) => {
-  const value = clean(v);
-  return /^[a-fA-F0-9]{24}$/.test(value) ? value : null;
-};
-const activeFilter = {$or:[{active:true},{active:{$exists:false}}]};
+const accountsMasterSchema = new mongoose.Schema({
+  masterType: { type: String, required: true, index: true },
+  name: { type: String, required: true, trim: true },
+  alias: String,
+  code: String,
+  under: String,
+  nature: String,
+  openingBalance: { type: Number, default: 0 },
+  openingType: { type: String, enum: ["Dr", "Cr"], default: "Dr" },
+  gstApplicable: { type: Boolean, default: false },
+  gstin: String,
+  pan: String,
+  address: String,
+  state: String,
+  district: String,
+  pin: String,
+  mobile: String,
+  email: String,
+  creditLimit: { type: Number, default: 0 },
+  creditDays: { type: Number, default: 0 },
+  partyType: String,
+  ledgerId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
+  locationId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
+  locationName: String,
+  itemType: String,
+  hsn: String,
+  unit: String,
+  decimalPlaces: { type: Number, default: 2 },
+  gstRate: { type: Number, default: 0 },
+  purchaseRate: { type: Number, default: 0 },
+  salesRate: { type: Number, default: 0 },
+  openingQty: { type: Number, default: 0 },
+  openingValue: { type: Number, default: 0 },
+  stockLedgerId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
+  gstStateCode: String,
+  active: { type: Boolean, default: true },
+}, { timestamps: true });
 
-function requireContext(ctx={}) {
-  if (!ctx.user?._id) throw new Error("Authentication is required for master changes.");
-  return ctx;
-}
+accountsMasterSchema.index({ masterType: 1, name: 1 });
 
-function inferNature(name, fallback="Asset") {
-  const s = clean(name).toLowerCase();
-  if (s.includes("income")) return "Income";
-  if (s.includes("expense") || s.includes("purchase")) return "Expense";
-  if (s.includes("creditor") || s.includes("liabil")) return "Liability";
-  if (s.includes("capital")) return "Capital";
-  return fallback;
-}
-
-async function ensureRealGroup(name, nature, userId) {
-  const groupName = clean(name) || "Current Assets";
-  let row = await Group.findOne({name:groupName,parent:null});
-  if (!row) {
-    row = await Group.create({name:groupName,parent:null,nature:inferNature(groupName,nature),isSystem:false});
-  }
-  return row;
-}
-
-async function ensureRealLedger(name, {under,nature,openingBalance,openingType,gstin,pan,address,mobile,userId}={}) {
-  const ledgerName = clean(name);
-  if (!ledgerName) return null;
-  const group = await ensureRealGroup(under || "Current Assets", nature || "Asset", userId);
-  let row = await Ledger.findOne({name:ledgerName,group:group._id});
-  const payload = {
-    name:ledgerName,
-    group:group._id,
-    openingBalance:num(openingBalance),
-    openingType:openingType === "Cr" ? "Cr" : "Dr",
-    gstin:clean(gstin).toUpperCase(),
-    pan:clean(pan).toUpperCase(),
-    address:clean(address),
-    phone:clean(mobile),
-    isActive:true,
-  };
-  if (!row) row = await Ledger.create({...payload,createdBy:userId});
-  else await Ledger.findByIdAndUpdate(row._id,{$set:payload});
-  return row;
-}
-
-export async function syncLedgerCounterparty(master, ledger, ctx={}) {
-  const under = clean(master.under).toLowerCase();
-  if (under !== "sundry debtors" && under !== "sundry creditors") return;
-  const {user}=requireContext(ctx);
-  const companyId=user.companyId || null;
-  const counterparty = {
-    gstin:clean(master.gstin).toUpperCase(),
-    state:clean(master.state),
-    district:clean(master.district),
-    pin:clean(master.pin),
-    phone:clean(master.mobile || master.phone),
-    address:clean(master.address),
-    ledgerId:ledger?._id || null,
-    active:true,
-    createdBy:user._id,
-  };
-  const Model = under === "sundry debtors" ? CustomerMaster : SupplierMaster;
-  await Model.findOneAndUpdate(
-    {companyId,name:clean(master.name)},
-    {$set:counterparty,$setOnInsert:{companyId,name:clean(master.name)}},
-    {upsert:true,new:true,setDefaultsOnInsert:true}
-  );
-}
-
-async function syncTransactionMaster(master, ctx) {
-  const {user}=requireContext(ctx);
-  const companyId=user.companyId || null;
-  const createdBy=user._id;
-
-  if (master.masterType === "group") {
-    await ensureRealGroup(master.name, master.nature || "Liability", createdBy);
-    return;
-  }
-
-  if (master.masterType === "ledger") {
-    const ledger = await ensureRealLedger(master.name, {
-      under:master.under,
-      nature:master.nature,
-      openingBalance:master.openingBalance,
-      openingType:master.openingType,
-      gstin:master.gstin,
-      pan:master.pan,
-      address:master.address,
-      mobile:master.mobile,
-      userId:createdBy,
-    });
-    await syncLedgerCounterparty(master, ledger, ctx);
-    return;
-  }
-
-  if (master.masterType === "supplier") {
-    const ledger = await ensureRealLedger(master.name, {under:"Sundry Creditors",nature:"Liability",openingBalance:master.openingBalance,openingType:master.openingType,gstin:master.gstin,pan:master.pan,address:master.address,mobile:master.mobile,userId:createdBy});
-    const filter = {companyId,name:master.name};
-    await SupplierMaster.findOneAndUpdate(filter,{$set:{
-      gstin:clean(master.gstin).toUpperCase(),state:clean(master.state),district:clean(master.district),pin:clean(master.pin),phone:clean(master.mobile),address:clean(master.address),ledgerId:ledger?._id||null,active:true,createdBy,
-    },$setOnInsert:{companyId,name:master.name}},{upsert:true,new:true,setDefaultsOnInsert:true});
-    return;
-  }
-
-  if (master.masterType === "party") {
-    const ledger = await ensureRealLedger(master.name, {under:"Sundry Debtors",nature:"Asset",openingBalance:master.openingBalance,openingType:master.openingType,gstin:master.gstin,pan:master.pan,address:master.address,mobile:master.mobile,userId:createdBy});
-    const filter = {companyId,name:master.name};
-    await CustomerMaster.findOneAndUpdate(filter,{$set:{
-      gstin:clean(master.gstin).toUpperCase(),state:clean(master.state),district:clean(master.district),pin:clean(master.pin),phone:clean(master.mobile),address:clean(master.address),ledgerId:ledger?._id||null,active:true,createdBy,
-    },$setOnInsert:{companyId,name:master.name}},{upsert:true,new:true,setDefaultsOnInsert:true});
-    return;
-  }
-
-  if (master.masterType === "product") {
-    const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)?master.itemType:"RAW_MATERIAL";
-    await InventoryItemMaster.findOneAndUpdate({companyId,name:master.name},{$set:{itemType,hsn:clean(master.hsn),unit:clean(master.unit)||"KG",defaultGstRate:num(master.gstRate),defaultBarcode:clean(master.code),active:true},$setOnInsert:{companyId,name:master.name,createdBy}},{upsert:true,new:true,setDefaultsOnInsert:true});
-    return;
-  }
-
-  if (master.masterType === "location") {
-    const code = clean(master.code).toUpperCase() || clean(master.name).toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30) || "LOCATION";
-    await LocationMaster.findOneAndUpdate({companyId,name:master.name},{$set:{code,pin:clean(master.pin)||null,state:clean(master.state),district:clean(master.district),address:clean(master.address),active:true,createdBy},$setOnInsert:{companyId,name:master.name}},{upsert:true,new:true,setDefaultsOnInsert:true});
-    return;
-  }
-
-  if (master.masterType === "unit") {
-    await UnitMaster.findOneAndUpdate(
-      {companyId,name:master.name},
-      {$set:{code:clean(master.code).toUpperCase(),decimalPlaces:master.decimalPlaces,active:true,createdBy},$setOnInsert:{companyId,name:master.name}},
-      {upsert:true,new:true,setDefaultsOnInsert:true}
-    );
-  }
-}
-
-export async function listMasters(masterType) {
-  const filter = masterType ? { masterType, active: true } : { active: true };
-  return AccountsMaster.find(filter).sort({ name: 1 }).lean();
-}
-
-export async function getMaster(id) {
-  return AccountsMaster.findById(id).lean();
-}
-
-export async function createMaster(payload = {}, ctx = {}) {
-  requireContext(ctx);
-  const masterType = clean(payload.masterType).toLowerCase();
-  if (!["group", "ledger", "party", "supplier", "product", "location", "unit"].includes(masterType)) throw new Error("Invalid master type.");
-  const name = clean(payload.name);
-  if (!name) throw new Error("Name is required.");
-
-  const data = {
-    ...payload,
-    masterType,
-    ledgerId: objectIdOrNull(payload.ledgerId),
-    locationId: objectIdOrNull(payload.locationId),
-    stockLedgerId: objectIdOrNull(payload.stockLedgerId),
-    name,
-    alias: clean(payload.alias), code: clean(payload.code), under: clean(payload.under),
-    state: clean(payload.state), district: clean(payload.district), pin: clean(payload.pin), address: clean(payload.address),
-    mobile: clean(payload.mobile), email: clean(payload.email), gstin: clean(payload.gstin).toUpperCase(), pan: clean(payload.pan).toUpperCase(),
-    openingBalance: num(payload.openingBalance), decimalPlaces: Math.max(0, Math.min(6, Number.isFinite(Number(payload.decimalPlaces)) ? Number(payload.decimalPlaces) : 2)), creditLimit: num(payload.creditLimit), creditDays: num(payload.creditDays),
-    gstRate: num(payload.gstRate), purchaseRate: num(payload.purchaseRate), salesRate: num(payload.salesRate), openingQty: num(payload.openingQty), openingValue: num(payload.openingValue),
-    active:true,
-  };
-  if (masterType === "party") { data.under=data.under||"Sundry Debtors"; data.partyType=data.partyType||"CUSTOMER"; data.nature=data.nature||"Current Assets"; }
-  if (masterType === "supplier") { data.under=data.under||"Sundry Creditors"; data.partyType=data.partyType||"SUPPLIER"; data.nature=data.nature||"Current Liabilities"; }
-  if (masterType === "product") { data.under=data.under||"Stock-in-Hand"; data.itemType=data.itemType||"RAW_MATERIAL"; data.unit=data.unit||"KG"; }
-  if (masterType === "location") {
-    data.code=data.code||name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
-    if (data.pin && !/^\d{6}$/.test(data.pin)) throw new Error("PIN must be exactly 6 digits.");
-  }
-  if (masterType === "unit") { data.code=data.code||name.toUpperCase().replace(/\s+/g,"_"); data.decimalPlaces=Math.max(0, Math.min(6, Number(data.decimalPlaces ?? 2))); }
-
-  const created = await AccountsMaster.create(data);
-  await syncTransactionMaster(created.toObject(), ctx);
-  return created.toObject();
-}
-
-export async function updateMaster(id, payload = {}, ctx = {}) {
-  requireContext(ctx);
-  const existing = await AccountsMaster.findById(id);
-  if (!existing) throw new Error("Master not found.");
-  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
-  for (const key of allowed) if (payload[key] !== undefined) existing[key]=payload[key];
-  existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
-  if (existing.masterType==="location") {
-    existing.code=clean(existing.code).toUpperCase()||existing.name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
-    if (clean(existing.pin) && !/^\d{6}$/.test(clean(existing.pin))) throw new Error("PIN must be exactly 6 digits.");
-  }
-  await existing.save();
-  await syncTransactionMaster(existing.toObject(), ctx);
-  return existing.toObject();
-}
-
-export async function deleteMaster(id, ctx = {}) {
-  requireContext(ctx);
-  const existing = await AccountsMaster.findById(id);
-  if (!existing) throw new Error("Master not found.");
-  existing.active=false; await existing.save();
-  const companyId=ctx.user?.companyId||null;
-  if (existing.masterType==="unit") { /* Unit is stored in AccountsMaster; no secondary model is required. */ }
-  if (existing.masterType==="product") await InventoryItemMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
-  if (existing.masterType==="supplier") await SupplierMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
-  if (existing.masterType==="party") await CustomerMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
-  if (existing.masterType==="unit") await UnitMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
-  if (existing.masterType==="location") await LocationMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
-  if (existing.masterType==="ledger") await Ledger.updateMany({name:existing.name},{$set:{isActive:false}});
-  if (existing.masterType==="group") await Group.updateMany({name:existing.name},{$set:{isActive:false}});
-  return existing.toObject();
-}
+accountsMasterSchema.plugin(companyScopePlugin, { financialYear: false });
+export default mongoose.models.AccountsMaster || mongoose.model("AccountsMaster", accountsMasterSchema);
