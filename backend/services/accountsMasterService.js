@@ -32,8 +32,22 @@ function inferNature(name, fallback="Asset") {
 async function ensureRealGroup(name, nature, userId) {
   const groupName = clean(name) || "Current Assets";
   let row = await Group.findOne({name:groupName,parent:null});
+  const sharedGroupFilter = {
+    name:groupName,
+    parent:null,
+    isActive:{$ne:false},
+    $or:[{companyId:null},{companyId:{$exists:false}}],
+  };
+  if (!row) row = await Group.collection.findOne(sharedGroupFilter);
   if (!row) {
-    row = await Group.create({name:groupName,parent:null,nature:inferNature(groupName,nature),isSystem:false});
+    try {
+      row = await Group.create({name:groupName,parent:null,nature:inferNature(groupName,nature),isSystem:false});
+    } catch (error) {
+      if (error?.code !== 11000) throw error;
+      row = await Group.findOne({name:groupName,parent:null});
+      if (!row) row = await Group.collection.findOne(sharedGroupFilter);
+      if (!row) throw error;
+    }
   }
   return row;
 }
