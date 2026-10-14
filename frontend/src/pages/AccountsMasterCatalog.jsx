@@ -158,14 +158,14 @@ function SearchableSelect({ value, options, onChange, placeholder="Select or typ
 
 export default function AccountsMasterCatalog({ initialType = "ledger", initialMode = "list", initialEditId = "", onSaved }) {
   const [type, setType] = useState(initialType);
-  const [mode, setMode] = useState(initialMode === "create" ? "form" : "list");
+  const [mode, setMode] = useState("list");
   const [rows, setRows] = useState([]);
   const [groups, setGroups] = useState([]);
   const [locations, setLocations] = useState([]);
   const [ledgers, setLedgers] = useState([]);
   const [units, setUnits] = useState([]);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({...blank[initialType] || blank.ledger});
+  const [form, setForm] = useState({...blank.ledger});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -176,16 +176,22 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
   const gstLookupRef = useRef(0);
 
   useEffect(() => {
-    if (initialType && initialType !== type && blank[initialType]) {
+    if (initialType && blank[initialType]) {
       setType(initialType);
-      setMode("list");
+      setMode(initialMode === "create" ? "form" : "list");
       setEditing(null);
       setForm({...blank[initialType]});
       setSearch("");
       setError("");
       setMessage("");
     }
-  }, [initialType]);
+  }, [initialType, initialMode]);
+
+  useEffect(() => {
+    if (initialMode !== "edit" || !initialEditId || !rows.length) return;
+    const row = rows.find(item => String(item._id) === String(initialEditId));
+    if (row) edit(row);
+  }, [initialMode, initialEditId, rows]);
 
   const headers = () => ({
     "Content-Type":"application/json",
@@ -224,13 +230,6 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
   }
 
   useEffect(() => { load(); loadLookups(); }, [type]);
-
-  useEffect(() => {
-    if (initialEditId && rows.length && mode === "list") {
-      const found = rows.find(row => String(row._id) === String(initialEditId));
-      if (found) edit(found);
-    }
-  }, [initialEditId, rows, mode]);
 
   const filtered = useMemo(() => rows.filter(x =>
     `${x.name||""} ${x.code||""} ${x.gstin||""} ${x.state||""} ${x.under||""}`
@@ -393,7 +392,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
       setMode("list");
       await load();
       await loadLookups();
-      if (typeof onSaved === "function") onSaved(d.data || d.master || null);
+      if (typeof onSaved === "function") await onSaved(d.data || d.master || d);
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
