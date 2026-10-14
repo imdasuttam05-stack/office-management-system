@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
 const token = () => localStorage.getItem("token") || localStorage.getItem("accessToken") || "";
@@ -81,6 +81,8 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [pinLookup, setPinLookup] = useState("");
+  const pinLookupRef = useRef(0);
 
   useEffect(() => {
     if (initialType && initialType !== type && blank[initialType]) {
@@ -194,6 +196,40 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
     });
   }
 
+  useEffect(() => {
+    const pin = String(form.pin || "");
+    if (type !== "location" || !/^\d{6}$/.test(pin)) {
+      setPinLookup("");
+      return;
+    }
+
+    const lookupId = ++pinLookupRef.current;
+    let cancelled = false;
+    setPinLookup("Looking up PIN...");
+
+    async function lookup() {
+      try {
+        const r = await fetch(`${API_URL}/api/inventory/masters/pincode/${pin}`, {headers:headers()});
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.message || "PIN lookup failed.");
+        if (cancelled || lookupId !== pinLookupRef.current) return;
+        setForm(current => current.pin !== pin ? current : ({
+          ...current,
+          state:d.state || current.state,
+          district:d.district || current.district,
+          address:current.address || d.address || "",
+          gstStateCode:GST_STATE_CODES[d.state] || current.gstStateCode,
+        }));
+        setPinLookup("State, district and address filled from PIN.");
+      } catch (e) {
+        if (!cancelled && lookupId === pinLookupRef.current) setPinLookup(e.message);
+      }
+    }
+
+    lookup();
+    return () => { cancelled = true; };
+  }, [type, form.pin]);
+
   async function save() {
     if (!String(form.name || "").trim()) {
       setError("Name is required.");
@@ -271,7 +307,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
         .danger{color:#b42318}.card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;overflow:hidden}.row{display:grid;grid-template-columns:1fr auto;gap:10px;padding:13px 15px;border-bottom:1px solid #eef0f3}.row:last-child{border-bottom:0}.row small{display:block;color:#667085;margin-top:4px;font-size:10px}.actions{display:flex;gap:6px}.actions button{border:1px solid #d0d5dd;background:#fff;border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px}
         .form-card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:18px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.field-section{grid-column:1/-1;padding:4px 0 16px;border-bottom:1px solid #e4e7ec}.field-section:last-child{border-bottom:0;padding-bottom:0}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.section-heading h3{margin:0;color:#344054;font-size:13px}.section-tag{font-size:11px;font-weight:700;color:#176b58;background:#e8f5ef;border-radius:4px;padding:5px 8px}.section-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.field label{display:block;font-size:11px;font-weight:800;color:#344054;margin-bottom:5px}.full{grid-column:1/-1}.check{display:flex;gap:8px;align-items:center}.check input{width:auto}
         .form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.msg{padding:10px;border-radius:7px;margin-bottom:10px;background:#ecfdf3;color:#027a48}.err{padding:10px;border-radius:7px;margin-bottom:10px;background:#fef3f2;color:#b42318}
-        .empty{padding:35px;text-align:center;color:#667085}.hint{font-size:10px;color:#667085;margin-top:4px}
+        .empty{padding:35px;text-align:center;color:#667085}.hint{font-size:10px;color:#667085;margin-top:4px}.pin-lookup-error{color:#b42318}
         @media(max-width:800px){.grid,.section-grid{grid-template-columns:1fr 1fr}} @media(max-width:560px){.grid,.section-grid{grid-template-columns:1fr}.am-body{padding:12px 10px}.am-head{padding:12px 10px}.am-tabs{padding:8px 10px}.toolbar{align-items:stretch;flex-direction:column}.search{max-width:none}.row{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column}}
       `}</style>
 
@@ -409,10 +445,11 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
                 <div className="field full"><div className="hint">Example: KG = Kilogram, MT = Metric Ton, PCS = Pieces, LTR = Litre.</div></div>
               </>}
 
-              {type==="location" && <>                <div className="field"><label>Location Code</label><input value={form.code||""} placeholder="Auto code" onChange={e=>update("code",e.target.value)}/></div>
+              {type==="location" && <>
+                <div className="field"><label>Location Code</label><input value={form.code||""} placeholder="Auto generated if blank" onChange={e=>update("code",e.target.value)}/></div>
                 <div className="field"><label>State *</label><select value={form.state||""} onChange={e=>update("state",e.target.value)}><option value="">Select State</option>{STATES.map(x=><option key={x}>{x}</option>)}</select></div>
                 <div className="field"><label>District</label><input value={form.district||""} onChange={e=>update("district",e.target.value)}/></div>
-                <div className="field"><label>PIN</label><input maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
+                <div className="field"><label>PIN</label><input inputMode="numeric" maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/>{pinLookup && <div className={`hint ${pinLookup !== "Looking up PIN..." && pinLookup !== "State, district and address filled from PIN." ? "pin-lookup-error" : ""}`}>{pinLookup}</div>}</div>
                 <div className="field full"><label>Address</label><textarea value={form.address||""} onChange={e=>update("address",e.target.value)}/></div>
                 <div className="field"><label>GST State Code</label><input value={form.gstStateCode||""} onChange={e=>update("gstStateCode",e.target.value)}/></div>
               </>}
