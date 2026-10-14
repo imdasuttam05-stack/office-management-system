@@ -1,6 +1,7 @@
 import Group from "../models/Group.js";
 import Ledger from "../models/Ledger.js";
 import Voucher from "../models/Voucher.js";
+import { syncLedgerCounterparty } from "../services/accountsMasterService.js";
 
 export async function listGroups(req, res) {
   const groups = await Group.find({ isActive: true }).populate("parent", "name").sort({ nature: 1, name: 1 });
@@ -82,7 +83,10 @@ export async function listLedgers(req, res) {
 export async function createLedger(req, res) {
   const { name, group, openingBalance = 0, openingType = "Dr", gstin = "", pan = "", address = "", phone = "" } = req.body;
   if (!name || !group) return res.status(400).json({ success: false, message: "Ledger name and group are required." });
+  const ledgerGroup = await Group.findById(group);
+  if (!ledgerGroup) return res.status(400).json({ success: false, message: "Selected group was not found." });
   const ledger = await Ledger.create({ name, group, openingBalance: Number(openingBalance) || 0, openingType, gstin, pan, address, phone, createdBy: req.user._id });
+  await syncLedgerCounterparty({name,under:ledgerGroup.name,gstin,pan,address,phone},ledger,req);
   res.status(201).json({ success: true, ledger });
 }
 
