@@ -38,7 +38,7 @@ async function ensureRealGroup(name, nature, userId) {
   return row;
 }
 
-async function ensureRealLedger(name, {under,nature,openingBalance,openingType,gstin,pan,address,mobile,userId}={}) {
+async function ensureRealLedger(name, {under,nature,openingBalance,openingType,gstApplicable,gstin,pan,address,state,district,pin,mobile,email,creditLimit,creditDays,locationId,gstStateCode,bankDetailsProvided,bankAccountName,bankName,bankBranch,bankAccountNumber,bankIfsc,userId}={}) {
   const ledgerName = clean(name);
   if (!ledgerName) return null;
   const group = await ensureRealGroup(under || "Current Assets", nature || "Asset", userId);
@@ -48,10 +48,25 @@ async function ensureRealLedger(name, {under,nature,openingBalance,openingType,g
     group:group._id,
     openingBalance:num(openingBalance),
     openingType:openingType === "Cr" ? "Cr" : "Dr",
+    gstApplicable:!!gstApplicable,
     gstin:clean(gstin).toUpperCase(),
     pan:clean(pan).toUpperCase(),
     address:clean(address),
+    state:clean(state),
+    district:clean(district),
+    pin:clean(pin),
     phone:clean(mobile),
+    email:clean(email),
+    creditLimit:num(creditLimit),
+    creditDays:num(creditDays),
+    locationId:objectIdOrNull(locationId),
+    gstStateCode:clean(gstStateCode),
+    bankDetailsProvided:!!bankDetailsProvided,
+    bankAccountName:clean(bankAccountName),
+    bankName:clean(bankName),
+    bankBranch:clean(bankBranch),
+    bankAccountNumber:clean(bankAccountNumber),
+    bankIfsc:clean(bankIfsc).toUpperCase(),
     isActive:true,
   };
   if (!row) row = await Ledger.create({...payload,createdBy:userId});
@@ -99,10 +114,25 @@ async function syncTransactionMaster(master, ctx) {
       nature:master.nature,
       openingBalance:master.openingBalance,
       openingType:master.openingType,
+      gstApplicable:master.gstApplicable,
       gstin:master.gstin,
       pan:master.pan,
       address:master.address,
+      state:master.state,
+      district:master.district,
+      pin:master.pin,
       mobile:master.mobile,
+      email:master.email,
+      creditLimit:master.creditLimit,
+      creditDays:master.creditDays,
+      locationId:master.locationId,
+      gstStateCode:master.gstStateCode,
+      bankDetailsProvided:master.bankDetailsProvided,
+      bankAccountName:master.bankAccountName,
+      bankName:master.bankName,
+      bankBranch:master.bankBranch,
+      bankAccountNumber:master.bankAccountNumber,
+      bankIfsc:master.bankIfsc,
       userId:createdBy,
     });
     await syncLedgerCounterparty(master, ledger, ctx);
@@ -196,7 +226,7 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
   requireContext(ctx);
   const existing = await AccountsMaster.findById(id);
   if (!existing) throw new Error("Master not found.");
-  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
+  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","bankDetailsProvided","bankAccountName","bankName","bankBranch","bankAccountNumber","bankIfsc","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
   for (const key of allowed) if (payload[key] !== undefined) existing[key]=payload[key];
   existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
   if (existing.masterType==="location") {
