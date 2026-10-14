@@ -56,11 +56,25 @@ export async function lookupGSTIN(req,res){
   }catch(e){return res.status(502).json({success:false,message:"GST verification service unavailable."})}
 }
 async function ensureLedger({name, groupName, nature, req, gstin="", address="", phone=""}) {
- const existing=await Ledger.findOne({name:clean(name),isActive:true});
+ const ledgerName=clean(name);
+ const existing=await Ledger.findOne({name:ledgerName,isActive:true});
  if(existing)return existing;
- let group=await Group.findOne({name:groupName,parent:null});
- if(!group)group=await Group.create({name:groupName,parent:null,nature,isSystem:true});
- return Ledger.create({name:clean(name),group:group._id,gstin:clean(gstin).toUpperCase(),address:clean(address),phone:clean(phone),createdBy:req.user._id});
+ // Find shared/system groups even when companyScopePlugin scopes normal model queries.
+ const sharedGroupFilter={name:clean(groupName),parent:null,isActive:{$ne:false},$or:[{companyId:null},{companyId:{$exists:false}}]};
+ let group=await Group.findOne({name:clean(groupName),parent:null});
+ if(!group)group=await Group.collection.findOne(sharedGroupFilter);
+ if(!group){
+  try{
+   group=await Group.create({name:clean(groupName),parent:null,nature,isSystem:true});
+  }catch(error){
+   // A concurrent request may create the same unique group after the lookup.
+   if(error?.code!==11000)throw error;
+   group=await Group.findOne({name:clean(groupName),parent:null});
+   if(!group)group=await Group.collection.findOne(sharedGroupFilter);
+   if(!group)throw error;
+  }
+ }
+ return Ledger.create({name:ledgerName,group:group._id,gstin:clean(gstin).toUpperCase(),address:clean(address),phone:clean(phone),createdBy:req.user._id});
 }
 async function ensureGstLedger(name,req){return ensureLedger({name,groupName:"Duties & Taxes",nature:"Liability",req});}
 async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narration,lines,sourceType,sourceId}){
