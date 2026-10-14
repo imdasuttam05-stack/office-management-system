@@ -1,45 +1,406 @@
-import mongoose from "mongoose";
-import companyScopePlugin from "./companyScopePlugin.js";
+import React, { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import AccountsMasterCatalog from "./AccountsMasterCatalog.jsx";
+import AccountsTransactionCenter from "./AccountsTransactionCenter.jsx";
+import Accounting from "./Accounting.jsx";
 
-const accountsMasterSchema = new mongoose.Schema({
-  masterType: { type: String, required: true, index: true },
-  name: { type: String, required: true, trim: true },
-  alias: String,
-  code: String,
-  under: String,
-  nature: String,
-  openingBalance: { type: Number, default: 0 },
-  openingType: { type: String, enum: ["Dr", "Cr"], default: "Dr" },
-  gstApplicable: { type: Boolean, default: false },
-  gstin: String,
-  pan: String,
-  address: String,
-  state: String,
-  district: String,
-  pin: String,
-  mobile: String,
-  email: String,
-  creditLimit: { type: Number, default: 0 },
-  creditDays: { type: Number, default: 0 },
-  partyType: String,
-  ledgerId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
-  locationId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
-  locationName: String,
-  itemType: String,
-  hsn: String,
-  unit: String,
-  decimalPlaces: { type: Number, default: 2 },
-  gstRate: { type: Number, default: 0 },
-  purchaseRate: { type: Number, default: 0 },
-  salesRate: { type: Number, default: 0 },
-  openingQty: { type: Number, default: 0 },
-  openingValue: { type: Number, default: 0 },
-  stockLedgerId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
-  gstStateCode: String,
-  active: { type: Boolean, default: true },
-}, { timestamps: true });
+const masterTabs = [
+  ["group", "Group", "F4"],
+  ["ledger", "Ledger", "F5"],
+  ["product", "Product", "F8"],
+  ["location", "Location", "F9"],
+  ["unit", "Unit", "F10"],
+];
 
-accountsMasterSchema.index({ masterType: 1, name: 1 });
+const txTabs = [
+  ["purchase", "Purchase", "F11"],
+  ["sale", "Sale", "F12"],
+  ["job", "Job Order", "F13"],
+  ["production", "Production", "F14"],
+  ["grading", "Grading", "F15"],
+  ["pi", "PI", "F16"],
+  ["return", "Return", "F17"],
+  ["damage", "Damage", "F18"],
+  ["repack", "Repacking", "F19"],
+  ["packing", "Packing Conversion", "F20"],
+  ["bom", "BOM / Costing", ""],
+  ["stock", "Stock / Ledger", ""],
+  ["documents", "Documents", ""],
+];
 
-accountsMasterSchema.plugin(companyScopePlugin, { financialYear: false });
-export default mongoose.models.AccountsMaster || mongoose.model("AccountsMaster", accountsMasterSchema);
+export default function AccountsMasters() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const params = new URLSearchParams(location.search);
+
+  const [section, setSection] = useState(
+    params.get("section") || "master"
+  );
+
+  const requestedMaster = params.get("master") || "ledger";
+  const [master, setMaster] = useState(
+    ["party", "supplier"].includes(requestedMaster) ? "ledger" : requestedMaster
+  );
+
+  const [tx, setTx] = useState(
+    params.get("tab") || "purchase"
+  );
+
+  const [ledgerTab, setLedgerTab] = useState(params.get("ledgerTab") || "groups");
+
+  useEffect(() => {
+    const p = new URLSearchParams();
+
+    p.set("section", section);
+
+    if (section === "master") {
+      p.set("master", master);
+    } else if (section === "transactions") {
+      p.set("tab", tx);
+    } else if (section === "ledger") {
+      p.set("ledgerTab", ledgerTab);
+    }
+
+    navigate(`/accounts?${p.toString()}`, {
+      replace: true,
+    });
+  }, [section, master, tx, ledgerTab, navigate]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const map = {
+        F4: "group",
+        F5: "ledger",
+        F8: "product",
+        F9: "location",
+        F10: "unit",
+
+        F11: "purchase",
+        F12: "sale",
+        F13: "job",
+        F14: "production",
+        F15: "grading",
+        F16: "pi",
+        F17: "return",
+        F18: "damage",
+        F19: "repack",
+        F20: "packing",
+      };
+
+      if (!map[e.key]) return;
+
+      e.preventDefault();
+
+      if (
+        [
+          "group",
+          "ledger",
+          "product",
+          "location",
+          "unit",
+        ].includes(map[e.key])
+      ) {
+        setSection("master");
+        setMaster(map[e.key]);
+      } else {
+        setSection("transactions");
+        setTx(map[e.key]);
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  return (
+    <div className="am-shell">
+      <style>{`
+        .am-shell{
+          min-height:100vh;
+          background:#f5f7fb;
+          color:#172b4d;
+          font-family:Arial,sans-serif
+        }
+
+        .am-shell-head{
+          position:sticky;
+          top:0;
+          z-index:100;
+          background:#fff;
+          border-bottom:1px solid #e4e7ec;
+          box-shadow:0 2px 12px rgba(23,43,77,.06)
+        }
+
+        .am-shell-head-inner{
+          max-width:1650px;
+          margin:0 auto;
+          padding:14px 20px
+        }
+
+        .am-shell-title{
+          display:flex;
+          align-items:center;
+          gap:12px
+        }
+
+        .am-shell-logo{
+          width:42px;
+          height:42px;
+          border-radius:10px;
+          background:#245a96;
+          color:#fff;
+          display:grid;
+          place-items:center;
+          font-weight:900
+        }
+
+        .am-shell-title h1{
+          margin:0;
+          font-size:21px
+        }
+
+        .am-shell-title p{
+          margin:4px 0 0;
+          font-size:11px;
+          color:#667085
+        }
+
+        .am-shell-mainnav{display:none}
+
+        .am-layout{
+          display:grid;
+          grid-template-columns:230px minmax(0,1fr);
+          align-items:start;
+          min-height:calc(100vh - 120px)
+        }
+
+        .am-shell-subnav{
+          position:sticky;
+          top:0;
+          min-height:calc(100vh - 120px);
+          padding:14px 11px;
+          display:flex;
+          flex-direction:column;
+          align-items:stretch;
+          gap:7px;
+          background:#ffef9c;
+          border-right:1px solid #ead36a;
+          overflow-y:auto
+        }
+
+        .am-sidebar-sections{display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #ead36a}
+        .am-shell-subnav .am-section-btn{width:100%;text-align:left;border:1px solid #e6d36c;background:rgba(255,255,255,.7);color:#66571b;border-radius:8px;padding:10px 9px;font-weight:900;cursor:pointer}
+        .am-shell-subnav .am-section-btn.active{background:#e6c72f;color:#44380b;border-color:#cfb11f}
+
+        .am-sidebar-heading{
+          padding:5px 9px 9px;
+          color:#79651b;
+          font-size:11px;
+          font-weight:900;
+          letter-spacing:.07em;
+          text-transform:uppercase
+        }
+
+        .am-shell-subnav .am-navbtn{
+          width:100%;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:8px;
+          text-align:left;
+          border:1px solid transparent;
+          background:rgba(255,255,255,.52);
+          color:#66571b;
+          border-radius:8px;
+          padding:10px 11px;
+          font-weight:800;
+          cursor:pointer;
+          white-space:nowrap
+        }
+
+        .am-shell-subnav .am-navbtn:hover{
+          background:rgba(255,255,255,.82);
+          border-color:#f0d85d
+        }
+
+        .am-shell-subnav .am-navbtn.active{
+          background:#f4d84f;
+          color:#44380b;
+          border-color:#dfc12d;
+          box-shadow:0 2px 5px rgba(117,91,0,.09)
+        }
+
+        .am-shell-subnav .am-key{
+          color:inherit;
+          opacity:.65
+        }
+
+        .am-shell-subnav .am-back{
+          width:100%;
+          margin-top:8px;
+          border-color:#ead36a;
+          background:rgba(255,255,255,.55);
+          color:#66571b;
+          text-align:left
+        }
+
+        .am-key{
+          font-size:10px;
+          opacity:.75;
+          margin-left:4px
+        }
+
+        .am-content{
+          width:100%;
+          max-width:1650px;
+          min-width:0;
+          margin:0 auto;
+          padding:16px 20px
+        }
+
+        .am-back{
+          border:1px solid #d0d5dd;
+          background:#fff;
+          border-radius:8px;
+          padding:8px 11px;
+          font-weight:700;
+          cursor:pointer
+        }
+
+        .am-info{
+          background:#eef6ff;
+          border:1px solid #cfe2ff;
+          color:#245a96;
+          border-radius:9px;
+          padding:9px 12px;
+          font-size:12px;
+          margin-bottom:10px
+        }
+
+        @media(max-width:900px){
+          .am-layout{grid-template-columns:190px minmax(0,1fr)}
+          .am-content{padding:14px 12px}
+          .am-shell-subnav{padding:12px 8px}
+          .am-shell-subnav .am-navbtn{padding:9px 8px;font-size:12px}
+        }
+
+        @media(max-width:700px){
+          .am-shell-head-inner{padding:12px 10px}
+          .am-shell-title h1{font-size:18px}
+          .am-layout{grid-template-columns:132px minmax(0,1fr)}
+          .am-content{padding:12px 8px}
+          .am-shell-subnav{padding:10px 5px}
+          .am-sidebar-heading{padding:5px 5px 8px;font-size:9px}
+          .am-shell-subnav .am-section-btn{font-size:11px;padding:9px 6px}
+          .am-shell-subnav .am-navbtn{white-space:normal;font-size:11px;gap:3px;padding:9px 6px}
+          .am-shell-subnav .am-key{font-size:9px}
+        }
+      `}</style>
+
+      <header className="am-shell-head">
+        <div className="am-shell-head-inner">
+          <div className="am-shell-title">
+            <div className="am-shell-logo">₹</div>
+
+            <div>
+              <h1>Accounts Masters & Operations</h1>
+
+              <p>
+                Group, Ledger, Product, Unit, Location + all
+                voucher, inventory and production entry in one workspace
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </header>
+
+      <div className="am-layout">
+        <aside className="am-shell-subnav" aria-label="Accounts submenu">
+          <div className="am-sidebar-sections" aria-label="Main sections">
+            <button className={`am-section-btn ${section === "master" ? "active" : ""}`} onClick={() => setSection("master")}>Masters</button>
+            <button className={`am-section-btn ${section === "transactions" ? "active" : ""}`} onClick={() => setSection("transactions")}>Voucher / Operations</button>
+            <button className={`am-section-btn ${section === "ledger" ? "active" : ""}`} onClick={() => setSection("ledger")}>Accounts Ledger</button>
+            <button className="am-section-btn" onClick={() => navigate("/dashboard")}>Dashboard</button>
+          </div>
+          {section === "master" && (
+            <>
+              <div className="am-sidebar-heading">Masters Menu</div>
+              {masterTabs.map(([id, label, key]) => (
+                <React.Fragment key={id}>
+                  {id === "product" && <div className="am-sidebar-heading">Inventory Masters</div>}
+                  <button
+                    className={`am-navbtn ${master === id ? "active" : ""}`}
+                    onClick={() => {
+                      setMaster(id);
+                      setSection("master");
+                    }}
+                  >
+                    <span>{label}</span><span className="am-key">{key}</span>
+                  </button>
+                </React.Fragment>
+              ))}
+            </>
+          )}
+
+          {section === "transactions" && (
+            <>
+              <div className="am-sidebar-heading">Voucher / Operations</div>
+              {txTabs.map(([id, label, key]) => (
+                <button
+                  key={id}
+                  className={`am-navbtn ${tx === id ? "active" : ""}`}
+                  onClick={() => {
+                    setTx(id);
+                    setSection("transactions");
+                  }}
+                >
+                  <span>{label}</span>{key && <span className="am-key">{key}</span>}
+                </button>
+              ))}
+            </>
+          )}
+
+          {section === "ledger" && (
+            <>
+              <div className="am-sidebar-heading">Accounts Ledger</div>
+              {[["groups","Accounting Groups"],["ledgers","Ledgers"],["voucher","Voucher Entry"],["register","Register"]].map(([id,label]) => (
+                <button key={id} className={`am-navbtn ${ledgerTab === id ? "active" : ""}`} onClick={() => { setLedgerTab(id); setSection("ledger"); }}>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </>
+          )}
+        </aside>
+
+      <main className="am-content">
+        {section === "master" && (
+          <>
+            <div className="am-info">
+              Create and manage accounting ledgers and inventory masters.
+            </div>
+
+            <AccountsMasterCatalog
+              key={master}
+              initialType={master}
+            />
+          </>
+        )}
+
+        {section === "transactions" && (
+          <AccountsTransactionCenter
+            key={tx}
+            initialTab={tx}
+          />
+        )}
+
+        {section === "ledger" && <Accounting key={ledgerTab} initialTab={ledgerTab} />}
+      </main>
+      </div>
+    </div>
+  );
+}
