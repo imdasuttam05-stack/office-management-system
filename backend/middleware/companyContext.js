@@ -16,7 +16,12 @@ export default async function requireCompanyContext(req, res, next) {
     const company = await Company.findOne({ _id: companyId, status: "Active" }).select("_id name status").lean();
     if (!company) return res.status(403).json({ success:false, code:"INVALID_COMPANY", message:"Selected company is not active or does not exist." });
     // Keep legacy controllers that already filter req.user.companyId compatible.
-    if (req.user) req.user = { ...req.user, companyId: company._id, companyName: company.name, financialYear };
+    if (req.user) {
+      const authenticatedUser = typeof req.user.toObject === "function"
+        ? req.user.toObject()
+        : req.user;
+      req.user = { ...authenticatedUser, companyId: company._id, companyName: company.name, financialYear };
+    }
     req.company = company; req.financialYear = financialYear;
     return companyScopeStorage.run({ companyId: String(company._id), financialYear }, () => next());
   } catch (error) { return next(error); }
