@@ -1,0 +1,26 @@
+.oms-workspace-shell { min-height: 100%; }
+.oms-workspace-bar { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 70px; padding: 10px 22px; background: #fff; border-bottom: 1px solid #dce6ed; box-shadow: 0 3px 14px rgba(20, 48, 67, .07); font-family: Inter, Arial, sans-serif; }
+.oms-workspace-brand { display: flex; align-items: center; gap: 11px; min-width: 210px; }
+.oms-workspace-logo { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; color: #fff; background: linear-gradient(135deg, #174e69, #247e91); font-size: 13px; font-weight: 800; letter-spacing: .5px; }
+.oms-workspace-brand-copy, .oms-workspace-detail span { display: flex; flex-direction: column; min-width: 0; }
+.oms-workspace-brand-copy strong { color: #17374c; font-size: 14px; }
+.oms-workspace-brand-copy small { margin-top: 3px; color: #7b8d98; font-size: 11px; }
+.oms-workspace-current { display: flex; align-items: center; justify-content: flex-end; gap: 17px; min-width: 0; }
+.oms-workspace-detail { display: flex; align-items: center; gap: 8px; color: #24768a; min-width: 0; }
+.oms-workspace-detail span { gap: 3px; }
+.oms-workspace-detail small { color: #71838e; font-size: 10px; line-height: 1.2; }
+.oms-workspace-detail strong { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #17374c; font-size: 12px; }
+.oms-workspace-divider { height: 31px; width: 1px; background: #e0e8ed; }
+.oms-switch-company { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #b8d4df; border-radius: 9px; padding: 10px 13px; color: #17647b; background: #f3fafc; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.oms-switch-company:hover { background: #e5f4f8; border-color: #7db8c8; }
+.oms-workspace-outlet { min-width: 0; }
+@media (max-width: 760px) {
+ .oms-workspace-bar { align-items: flex-start; flex-direction: column; gap: 12px; padding: 11px 13px; position: relative; }
+ .oms-workspace-brand { min-width: 0; }
+ .oms-workspace-current { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+ .oms-workspace-detail { flex: 1 1 120px; }
+ .oms-workspace-detail strong { max-width: 44vw; }
+ .oms-workspace-divider { display: none; }
+ .oms-switch-company { padding: 9px 10px; }
+ .oms-switch-company span { display: inline; }
+}
