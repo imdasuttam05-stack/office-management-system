@@ -35,8 +35,8 @@ const voucherTypes = [
 
 const natures = ["Asset", "Liability", "Income", "Expense", "Capital"];
 
-export default function Accounting() {
-  const [tab, setTab] = useState("groups");
+export default function Accounting({ initialTab = "groups" } = {}) {
+  const [tab, setTab] = useState(initialTab);
 
   const [groups, setGroups] = useState([]);
   const [ledgers, setLedgers] = useState([]);
@@ -538,7 +538,7 @@ export default function Accounting() {
 
   return (
     <div className="accounts-page">
-      <style>{styles}</style>
+      <style>{`${styles}\n.top-tabs{display:none!important}`}</style>
 
       {/* ==================================================
           HEADER

@@ -48,6 +48,8 @@ export default function AccountsMasters() {
     params.get("tab") || "purchase"
   );
 
+  const [ledgerTab, setLedgerTab] = useState(params.get("ledgerTab") || "groups");
+
   useEffect(() => {
     const p = new URLSearchParams();
 
@@ -57,12 +59,14 @@ export default function AccountsMasters() {
       p.set("master", master);
     } else if (section === "transactions") {
       p.set("tab", tx);
+    } else if (section === "ledger") {
+      p.set("ledgerTab", ledgerTab);
     }
 
     navigate(`/accounts?${p.toString()}`, {
       replace: true,
     });
-  }, [section, master, tx, navigate]);
+  }, [section, master, tx, ledgerTab, navigate]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -169,36 +173,7 @@ export default function AccountsMasters() {
           color:#667085
         }
 
-        .am-shell-mainnav{
-          display:flex;
-          gap:7px;
-          flex-wrap:wrap;
-          margin-top:12px
-        }
-
-        /* Main navigation stays at the top; module submenus live only in the left sidebar. */
-        .am-shell-mainnav .am-navbtn{
-          border:1px solid #e5eaf1;
-          background:#f7f9fc;
-          color:#718096;
-          border-radius:8px;
-          padding:8px 11px;
-          font-weight:800;
-          cursor:pointer;
-          white-space:nowrap;
-          transition:background .15s ease,color .15s ease,border-color .15s ease
-        }
-
-        .am-shell-mainnav .am-navbtn:hover{
-          background:#edf3fa;
-          color:#52657d
-        }
-
-        .am-shell-mainnav .am-navbtn.active{
-          background:#eaf2ff;
-          color:#58708e;
-          border-color:#d8e5f6
-        }
+        .am-shell-mainnav{display:none}
 
         .am-layout{
           display:grid;
@@ -220,6 +195,10 @@ export default function AccountsMasters() {
           border-right:1px solid #ead36a;
           overflow-y:auto
         }
+
+        .am-sidebar-sections{display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #ead36a}
+        .am-shell-subnav .am-section-btn{width:100%;text-align:left;border:1px solid #e6d36c;background:rgba(255,255,255,.7);color:#66571b;border-radius:8px;padding:10px 9px;font-weight:900;cursor:pointer}
+        .am-shell-subnav .am-section-btn.active{background:#e6c72f;color:#44380b;border-color:#cfb11f}
 
         .am-sidebar-heading{
           padding:5px 9px 9px;
@@ -320,6 +299,7 @@ export default function AccountsMasters() {
           .am-content{padding:12px 8px}
           .am-shell-subnav{padding:10px 5px}
           .am-sidebar-heading{padding:5px 5px 8px;font-size:9px}
+          .am-shell-subnav .am-section-btn{font-size:11px;padding:9px 6px}
           .am-shell-subnav .am-navbtn{white-space:normal;font-size:11px;gap:3px;padding:9px 6px}
           .am-shell-subnav .am-key{font-size:9px}
         }
@@ -340,47 +320,17 @@ export default function AccountsMasters() {
             </div>
           </div>
 
-          <div className="am-shell-mainnav">
-            <button
-              className={`am-navbtn ${
-                section === "master" ? "active" : ""
-              }`}
-              onClick={() => setSection("master")}
-            >
-              Masters <span className="am-key">F4–F10</span>
-            </button>
-
-            <button
-              className={`am-navbtn ${
-                section === "transactions" ? "active" : ""
-              }`}
-              onClick={() => setSection("transactions")}
-            >
-              Voucher / Operations{" "}
-              <span className="am-key">F11–F20</span>
-            </button>
-
-            <button
-              className={`am-navbtn ${
-                section === "ledger" ? "active" : ""
-              }`}
-              onClick={() => setSection("ledger")}
-            >
-              Accounts Ledger
-            </button>
-
-            <button
-              className="am-navbtn"
-              onClick={() => navigate("/dashboard")}
-            >
-              Dashboard
-            </button>
-          </div>
         </div>
       </header>
 
       <div className="am-layout">
         <aside className="am-shell-subnav" aria-label="Accounts submenu">
+          <div className="am-sidebar-sections" aria-label="Main sections">
+            <button className={`am-section-btn ${section === "master" ? "active" : ""}`} onClick={() => setSection("master")}>Masters</button>
+            <button className={`am-section-btn ${section === "transactions" ? "active" : ""}`} onClick={() => setSection("transactions")}>Voucher / Operations</button>
+            <button className={`am-section-btn ${section === "ledger" ? "active" : ""}`} onClick={() => setSection("ledger")}>Accounts Ledger</button>
+            <button className="am-section-btn" onClick={() => navigate("/dashboard")}>Dashboard</button>
+          </div>
           {section === "master" && (
             <>
               <div className="am-sidebar-heading">Masters Menu</div>
@@ -396,9 +346,6 @@ export default function AccountsMasters() {
                   <span>{label}</span><span className="am-key">{key}</span>
                 </button>
               ))}
-              <button className="am-back" onClick={() => setSection("transactions")}>
-                Open Vouchers →
-              </button>
             </>
           )}
 
@@ -417,17 +364,17 @@ export default function AccountsMasters() {
                   <span>{label}</span>{key && <span className="am-key">{key}</span>}
                 </button>
               ))}
-              <button className="am-back" onClick={() => setSection("master")}>
-                ← Masters
-              </button>
             </>
           )}
 
           {section === "ledger" && (
             <>
               <div className="am-sidebar-heading">Accounts Ledger</div>
-              <button className="am-navbtn active" onClick={() => setSection("ledger")}>Ledger Workspace</button>
-              <button className="am-back" onClick={() => setSection("master")}>← Masters</button>
+              {[["groups","Accounting Groups"],["ledgers","Ledgers"],["voucher","Voucher Entry"],["register","Register"]].map(([id,label]) => (
+                <button key={id} className={`am-navbtn ${ledgerTab === id ? "active" : ""}`} onClick={() => { setLedgerTab(id); setSection("ledger"); }}>
+                  <span>{label}</span>
+                </button>
+              ))}
             </>
           )}
         </aside>
@@ -455,7 +402,7 @@ export default function AccountsMasters() {
           />
         )}
 
-        {section === "ledger" && <Accounting />}
+        {section === "ledger" && <Accounting key={ledgerTab} initialTab={ledgerTab} />}
       </main>
       </div>
     </div>
