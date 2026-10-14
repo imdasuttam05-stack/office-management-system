@@ -3,6 +3,7 @@ import Group from "../models/Group.js";
 import Ledger from "../models/Ledger.js";
 import CustomerMaster from "../models/CustomerMaster.js";
 import SupplierMaster from "../models/SupplierMaster.js";
+import UnitMaster from "../models/UnitMaster.js";
 import LocationMaster from "../models/LocationMaster.js";
 import InventoryItemMaster from "../models/InventoryItemMaster.js";
 
@@ -58,6 +59,30 @@ async function ensureRealLedger(name, {under,nature,openingBalance,openingType,g
   return row;
 }
 
+export async function syncLedgerCounterparty(master, ledger, ctx={}) {
+  const under = clean(master.under).toLowerCase();
+  if (under !== "sundry debtors" && under !== "sundry creditors") return;
+  const {user}=requireContext(ctx);
+  const companyId=user.companyId || null;
+  const counterparty = {
+    gstin:clean(master.gstin).toUpperCase(),
+    state:clean(master.state),
+    district:clean(master.district),
+    pin:clean(master.pin),
+    phone:clean(master.mobile || master.phone),
+    address:clean(master.address),
+    ledgerId:ledger?._id || null,
+    active:true,
+    createdBy:user._id,
+  };
+  const Model = under === "sundry debtors" ? CustomerMaster : SupplierMaster;
+  await Model.findOneAndUpdate(
+    {companyId,name:clean(master.name)},
+    {$set:counterparty,$setOnInsert:{companyId,name:clean(master.name)}},
+    {upsert:true,new:true,setDefaultsOnInsert:true}
+  );
+}
+
 async function syncTransactionMaster(master, ctx) {
   const {user}=requireContext(ctx);
   const companyId=user.companyId || null;
@@ -69,7 +94,7 @@ async function syncTransactionMaster(master, ctx) {
   }
 
   if (master.masterType === "ledger") {
-    await ensureRealLedger(master.name, {
+    const ledger = await ensureRealLedger(master.name, {
       under:master.under,
       nature:master.nature,
       openingBalance:master.openingBalance,
@@ -80,6 +105,7 @@ async function syncTransactionMaster(master, ctx) {
       mobile:master.mobile,
       userId:createdBy,
     });
+    await syncLedgerCounterparty(master, ledger, ctx);
     return;
   }
 
@@ -109,6 +135,15 @@ async function syncTransactionMaster(master, ctx) {
 
   if (master.masterType === "location") {
     await LocationMaster.findOneAndUpdate({companyId,name:master.name},{$set:{code:clean(master.code).toUpperCase(),pin:clean(master.pin),state:clean(master.state),district:clean(master.district),address:clean(master.address),active:true,createdBy},$setOnInsert:{companyId,name:master.name}},{upsert:true,new:true,setDefaultsOnInsert:true});
+    return;
+  }
+
+  if (master.masterType === "unit") {
+    await UnitMaster.findOneAndUpdate(
+      {companyId,name:master.name},
+      {$set:{code:clean(master.code).toUpperCase(),decimalPlaces:master.decimalPlaces,active:true,createdBy},$setOnInsert:{companyId,name:master.name}},
+      {upsert:true,new:true,setDefaultsOnInsert:true}
+    );
   }
 }
 
@@ -174,6 +209,7 @@ export async function deleteMaster(id, ctx = {}) {
   if (existing.masterType==="product") await InventoryItemMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
   if (existing.masterType==="supplier") await SupplierMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
   if (existing.masterType==="party") await CustomerMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
+  if (existing.masterType==="unit") await UnitMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
   if (existing.masterType==="location") await LocationMaster.findOneAndUpdate({companyId,name:existing.name},{$set:{active:false}});
   if (existing.masterType==="ledger") await Ledger.updateMany({name:existing.name},{$set:{isActive:false}});
   if (existing.masterType==="group") await Group.updateMany({name:existing.name},{$set:{isActive:false}});
