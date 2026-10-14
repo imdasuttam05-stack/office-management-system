@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import "./AccountsGSTTheme.css";
 
 const API = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
 const auth = () => ({"Content-Type":"application/json", Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("accessToken") || ""}`});
@@ -204,23 +203,16 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const jobHistoryContent=<div className="tx-card"><div className="tx-title" style={{marginBottom:10}}><h3>Job Order History</h3><button className="tx-btn" onClick={loadJobs}>Refresh</button></div>{jobHistoryLoading?<div>Loading job order history...</div>:<div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>Job No.</th><th>Date</th><th>Party</th><th>Type</th><th>Location</th><th>Raw Material Issue / Return</th><th>Finished Goods Progress</th><th>Status</th><th>Actions</th></tr></thead><tbody>{allJobs.map(j=><tr key={j._id}><td><b>{j.jobNo}</b></td><td>{new Date(j.date).toLocaleDateString("en-IN")}</td><td>{j.partyName||"-"}</td><td>{j.type}</td><td>{j.location}</td><td>{(j.sourceItems||[]).map(x=><div key={`${x.itemName}-${x.batchNo||""}-${x.barcode||""}`}>{x.itemName}: issued {x.qty} {x.unit}, returned {x.returnedQty||0}, remaining {x.remainingReturnQty??x.qty}</div>)}</td><td>{(j.remainingOutputItems||[]).map(x=><div key={x.itemName}>{x.itemName}: planned {x.qty}, produced {x.producedQty||0}, remaining {x.remainingQty}</div>)}</td><td>{j.status}</td><td><button className="tx-btn" disabled={busy} onClick={()=>{setSelectedJob(j);setTab("production")}}>Production</button></td></tr>)}{!allJobs.length&&<tr><td colSpan="9">No job orders found.</td></tr>}</tbody></table></div>}</div>;
   const jobReturnContent=<div className="tx-card"><div className="tx-title"><div><h3>Return Raw Material from Job Order</h3><p>Returned quantity is limited to raw material issued and not previously returned.</p></div></div><div className="tx-grid"><div className="tx-field"><label>Job Order</label><select value={jobReturn.jobId} onChange={e=>selectJobForReturn(e.target.value)}><option value="">Select Job Order</option>{allJobs.filter(x=>x.status!=="CANCELLED"&&(x.sourceItems||[]).some(line=>n(line.remainingReturnQty)>0)).map(x=><option key={x._id} value={x._id}>{x.jobNo} · {x.partyName||"No party"} · {x.location}</option>)}</select></div><div className="tx-field"><label>Return Date</label><input type="date" value={jobReturn.date} onChange={e=>setJobReturn({...jobReturn,date:e.target.value})}/></div><div className="tx-field"><label>Notes</label><input value={jobReturn.notes} onChange={e=>setJobReturn({...jobReturn,notes:e.target.value})}/></div></div>{jobReturn.jobId&&<><h4>Returnable Raw Materials</h4>{jobReturnLines.length?<LineTable lines={jobReturnLines} setter={setJobReturnLines} allowedTypes={["RAW_MATERIAL"]}/>:<div className="tx-note">No raw material remains available to return for this job order.</div>}<div className="tx-actions"><button className="tx-btn primary" disabled={busy||!jobReturnLines.some(x=>n(x.qty)>0)} onClick={()=>submit(`/api/inventory/job-orders/${jobReturn.jobId}/returns`,{date:jobReturn.date,notes:jobReturn.notes,lines:jobReturnLines.filter(x=>n(x.qty)>0).map(x=>({...x,qty:n(x.qty)}))})}>{busy?"Posting return...":"Post Raw Material Return"}</button></div></>}</div>;
 
-  function handleEntryKeyDown(event) {
-    if (event.key !== "Enter" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    const current = event.target;
-    if (!current || !current.matches || !current.matches("input, select, textarea")) return;
-    // Let multiline fields keep Enter for a newline; otherwise move to the next entry column.
-    if (current.tagName === "TEXTAREA") return;
-    const root = event.currentTarget;
-    const fields = Array.from(root.querySelectorAll("input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])"))
-      .filter(el => el.offsetParent !== null && !el.readOnly && el.getAttribute("aria-hidden") !== "true");
-    const index = fields.indexOf(current);
-    if (index < 0 || index >= fields.length - 1) return;
-    event.preventDefault();
-    fields[index + 1].focus();
-    if (fields[index + 1].tagName === "INPUT" && fields[index + 1].type !== "date" && fields[index + 1].type !== "checkbox") fields[index + 1].select?.();
-  }
-
-  return <div className="tx-center" onKeyDown={handleEntryKeyDown}>
+  return <div className="tx-center" onKeyDown={(event)=>{
+    if(event.key!=="Enter" || event.defaultPrevented || event.shiftKey || event.ctrlKey || event.altKey) return;
+    const target=event.target;
+    if(!target || target.tagName==="TEXTAREA" || target.tagName==="BUTTON" || target.type==="submit" || target.closest("button")) return;
+    const root=event.currentTarget;
+    const fields=Array.from(root.querySelectorAll('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])'))
+      .filter(el=>el.getClientRects().length && el.tabIndex!==-1);
+    const index=fields.indexOf(target);
+    if(index>=0){ event.preventDefault(); const next=fields[index+1] || fields[0]; next?.focus(); if(next?.tagName==="INPUT" && next.type!=="date" && next.type!=="checkbox" && next.type!=="radio") next.select?.(); }
+  }}>
     {tab==="bom-history"&&bomHistoryContent}
     {bomPurchasePicker&&<div role="presentation" onClick={()=>setBomPurchasePicker(null)} style={{position:"fixed",inset:0,zIndex:1300,background:"rgba(13,31,33,.58)",display:"grid",placeItems:"center",padding:16}}><section role="dialog" aria-modal="true" aria-labelledby="bom-purchase-title" onClick={e=>e.stopPropagation()} style={{width:"min(900px,100%)",maxHeight:"85vh",overflow:"auto",background:"#fff",borderRadius:8,padding:18,boxShadow:"0 24px 70px rgba(0,0,0,.25)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}><div><h3 id="bom-purchase-title" style={{margin:"0 0 4px"}}>Select Purchase Lot</h3><div style={{fontSize:13,color:"#667085"}}>{bomPurchasePicker.itemName} · choose rate and unit; enter BOM quantity manually</div></div><button type="button" className="tx-btn" onClick={()=>setBomPurchasePicker(null)}>Close</button></div>{bomPurchasePicker.loading?<p>Loading purchase details...</p>:bomPurchasePicker.error?<div className="tx-note err">{bomPurchasePicker.error}</div>:<div className="tx-table-wrap" style={{marginTop:14}}><table className="tx-table"><thead><tr><th>Purchase</th><th>Date</th><th>Supplier</th><th>Location</th><th>Batch</th><th>Purchased</th><th>Balance</th><th>Unit</th><th>Rate</th><th></th></tr></thead><tbody>{bomPurchasePicker.options.map(option=><tr key={`${option.purchaseId}:${option.lineId}`}><td>{option.purchaseNo}</td><td>{option.date?new Date(option.date).toLocaleDateString("en-IN"):"-"}</td><td>{option.supplierName||"-"}</td><td>{option.location||"-"}</td><td>{option.batchNo||"-"}</td><td>{money(option.purchaseQty)}</td><td><b>{money(option.remainingQty)}</b></td><td>{option.unit}</td><td>₹ {money(option.rate)}</td><td><button type="button" className="tx-btn primary" disabled={option.remainingQty<=0} onClick={()=>chooseBomPurchase(option)}>Select</button></td></tr>)}{!bomPurchasePicker.options.length&&<tr><td colSpan="10">No purchase records found for this material.</td></tr>}</tbody></table></div>}</section></div>}
     <style>{`
@@ -229,6 +221,43 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
       .tx-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;padding:4px 2px}.tx-title h2{letter-spacing:-.025em}.tx-title p{line-height:1.5}.tx-title h2{margin:0;font-size:20px}.tx-title p{margin:4px 0 0;color:#667085;font-size:12px}
       .tx-card{background:linear-gradient(180deg,#fff 0%,#fcfefd 100%);border:1px solid #e4e7ec;border-radius:16px;padding:20px;margin-bottom:16px}.tx-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.tx-field label{display:block;font-size:11px;font-weight:800;margin-bottom:5px;color:#344054}.tx-field.full{grid-column:1/-1}.tx-field input,.tx-field select,.tx-field textarea{width:100%;box-sizing:border-box;border:1px solid #d0d5dd;border-radius:8px;padding:9px 10px;font:inherit}.tx-field textarea{min-height:70px}.tx-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}.tx-btn{border:1px solid #d0dcd6;background:#fff;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;transition:all .16s ease}.tx-btn:hover:not(:disabled){border-color:#176b55;background:#f4faf7}.tx-btn:disabled{opacity:.55;cursor:not-allowed}.tx-btn.primary{background:#245a96;color:#fff;border-color:#245a96}.tx-btn.danger{color:#b42318}.tx-note{padding:10px;border-radius:8px;margin-bottom:12px}.tx-note.ok{background:#ecfdf3;color:#027a48}.tx-note.err{background:#fef3f2;color:#b42318}.tx-table-wrap{overflow:auto}.tx-table{width:100%;border-collapse:collapse;font-size:12px}.tx-table th,.tx-table td{border-bottom:1px solid #eaf0ed;padding:10px;text-align:left;vertical-align:middle}.tx-table tbody tr:nth-child(even){background:#fbfdfc}.tx-table th{background:#f8fafc}.tx-table input,.tx-table select{min-width:90px;padding:7px;border:1px solid #d0d5dd;border-radius:6px}.tx-mini-danger{border:1px solid #fecdca;background:#fff;color:#b42318;border-radius:6px;padding:5px 8px;cursor:pointer}.tx-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.tx-kpi{background:#f8fafc;border:1px solid #e4e7ec;border-radius:10px;padding:12px}.tx-kpi b{display:block;color:#667085;font-size:11px}.tx-kpi strong{display:block;margin-top:5px;font-size:18px}.tx-subnav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
       @media(max-width:900px){.tx-grid{grid-template-columns:1fr 1fr}.tx-kpis,.tx-stock-detail-kpis{grid-template-columns:1fr 1fr}}@media(max-width:560px){.tx-center{padding:6px}.tx-center .tx-card{padding:12px;border-radius:12px}.tx-center .tx-subnav{width:100%;box-sizing:border-box}.tx-center .tx-subnav .tx-btn{flex:1;padding:9px 8px;font-size:12px}.tx-grid{grid-template-columns:1fr}.tx-kpis,.tx-stock-detail-kpis{grid-template-columns:1fr 1fr}.tx-stock-dialog{padding:13px}.tx-stock-dialog-head{align-items:stretch}.tx-stock-dialog-head h2{font-size:17px}}
+      /* GST Reports visual system: shared navy, teal, gold and clean report surfaces */
+      .tx-center{font-family:"Segoe UI",Arial,sans-serif!important;color:#152a3a!important;background:#f2f6f8!important;min-height:100%;padding:0!important;--tx-ink:#17374c;--tx-muted:#71838e;--tx-green:#27786e;--tx-border:#d7e1e6;--tx-surface:#fff}
+      .tx-center>.tx-title{min-height:66px;margin:0 -0px 0;padding:14px 24px;background:#123c55;color:#fff;box-sizing:border-box}
+      .tx-center>.tx-title h2{color:#fff!important;font-size:18px!important;letter-spacing:0!important}
+      .tx-center>.tx-title p{color:#c8d9e2!important;font-size:12px!important;margin-top:5px}
+      .tx-center>.tx-title>.tx-btn{border:1px solid #668194;background:transparent;color:#fff;border-radius:2px;padding:9px 13px}
+      .tx-center>.tx-title>.tx-btn:hover{background:#1d506b;color:#fff}
+      .tx-center .tx-card{border:1px solid #d7e1e6!important;border-radius:3px!important;box-shadow:none!important;background:#fff!important;padding:18px!important;margin:0 0 16px!important}
+      .tx-center .tx-card:hover{border-color:#c4d6df!important;box-shadow:none!important}
+      .tx-center .tx-title{border-bottom:1px solid #dfe7eb;padding:0 0 12px;margin-bottom:16px}
+      .tx-center .tx-title h2,.tx-center .tx-title h3,.tx-center h3{color:#1b3a4d!important}
+      .tx-center h4{color:#27786e!important}
+      .tx-center .tx-subnav{padding:10px 14px;margin:0 -0px 16px;background:#e5eff4;border:0;border-bottom:1px solid #d0dfe6;border-radius:0;box-shadow:none;width:auto;max-width:none}
+      .tx-center .tx-subnav .tx-btn{border-radius:2px!important;border:1px solid #cbd8df;background:#fff;color:#31586b;box-shadow:none;padding:9px 13px}
+      .tx-center .tx-subnav .tx-btn.primary,.tx-center .tx-btn.primary{background:#27786e!important;border-color:#27786e!important;color:#fff!important;box-shadow:none!important}
+      .tx-center .tx-btn{border-radius:2px!important;border:1px solid #cbd8df;background:#fff;color:#31586b;box-shadow:none;font-size:12px;transition:background .15s,border-color .15s}
+      .tx-center .tx-btn:hover:not(:disabled){border-color:#4d8c86;background:#f3f8fa;transform:none}
+      .tx-center .tx-btn.primary:hover:not(:disabled){background:#1d655d!important}
+      .tx-center .tx-grid{gap:14px}
+      .tx-center .tx-field label{color:#637782;font-size:11px;font-weight:700}
+      .tx-center .tx-field input,.tx-center .tx-field select,.tx-center .tx-field textarea,.tx-center .tx-table input,.tx-center .tx-table select{border:1px solid #cbd8df;border-radius:2px;background:#fff;color:#203c4e;min-height:35px;box-sizing:border-box}
+      .tx-center .tx-field input,.tx-center .tx-field select,.tx-center .tx-field textarea{padding:8px 9px;font-size:12px}
+      .tx-center .tx-field input:focus,.tx-center .tx-field select:focus,.tx-center .tx-field textarea:focus,.tx-center .tx-table input:focus,.tx-center .tx-table select:focus{outline:0;border-color:#27786e;box-shadow:0 0 0 2px rgba(39,120,110,.12)}
+      .tx-center .tx-table-wrap{border:1px solid #d7e1e6;border-radius:0;background:#fff}
+      .tx-center .tx-table{font-size:12px}
+      .tx-center .tx-table th{position:sticky;top:0;z-index:1;padding:10px 11px;color:#526a77;background:#f1f6f8;font-size:10px;font-weight:800}
+      .tx-center .tx-table td{padding:10px 11px;border-bottom:1px solid #edf1f3;color:#2f4654}
+      .tx-center .tx-table tbody tr:nth-child(even),.tx-center .tx-table tbody tr:hover{background:#f8fbfc}
+      .tx-center .tx-kpi{border:1px solid #d7e1e6;border-top:2px solid #307a73;border-radius:0;background:#fff;padding:13px 14px}
+      .tx-center .tx-kpi b{color:#788891;font-weight:600}
+      .tx-center .tx-kpi strong{color:#1a394d;font-size:17px}
+      .tx-center .tx-note{border-radius:0;padding:10px 12px}
+      .tx-center .tx-note.ok{border-left:3px solid #27786e;background:#e9f5f1;color:#287168}
+      .tx-center .tx-note.err{border-left:3px solid #c34545;background:#fff0f0;color:#8d2828}
+      .tx-center .tx-stock-qty,.tx-center .tx-ledger-link{color:#27786e}
+      .tx-center .tx-stock-dialog{border-radius:3px;border:1px solid #d7e1e6}
+      @media(max-width:640px){.tx-center>.tx-title{padding:13px 14px;align-items:flex-start;flex-wrap:wrap}.tx-center>.tx-title h2{font-size:16px!important}.tx-center .tx-subnav{overflow-x:auto;flex-wrap:nowrap;padding:9px 10px}.tx-center .tx-subnav .tx-btn{white-space:nowrap}.tx-center .tx-card{padding:13px!important}}
     `}</style>
     <div className="tx-title"><div><h2>Voucher & Operations</h2><p>Purchase → Stock → Job Order → Production → Packing → Sale → Return</p></div><button className="tx-btn" onClick={()=>loadMasters()}>Refresh Masters</button></div>
     {(tab==="purchase"||tab==="purchase-history")&&<div className="tx-subnav"><button className={`tx-btn ${tab==="purchase"?"primary":""}`} onClick={()=>{setTab("purchase");resetFeedback()}}>Purchase Entry</button><button className={`tx-btn ${tab==="purchase-history"?"primary":""}`} onClick={()=>{setTab("purchase-history");resetFeedback()}}>Purchase History</button></div>}
