@@ -156,16 +156,16 @@ function SearchableSelect({ value, options, onChange, placeholder="Select or typ
   );
 }
 
-export default function AccountsMasterCatalog({ initialType = "ledger", onMasterSaved, compact = false, autoCreate = false }) {
+export default function AccountsMasterCatalog({ initialType = "ledger", initialMode = "list", initialEditId = "", onSaved }) {
   const [type, setType] = useState(initialType);
-  const [mode, setMode] = useState("list");
+  const [mode, setMode] = useState(initialMode === "create" ? "form" : "list");
   const [rows, setRows] = useState([]);
   const [groups, setGroups] = useState([]);
   const [locations, setLocations] = useState([]);
   const [ledgers, setLedgers] = useState([]);
   const [units, setUnits] = useState([]);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({...blank.ledger});
+  const [form, setForm] = useState({...blank[initialType] || blank.ledger});
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -224,7 +224,13 @@ export default function AccountsMasterCatalog({ initialType = "ledger", onMaster
   }
 
   useEffect(() => { load(); loadLookups(); }, [type]);
-  useEffect(() => { if (autoCreate && blank[type]) openCreate(type); }, [autoCreate, type]);
+
+  useEffect(() => {
+    if (initialEditId && rows.length && mode === "list") {
+      const found = rows.find(row => String(row._id) === String(initialEditId));
+      if (found) edit(found);
+    }
+  }, [initialEditId, rows, mode]);
 
   const filtered = useMemo(() => rows.filter(x =>
     `${x.name||""} ${x.code||""} ${x.gstin||""} ${x.state||""} ${x.under||""}`
@@ -387,7 +393,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", onMaster
       setMode("list");
       await load();
       await loadLookups();
-      if (typeof onMasterSaved === "function") onMasterSaved({ type, row: d.data || d.master || {...form, _id: editing?._id} });
+      if (typeof onSaved === "function") onSaved(d.data || d.master || null);
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -431,7 +437,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", onMaster
   }[type];
 
   return (
-    <div className={`accounts-master-page${compact ? " accounts-master-compact" : ""}`}>
+    <div className="accounts-master-page">
       <style>{`
         .accounts-master-page{min-height:100vh;background:#f2f6f8;color:#152a3a;font-family:"Segoe UI",Arial,sans-serif}
         .am-head{background:#123c55;color:#fff;border-bottom:1px solid #0d3044;padding:18px 20px;position:sticky;top:0;z-index:10}
