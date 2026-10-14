@@ -121,18 +121,19 @@ export default function AccountsMasters() {
       <style>{`
         .am-shell{
           min-height:100vh;
-          background:#f5f7fb;
-          color:#172b4d;
-          font-family:Arial,sans-serif
+          background:#f2f6f8;
+          color:#152a3a;
+          font-family:"Segoe UI",Arial,sans-serif
         }
 
         .am-shell-head{
           position:sticky;
           top:0;
           z-index:100;
-          background:#fff;
-          border-bottom:1px solid #e4e7ec;
-          box-shadow:0 2px 12px rgba(23,43,77,.06)
+          background:#123c55;
+          color:#fff;
+          border-bottom:1px solid #0d3044;
+          box-shadow:0 2px 12px rgba(18,60,85,.12)
         }
 
         .am-shell-head-inner{
@@ -151,8 +152,8 @@ export default function AccountsMasters() {
           width:42px;
           height:42px;
           border-radius:10px;
-          background:#245a96;
-          color:#fff;
+          background:#f0b83f;
+          color:#17364a;
           display:grid;
           place-items:center;
           font-weight:900
@@ -160,13 +161,14 @@ export default function AccountsMasters() {
 
         .am-shell-title h1{
           margin:0;
+          color:#fff;
           font-size:21px
         }
 
         .am-shell-title p{
           margin:4px 0 0;
           font-size:11px;
-          color:#667085
+          color:#c8d9e2
         }
 
         .am-shell-mainnav{display:none}
@@ -187,18 +189,18 @@ export default function AccountsMasters() {
           flex-direction:column;
           align-items:stretch;
           gap:7px;
-          background:#ffef9c;
-          border-right:1px solid #ead36a;
+          background:#e5eff4;
+          border-right:1px solid #d0dfe6;
           overflow-y:auto
         }
 
-        .am-sidebar-sections{display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #ead36a}
-        .am-shell-subnav .am-section-btn{width:100%;text-align:left;border:1px solid #e6d36c;background:rgba(255,255,255,.7);color:#66571b;border-radius:8px;padding:10px 9px;font-weight:900;cursor:pointer}
-        .am-shell-subnav .am-section-btn.active{background:#e6c72f;color:#44380b;border-color:#cfb11f}
+        .am-sidebar-sections{display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #d0dfe6}
+        .am-shell-subnav .am-section-btn{width:100%;text-align:left;border:1px solid #cbd8df;background:rgba(255,255,255,.76);color:#1a3446;border-radius:3px;padding:10px 9px;font-weight:800;cursor:pointer}
+        .am-shell-subnav .am-section-btn.active{background:#f4c648;color:#183348;border-color:#dda936}
 
         .am-sidebar-heading{
           padding:5px 9px 9px;
-          color:#79651b;
+          color:#528096;
           font-size:11px;
           font-weight:900;
           letter-spacing:.07em;
@@ -214,8 +216,8 @@ export default function AccountsMasters() {
           text-align:left;
           border:1px solid transparent;
           background:rgba(255,255,255,.52);
-          color:#66571b;
-          border-radius:8px;
+          color:#1a3446;
+          border-radius:3px;
           padding:10px 11px;
           font-weight:800;
           cursor:pointer;
@@ -223,15 +225,15 @@ export default function AccountsMasters() {
         }
 
         .am-shell-subnav .am-navbtn:hover{
-          background:rgba(255,255,255,.82);
-          border-color:#f0d85d
+          background:#d6e7ef;
+          border-color:#c3d8e1
         }
 
         .am-shell-subnav .am-navbtn.active{
-          background:#f4d84f;
-          color:#44380b;
-          border-color:#dfc12d;
-          box-shadow:0 2px 5px rgba(117,91,0,.09)
+          background:#f4c648;
+          color:#183348;
+          border-color:#dda936;
+          box-shadow:0 2px 5px rgba(18,60,85,.09)
         }
 
         .am-shell-subnav .am-key{
@@ -242,9 +244,9 @@ export default function AccountsMasters() {
         .am-shell-subnav .am-back{
           width:100%;
           margin-top:8px;
-          border-color:#ead36a;
+          border-color:#cbd8df;
           background:rgba(255,255,255,.55);
-          color:#66571b;
+          color:#1a3446;
           text-align:left
         }
 
@@ -272,10 +274,10 @@ export default function AccountsMasters() {
         }
 
         .am-info{
-          background:#eef6ff;
-          border:1px solid #cfe2ff;
-          color:#245a96;
-          border-radius:9px;
+          background:#e9f5f1;
+          border:1px solid #c8e2d9;
+          color:#287168;
+          border-radius:2px;
           padding:9px 12px;
           font-size:12px;
           margin-bottom:10px
