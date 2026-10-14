@@ -7,8 +7,6 @@ import Accounting from "./Accounting.jsx";
 const masterTabs = [
   ["group", "Group", "F4"],
   ["ledger", "Ledger", "F5"],
-  ["party", "Party", "F6"],
-  ["supplier", "Supplier", "F7"],
   ["product", "Product", "F8"],
   ["location", "Location", "F9"],
   ["unit", "Unit", "F10"],
@@ -40,8 +38,9 @@ export default function AccountsMasters() {
     params.get("section") || "master"
   );
 
+  const requestedMaster = params.get("master") || "ledger";
   const [master, setMaster] = useState(
-    params.get("master") || "ledger"
+    ["party", "supplier"].includes(requestedMaster) ? "ledger" : requestedMaster
   );
 
   const [tx, setTx] = useState(
@@ -73,8 +72,6 @@ export default function AccountsMasters() {
       const map = {
         F4: "group",
         F5: "ledger",
-        F6: "party",
-        F7: "supplier",
         F8: "product",
         F9: "location",
         F10: "unit",
@@ -99,10 +96,9 @@ export default function AccountsMasters() {
         [
           "group",
           "ledger",
-          "party",
-          "supplier",
           "product",
           "location",
+          "unit",
         ].includes(map[e.key])
       ) {
         setSection("master");
@@ -314,7 +310,7 @@ export default function AccountsMasters() {
               <h1>Accounts Masters & Operations</h1>
 
               <p>
-                Group, Ledger, Party, Supplier, Product, Location + all
+                Group, Ledger, Product, Unit, Location + all
                 voucher, inventory and production entry in one workspace
               </p>
             </div>
@@ -335,16 +331,18 @@ export default function AccountsMasters() {
             <>
               <div className="am-sidebar-heading">Masters Menu</div>
               {masterTabs.map(([id, label, key]) => (
-                <button
-                  key={id}
-                  className={`am-navbtn ${master === id ? "active" : ""}`}
-                  onClick={() => {
-                    setMaster(id);
-                    setSection("master");
-                  }}
-                >
-                  <span>{label}</span><span className="am-key">{key}</span>
-                </button>
+                <React.Fragment key={id}>
+                  {id === "product" && <div className="am-sidebar-heading">Inventory Masters</div>}
+                  <button
+                    className={`am-navbtn ${master === id ? "active" : ""}`}
+                    onClick={() => {
+                      setMaster(id);
+                      setSection("master");
+                    }}
+                  >
+                    <span>{label}</span><span className="am-key">{key}</span>
+                  </button>
+                </React.Fragment>
               ))}
             </>
           )}
@@ -383,9 +381,7 @@ export default function AccountsMasters() {
         {section === "master" && (
           <>
             <div className="am-info">
-              Create, edit, and delete Group, Ledger, Party, Supplier,
-              Product, and Location here. Use F4–F9 to switch between
-              masters.
+              Create and manage accounting ledgers and inventory masters.
             </div>
 
             <AccountsMasterCatalog
