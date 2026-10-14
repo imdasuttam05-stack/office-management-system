@@ -156,7 +156,7 @@ function SearchableSelect({ value, options, onChange, placeholder="Select or typ
   );
 }
 
-export default function AccountsMasterCatalog({ initialType = "ledger" }) {
+export default function AccountsMasterCatalog({ initialType = "ledger", onMasterSaved, compact = false, autoCreate = false }) {
   const [type, setType] = useState(initialType);
   const [mode, setMode] = useState("list");
   const [rows, setRows] = useState([]);
@@ -224,6 +224,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
   }
 
   useEffect(() => { load(); loadLookups(); }, [type]);
+  useEffect(() => { if (autoCreate && blank[type]) openCreate(type); }, [autoCreate, type]);
 
   const filtered = useMemo(() => rows.filter(x =>
     `${x.name||""} ${x.code||""} ${x.gstin||""} ${x.state||""} ${x.under||""}`
@@ -386,6 +387,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
       setMode("list");
       await load();
       await loadLookups();
+      if (typeof onMasterSaved === "function") onMasterSaved({ type, row: d.data || d.master || {...form, _id: editing?._id} });
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -429,7 +431,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
   }[type];
 
   return (
-    <div className="accounts-master-page">
+    <div className={`accounts-master-page${compact ? " accounts-master-compact" : ""}`}>
       <style>{`
         .accounts-master-page{min-height:100vh;background:#f2f6f8;color:#152a3a;font-family:"Segoe UI",Arial,sans-serif}
         .am-head{background:#123c55;color:#fff;border-bottom:1px solid #0d3044;padding:18px 20px;position:sticky;top:0;z-index:10}
