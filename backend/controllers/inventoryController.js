@@ -57,24 +57,45 @@ export async function lookupGSTIN(req,res){
 }
 async function ensureLedger({name, groupName, nature, req, gstin="", address="", phone=""}) {
  const ledgerName=clean(name);
- const existing=await Ledger.findOne({name:ledgerName,isActive:true});
- if(existing)return existing;
- // Find shared/system groups even when companyScopePlugin scopes normal model queries.
- const sharedGroupFilter={name:clean(groupName),parent:null,isActive:{$ne:false},$or:[{companyId:null},{companyId:{$exists:false}}]};
- let group=await Group.findOne({name:clean(groupName),parent:null});
+ // Find the intended shared/system group first; the unique legacy index may be {name, group}.
+ const groupNameClean=clean(groupName);
+ const sharedGroupFilter={name:groupNameClean,parent:null,isActive:{$ne:false},$or:[{companyId:null},{companyId:{$exists:false}}]};
+ let group=await Group.findOne({name:groupNameClean,parent:null});
  if(!group)group=await Group.collection.findOne(sharedGroupFilter);
  if(!group){
   try{
-   group=await Group.create({name:clean(groupName),parent:null,nature,isSystem:true});
+   group=await Group.create({name:groupNameClean,parent:null,nature,isSystem:true});
   }catch(error){
-   // A concurrent request may create the same unique group after the lookup.
+   // Another request may have created this group after our first lookup.
    if(error?.code!==11000)throw error;
-   group=await Group.findOne({name:clean(groupName),parent:null});
+   group=await Group.findOne({name:groupNameClean,parent:null});
    if(!group)group=await Group.collection.findOne(sharedGroupFilter);
    if(!group)throw error;
   }
  }
- return Ledger.create({name:ledgerName,group:group._id,gstin:clean(gstin).toUpperCase(),address:clean(address),phone:clean(phone),createdBy:req.user._id});
+ // Bypass company-scope filtering so an existing ledger hidden by the scope plugin
+ // is reused instead of triggering E11000 on the database's unique name/group index.
+ let existing=await Ledger.collection.findOne({name:ledgerName,group:group._id});
+ if(existing){
+  if(existing.isActive===false){
+   await Ledger.collection.updateOne({_id:existing._id},{$set:{isActive:true}});
+   existing.isActive=true;
+  }
+  return existing;
+ }
+ try{
+  return await Ledger.create({name:ledgerName,group:group._id,gstin:clean(gstin).toUpperCase(),address:clean(address),phone:clean(phone),createdBy:req.user._id});
+ }catch(error){
+  // Recover if a concurrent request inserted the same ledger after our lookup.
+  if(error?.code!==11000)throw error;
+  existing=await Ledger.collection.findOne({name:ledgerName,group:group._id});
+  if(!existing)throw error;
+  if(existing.isActive===false){
+   await Ledger.collection.updateOne({_id:existing._id},{$set:{isActive:true}});
+   existing.isActive=true;
+  }
+  return existing;
+ }
 }
 async function ensureGstLedger(name,req){return ensureLedger({name,groupName:"Duties & Taxes",nature:"Liability",req});}
 async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narration,lines,sourceType,sourceId}){
