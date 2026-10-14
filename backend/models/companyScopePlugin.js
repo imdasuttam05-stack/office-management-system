@@ -18,11 +18,18 @@ export default function companyScopePlugin(schema, options = {}) {
       const scopedValues = { companyId: match.companyId, ...(yearScoped ? { financialYear: scope.financialYear } : {}) };
       const isOperatorUpdate = Object.keys(update).some((key) => key.startsWith("$"));
       if (isOperatorUpdate) {
-        update.$set = { ...(update.$set || {}), ...scopedValues };
-        if (this.getOptions().upsert) update.$setOnInsert = { ...(update.$setOnInsert || {}), ...scopedValues };
-        if (update.$unset) {
-          delete update.$unset.companyId;
-          if (yearScoped) delete update.$unset.financialYear;
+        if (this.getOptions().upsert) {
+          update.$set = { ...(update.$set || {}) };
+          update.$setOnInsert = { ...(update.$setOnInsert || {}), ...scopedValues };
+          for (const key of Object.keys(scopedValues)) {
+            delete update.$set[key];
+            if (update.$unset) delete update.$unset[key];
+          }
+        } else {
+          update.$set = { ...(update.$set || {}), ...scopedValues };
+          if (update.$unset) {
+            for (const key of Object.keys(scopedValues)) delete update.$unset[key];
+          }
         }
       } else {
         Object.assign(update, scopedValues);
