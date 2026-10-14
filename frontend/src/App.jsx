@@ -41,6 +41,7 @@ import Reports from "./pages/Reports.jsx";
 import PayrollReport from "./pages/PayrollReport.jsx";
 import GSTReports from "./pages/GSTReports.jsx";
 import CompanySelection from "./pages/CompanySelection.jsx";
+import CompanyWorkspaceLayout from "./components/CompanyWorkspaceLayout.jsx";
 
 /* ==============================
    PAYROLL
@@ -103,7 +104,8 @@ export default function App() {
               PROTECTED USER ROUTES
           ====================================== */}
           <Route element={<ProtectedRoute />}>
-            <Route path="/company-selection" element={<CompanySelection />} />
+            <Route element={<CompanyWorkspaceLayout />}>
+              <Route path="/company-selection" element={<CompanySelection />} />
 
             {/* ================================
                 MAIN
@@ -279,6 +281,7 @@ export default function App() {
               element={<PayrollReport />}
             />
 
+            </Route>
           </Route>
 
           {/* =====================================
@@ -291,10 +294,12 @@ export default function App() {
               />
             }
           >
-            <Route
-              path="/users"
-              element={<Users />}
-            />
+            <Route element={<CompanyWorkspaceLayout />}>
+              <Route
+                path="/users"
+                element={<Users />}
+              />
+            </Route>
           </Route>
 
           {/* =====================================
