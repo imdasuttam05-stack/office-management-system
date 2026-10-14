@@ -35,3 +35,24 @@
 .oms-continue { margin:0 18px; width:calc(100% - 36px); min-height:42px; }
 .oms-footnote { margin:18px 0 0; color:#82919a; font-size:11px; line-height:1.6; }
 @media(max-width:760px) { .oms-company-wrap { padding:22px 14px 32px; } .oms-company-grid { grid-template-columns:1fr; } .oms-company-intro h1 { font-size:23px; } .gst-topbar { padding:0 14px; } }
+
+/* Tally-style create/alter company panel */
+.oms-company-row { display:flex; align-items:center; gap:8px; padding:3px 5px; border-bottom:1px solid #edf1f3; }
+.oms-company-row.selected { background:#f4faf8; }
+.oms-company-row .oms-company-option { flex:1; min-width:0; }
+.oms-alter-button { display:inline-flex; align-items:center; justify-content:center; gap:5px; flex:0 0 auto; border:1px solid #d1dde3; background:#fff; color:#31586b; padding:8px 10px; font-size:11px; font-weight:700; cursor:pointer; }
+.oms-alter-button:hover { background:#e9f5f1; border-color:#9ecfc0; }
+.oms-company-actions { display:flex; align-items:center; gap:12px; padding:14px 18px 18px; border-top:1px solid #dfe7eb; }
+.oms-company-actions > span { color:#82919a; font-size:11px; }
+.oms-tally-form-card { margin-top:18px; border-color:#cbd8df; box-shadow:0 12px 34px rgba(18,60,85,.08); }
+.oms-tally-form { padding:18px; }
+.oms-tally-section-title { margin:5px 0 13px; padding:9px 11px; background:#eef4f7; border-left:3px solid #27786e; color:#1b3a4d; font-size:12px; font-weight:800; letter-spacing:.02em; }
+.oms-tally-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:13px 15px; margin-bottom:18px; }
+.oms-tally-field { display:flex; flex-direction:column; gap:6px; min-width:0; color:#526976; font-size:11px; font-weight:700; }
+.oms-tally-field.wide { grid-column:1/-1; }
+.oms-tally-field input { width:100%; min-width:0; height:38px; box-sizing:border-box; border:1px solid #cbd8df; border-radius:2px; padding:0 10px; background:#fff; color:#203c4e; font:inherit; font-size:12px; outline:none; }
+.oms-tally-field input:focus { border-color:#27786e; box-shadow:0 0 0 3px rgba(39,120,110,.12); }
+.oms-tally-field.wide input { height:72px; }
+.oms-tally-form-actions { display:flex; justify-content:flex-end; gap:10px; padding-top:14px; border-top:1px solid #e1e8ec; }
+.oms-cancel-button { border:1px solid #cbd8df; background:#fff; color:#526976; padding:10px 16px; font-size:12px; cursor:pointer; }
+@media(max-width:760px) { .oms-tally-grid { grid-template-columns:1fr; } .oms-company-actions { align-items:flex-start; flex-direction:column; } .oms-company-row { align-items:stretch; } .oms-alter-button { padding:6px 8px; } }
