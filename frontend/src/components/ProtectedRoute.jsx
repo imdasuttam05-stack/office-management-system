@@ -1,7 +1,8 @@
 import React from "react";
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 export default function ProtectedRoute({ allowedRoles }) {
+  const location = useLocation();
   const token = localStorage.getItem("token");
   const userData = localStorage.getItem("user");
 
@@ -19,6 +20,17 @@ export default function ProtectedRoute({ allowedRoles }) {
     localStorage.removeItem("user");
 
     return <Navigate to="/login" replace />;
+  }
+
+  // Tally-style company/FY must be selected before entering the workspace.
+  // Keep the selection route accessible so users can create or switch companies.
+  if (location.pathname !== "/company-selection") {
+    let activeCompany = null;
+    try { activeCompany = JSON.parse(localStorage.getItem("oms_active_company") || "null"); } catch { activeCompany = null; }
+    const activeFY = localStorage.getItem("oms_active_financial_year");
+    if (!activeCompany?._id || !activeFY) {
+      return <Navigate to="/company-selection" replace state={{ from: location.pathname }} />;
+    }
   }
 
   // Role permission
