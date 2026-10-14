@@ -175,7 +175,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
         }
       }
 
-      const map = { F4:"group", F5:"ledger", F6:"party", F7:"supplier", F8:"product", F9:"location", F10:"unit" };
+      const map = { F4:"group", F5:"ledger", F8:"product", F9:"location", F10:"unit" };
       if (map[e.key]) {
         e.preventDefault();
         const nextType = map[e.key];
@@ -269,20 +269,21 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
         input,select,textarea{width:100%;border:1px solid #d0d5dd;border-radius:7px;padding:9px 10px;font:inherit;background:#fff}
         textarea{min-height:72px;resize:vertical}.search{max-width:360px}.btn{border:1px solid #d0d5dd;background:#fff;border-radius:7px;padding:9px 13px;font-weight:700;cursor:pointer}.primary{background:#245a96;color:#fff;border-color:#245a96}
         .danger{color:#b42318}.card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;overflow:hidden}.row{display:grid;grid-template-columns:1fr auto;gap:10px;padding:13px 15px;border-bottom:1px solid #eef0f3}.row:last-child{border-bottom:0}.row small{display:block;color:#667085;margin-top:4px;font-size:10px}.actions{display:flex;gap:6px}.actions button{border:1px solid #d0d5dd;background:#fff;border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px}
-        .form-card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:18px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.field label{display:block;font-size:11px;font-weight:800;color:#344054;margin-bottom:5px}.full{grid-column:1/-1}.check{display:flex;gap:8px;align-items:center}.check input{width:auto}
+        .form-card{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:18px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.field-section{grid-column:1/-1;padding:4px 0 16px;border-bottom:1px solid #e4e7ec}.field-section:last-child{border-bottom:0;padding-bottom:0}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.section-heading h3{margin:0;color:#344054;font-size:13px}.section-tag{font-size:11px;font-weight:700;color:#176b58;background:#e8f5ef;border-radius:4px;padding:5px 8px}.section-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.field label{display:block;font-size:11px;font-weight:800;color:#344054;margin-bottom:5px}.full{grid-column:1/-1}.check{display:flex;gap:8px;align-items:center}.check input{width:auto}
         .form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.msg{padding:10px;border-radius:7px;margin-bottom:10px;background:#ecfdf3;color:#027a48}.err{padding:10px;border-radius:7px;margin-bottom:10px;background:#fef3f2;color:#b42318}
         .empty{padding:35px;text-align:center;color:#667085}.hint{font-size:10px;color:#667085;margin-top:4px}
-        @media(max-width:800px){.grid{grid-template-columns:1fr 1fr}} @media(max-width:560px){.grid{grid-template-columns:1fr}.am-body{padding:12px 10px}.am-head{padding:12px 10px}.am-tabs{padding:8px 10px}.toolbar{align-items:stretch;flex-direction:column}.search{max-width:none}.row{grid-template-columns:1fr}}
+        @media(max-width:800px){.grid,.section-grid{grid-template-columns:1fr 1fr}} @media(max-width:560px){.grid,.section-grid{grid-template-columns:1fr}.am-body{padding:12px 10px}.am-head{padding:12px 10px}.am-tabs{padding:8px 10px}.toolbar{align-items:stretch;flex-direction:column}.search{max-width:none}.row{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column}}
       `}</style>
 
       <header className="am-head">
         <div className="am-head-row">
-          <div className="am-title"><div className="am-logo">₹</div><div><h1>Accounts Masters</h1><div className="sub">Group, Ledger, Party, Supplier, Product & Location — same master form</div></div></div>
+          <div className="am-title"><div className="am-logo">₹</div><div><h1>Accounts Masters</h1><div className="sub">Ledgers, inventory items, units & locations</div></div></div>
           <button className="btn primary" onClick={()=>openCreate(type)}>+ Create {title}</button>
         </div>
         <div className="shortcuts">
           <span className="kbd"><b>Alt+C</b>Create current master</span>
-          <span className="kbd"><b>F4–F10</b>Switch master</span>
+          <span className="kbd"><b>F4–F5</b>Group / Ledger</span>
+          <span className="kbd"><b>F8–F10</b>Product / Location / Unit</span>
           <span className="kbd"><b>Enter</b>Next field</span>
           <span className="kbd"><b>Esc</b>Clear focus</span>
         </div>
@@ -326,24 +327,45 @@ export default function AccountsMasterCatalog({ initialType = "ledger" }) {
             <div className="toolbar"><div><b>{editing ? "Edit" : "Create"} {title}</b><div className="hint">Fields marked * are required.</div></div><button className="btn" onClick={()=>setMode("list")}>Back</button></div>
 
             <div className="grid">
-              <div className="field"><label>Name *</label><input autoFocus value={form.name||""} onChange={e=>update("name",e.target.value)} /></div>
+              {type!=="ledger" && <div className="field"><label>Name *</label><input autoFocus value={form.name||""} onChange={e=>update("name",e.target.value)} /></div>}
 
               {type==="ledger" && <>
-                <div className="field"><label>Alias</label><input value={form.alias||""} onChange={e=>update("alias",e.target.value)} /></div>
-                <div className="field"><label>Under *</label><select value={form.under||"Sundry Debtors"} onChange={e=>update("under",e.target.value)}>{GROUPS.map(x=><option key={x}>{x}</option>)}</select></div>
-                <div className="field"><label>Opening Balance</label><input type="number" value={form.openingBalance||""} onChange={e=>update("openingBalance",e.target.value)} /></div>
-                <div className="field"><label>Dr / Cr</label><select value={form.openingType||"Dr"} onChange={e=>update("openingType",e.target.value)}><option>Dr</option><option>Cr</option></select></div>
-                <div className="field"><label>Location</label><select value={form.locationId||""} onChange={e=>update("locationId",e.target.value)}><option value="">Select Location</option>{locations.map(x=><option value={x._id} key={x._id}>{x.name}</option>)}</select></div>
-                <div className="field check"><input type="checkbox" checked={!!form.gstApplicable} onChange={e=>update("gstApplicable",e.target.checked)}/><label>GST Applicable</label></div>
-                <div className="field"><label>GSTIN</label><input maxLength="15" value={form.gstin||""} onChange={e=>update("gstin",e.target.value.toUpperCase())}/></div>
-                <div className="field"><label>PAN</label><input maxLength="10" value={form.pan||""} onChange={e=>update("pan",e.target.value.toUpperCase())}/></div>
-                <div className="field"><label>State</label><select value={form.state||""} onChange={e=>update("state",e.target.value)}><option value="">Select State</option>{STATES.map(x=><option key={x}>{x}</option>)}</select></div>
-                <div className="field"><label>PIN</label><input maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
-                <div className="field"><label>Mobile</label><input value={form.mobile||""} onChange={e=>update("mobile",e.target.value)}/></div>
-                <div className="field"><label>Email</label><input type="email" value={form.email||""} onChange={e=>update("email",e.target.value)}/></div>
-                <div className="field"><label>Credit Limit</label><input type="number" value={form.creditLimit||""} onChange={e=>update("creditLimit",e.target.value)}/></div>
-                <div className="field"><label>Credit Days</label><input type="number" value={form.creditDays||""} onChange={e=>update("creditDays",e.target.value)}/></div>
-                <div className="field full"><label>Address</label><textarea value={form.address||""} onChange={e=>update("address",e.target.value)}/></div>
+                <section className="field-section">
+                  <div className="section-heading"><h3>Ledger Details</h3><span className="section-tag">{form.under==="Sundry Debtors"?"Customer Ledger":form.under==="Sundry Creditors"?"Supplier Ledger":"General Ledger"}</span></div>
+                  <div className="section-grid">
+                    <div className="field"><label>Name *</label><input autoFocus value={form.name||""} onChange={e=>update("name",e.target.value)} /></div>
+                    <div className="field"><label>Alias</label><input value={form.alias||""} onChange={e=>update("alias",e.target.value)} /></div>
+                    <div className="field"><label>Under *</label><select value={form.under||"Sundry Debtors"} onChange={e=>update("under",e.target.value)}>{GROUPS.map(x=><option key={x}>{x}</option>)}</select></div>
+                  </div>
+                </section>
+                <section className="field-section">
+                  <div className="section-heading"><h3>Mailing Details</h3></div>
+                  <div className="section-grid">
+                    <div className="field"><label>State</label><select value={form.state||""} onChange={e=>update("state",e.target.value)}><option value="">Select State</option>{STATES.map(x=><option key={x}>{x}</option>)}</select></div>
+                    <div className="field"><label>PIN</label><input maxLength="6" value={form.pin||""} onChange={e=>update("pin",e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
+                    <div className="field"><label>Location</label><select value={form.locationId||""} onChange={e=>update("locationId",e.target.value)}><option value="">Select Location</option>{locations.map(x=><option value={x._id} key={x._id}>{x.name}</option>)}</select></div>
+                    <div className="field"><label>Mobile</label><input value={form.mobile||""} onChange={e=>update("mobile",e.target.value)}/></div>
+                    <div className="field"><label>Email</label><input type="email" value={form.email||""} onChange={e=>update("email",e.target.value)}/></div>
+                    <div className="field full"><label>Address</label><textarea value={form.address||""} onChange={e=>update("address",e.target.value)}/></div>
+                  </div>
+                </section>
+                <section className="field-section">
+                  <div className="section-heading"><h3>Tax Registration Details</h3></div>
+                  <div className="section-grid">
+                    <div className="field check"><input type="checkbox" checked={!!form.gstApplicable} onChange={e=>update("gstApplicable",e.target.checked)}/><label>GST Applicable</label></div>
+                    <div className="field"><label>GSTIN</label><input maxLength="15" value={form.gstin||""} onChange={e=>update("gstin",e.target.value.toUpperCase())}/></div>
+                    <div className="field"><label>PAN / IT No.</label><input maxLength="10" value={form.pan||""} onChange={e=>update("pan",e.target.value.toUpperCase())}/></div>
+                  </div>
+                </section>
+                <section className="field-section">
+                  <div className="section-heading"><h3>Credit Terms & Opening Balance</h3></div>
+                  <div className="section-grid">
+                    <div className="field"><label>Credit Limit</label><input type="number" min="0" value={form.creditLimit||""} onChange={e=>update("creditLimit",e.target.value)}/></div>
+                    <div className="field"><label>Credit Days</label><input type="number" min="0" value={form.creditDays||""} onChange={e=>update("creditDays",e.target.value)}/></div>
+                    <div className="field"><label>Opening Balance</label><input type="number" min="0" value={form.openingBalance||""} onChange={e=>update("openingBalance",e.target.value)}/></div>
+                    <div className="field"><label>Balance Type</label><select value={form.openingType||"Dr"} onChange={e=>update("openingType",e.target.value)}><option>Dr</option><option>Cr</option></select></div>
+                  </div>
+                </section>
               </>}
 
               {type==="group" && <>
