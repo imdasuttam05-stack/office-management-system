@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const schema = new mongoose.Schema(
   {
@@ -174,15 +175,12 @@ const schema = new mongoose.Schema(
 */
 
 schema.index(
-  {
-    employeeId: 1,
-    date: 1
-  },
-  {
-    unique: true
-  }
+  { companyId: 1, employeeId: 1, date: 1 },
+  { unique: true }
 );
 
+
+schema.plugin(companyScopePlugin, { financialYear: true });
 
 export default mongoose.model(
   "Attendance",

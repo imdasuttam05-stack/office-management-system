@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const employeeLetterSchema = new mongoose.Schema(
   {
@@ -13,5 +14,7 @@ const employeeLetterSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+employeeLetterSchema.plugin(companyScopePlugin, { financialYear: true });
 
 export default mongoose.model("EmployeeLetter", employeeLetterSchema);

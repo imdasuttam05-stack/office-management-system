@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const schema = new mongoose.Schema({
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", required: true },
@@ -9,5 +10,7 @@ const schema = new mongoose.Schema({
   reason: String,
   status: { type: String, enum: ["Pending", "Approved", "Rejected"], default: "Pending" }
 }, { timestamps: true });
+
+schema.plugin(companyScopePlugin, { financialYear: true });
 
 export default mongoose.model("Leave", schema);

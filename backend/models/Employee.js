@@ -1,8 +1,9 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const employeeSchema = new mongoose.Schema(
   {
-    employeeCode: { type: String, required: true, unique: true, trim: true },
+    employeeCode: { type: String, required: true, trim: true },
     name: { type: String, required: true, trim: true },
     companyName: { type: String, trim: true, default: "" },
     state: { type: String, trim: true, default: "" },
@@ -64,5 +65,8 @@ const employeeSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+employeeSchema.index({ companyId: 1, employeeCode: 1 }, { unique: true });
+employeeSchema.plugin(companyScopePlugin, { financialYear: false });
 
 export default mongoose.model("Employee", employeeSchema);

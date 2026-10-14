@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const schema = new mongoose.Schema({
   companyId:{type:mongoose.Schema.Types.ObjectId,ref:"Company",default:null,index:true},
@@ -12,4 +13,5 @@ const schema = new mongoose.Schema({
 schema.index({companyId:1,code:1},{unique:true});
 schema.index({companyId:1,name:1},{unique:true});
 
+schema.plugin(companyScopePlugin, { financialYear: false });
 export default mongoose.model("UnitMaster",schema);

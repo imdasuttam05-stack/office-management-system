@@ -1,8 +1,9 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const payrollSettingSchema = new mongoose.Schema(
   {
-    key: { type: String, unique: true, default: "default" },
+    key: { type: String, default: "default", index: true },
     basicPercent: { type: Number, default: 60, min: 0, max: 100 },
     hraPercent: { type: Number, default: 20, min: 0, max: 100 },
     daPercent: { type: Number, default: 10, min: 0, max: 100 },
@@ -29,5 +30,8 @@ const payrollSettingSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+payrollSettingSchema.index({ companyId: 1, key: 1 }, { unique: true });
+payrollSettingSchema.plugin(companyScopePlugin, { financialYear: false });
 
 export default mongoose.model("PayrollSetting", payrollSettingSchema);

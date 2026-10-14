@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const inventoryStockSchema = new mongoose.Schema(
   {
@@ -23,4 +24,5 @@ const inventoryStockSchema = new mongoose.Schema(
 
 inventoryStockSchema.index({ companyId: 1, location: 1, itemType: 1, itemName: 1, batchNo: 1, barcode: 1 }, { unique: true });
 
+inventoryStockSchema.plugin(companyScopePlugin, { financialYear: false });
 export default mongoose.model("InventoryStock", inventoryStockSchema);

@@ -1,9 +1,11 @@
 import express from "express";
+import requireCompanyContext from "../middleware/companyContext.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 
 const router = express.Router();
+router.use(requireCompanyContext);
 const STORAGE_DIR = path.join(process.cwd(), "tmp", "salary-slip-pdfs");
 const COMPANY_NAME = "Hansaria Food Pvt Ltd";
 const COMPANY_ADDRESS = "207 MD Road 6th Floor, Room No - 111, Kolkata-700007";
@@ -92,11 +94,12 @@ router.post("/", async (req, res) => {
     const companyName = String(req.body?.companyName || slip.companyName || COMPANY_NAME).trim() || COMPANY_NAME;
     const companyAddress = String(req.body?.companyAddress || slip.companyAddress || COMPANY_ADDRESS).trim() || COMPANY_ADDRESS;
     const pdf = buildPdf(slip, companyName, companyAddress);
-    await fs.mkdir(STORAGE_DIR, { recursive: true });
+    const companyStorageDir = path.join(STORAGE_DIR, String(req.company._id));
+    await fs.mkdir(companyStorageDir, { recursive: true });
     const id = crypto.randomBytes(10).toString("hex");
     const safeCode = String(slip.employeeCode || slip.employeeName || "employee").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 50);
     const fileName = `salary-slip-${safeCode}-${id}.pdf`;
-    await fs.writeFile(path.join(STORAGE_DIR, fileName), pdf);
+    await fs.writeFile(path.join(companyStorageDir, fileName), pdf);
     const base = `${req.protocol}://${req.get("host")}`;
     return res.json({ success: true, fileName, pdfUrl: `${base}/api/payroll/salary-slip-pdf/${encodeURIComponent(fileName)}` });
   } catch (error) {
@@ -109,7 +112,7 @@ router.get("/:fileName", async (req, res) => {
   try {
     const fileName = path.basename(String(req.params.fileName || ""));
     if (!fileName.toLowerCase().endsWith(".pdf")) return res.status(400).send("Invalid PDF file.");
-    const filePath = path.join(STORAGE_DIR, fileName);
+    const filePath = path.join(STORAGE_DIR, String(req.company._id), fileName);
     const stat = await fs.stat(filePath);
     res.setHeader("Content-Type", "application/pdf"); res.setHeader("Content-Length", stat.size); res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     return res.sendFile(filePath);

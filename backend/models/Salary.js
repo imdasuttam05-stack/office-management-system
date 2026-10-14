@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const schema = new mongoose.Schema({
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", required: true },
@@ -29,5 +30,7 @@ const schema = new mongoose.Schema({
   status: { type: String, enum: ["Draft", "Processed", "Paid"], default: "Processed" }
 }, { timestamps: true });
 
-schema.index({ employeeId: 1, month: 1, year: 1 }, { unique: true });
+schema.index({ companyId: 1, financialYear: 1, employeeId: 1, month: 1, year: 1 }, { unique: true });
+schema.plugin(companyScopePlugin, { financialYear: true });
+
 export default mongoose.model("Salary", schema);

@@ -1,4 +1,5 @@
 import express from "express";
+import requireCompanyContext from "../middleware/companyContext.js";
 import multer from "multer";
 import { getConfiguredMailProvider } from "../services/mailService.js";
 
@@ -10,6 +11,7 @@ import {
   getOptions,
   saveOptions,
   createCompany,
+  updateCompany,
   listCompanies,
 
   getAttendance,
@@ -59,6 +61,13 @@ import {
 } from "../controllers/reportController.js";
 
 const router = express.Router();
+
+// All HR/payroll business endpoints are company + financial-year scoped.
+// Company list/create must remain available before the first selection.
+router.use((req, res, next) => {
+  if (/^(?:\/(?:companies|company)(?:\/[^/]+)?|\/payroll\/(?:companies|company)(?:\/[^/]+)?)\/?$/.test(req.path)) return next();
+  return requireCompanyContext(req, res, next);
+});
 
 /* =========================================================
    ATTENDANCE EXCEL UPLOAD
@@ -165,6 +174,7 @@ router.get("/companies", listCompanies);
 router.get("/company", listCompanies);
 router.post("/company", createCompany);
 router.post("/companies", createCompany);
+router.put("/companies/:id", updateCompany);
 
 // Payroll compatibility
 router.post("/payroll/company", createCompany);

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const processSchema = new mongoose.Schema({
   type: { type: String, enum: ["Grading", "Packing"], required: true },
@@ -12,7 +13,7 @@ const processSchema = new mongoose.Schema({
 }, { _id: true });
 
 const jobOrderSchema = new mongoose.Schema({
-  jobNo: { type: String, unique: true, index: true },
+  jobNo: { type: String, index: true },
   date: { type: Date, default: Date.now, index: true },
   customerName: { type: String, trim: true, default: "" },
   product: { type: String, trim: true, default: "" },
@@ -25,4 +26,6 @@ const jobOrderSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });
 
+jobOrderSchema.index({ companyId: 1, financialYear: 1, jobNo: 1 }, { unique: true });
+jobOrderSchema.plugin(companyScopePlugin, { financialYear: true });
 export default mongoose.model("JobOrder", jobOrderSchema);

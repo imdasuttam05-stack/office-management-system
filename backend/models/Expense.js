@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const expenseSchema = new mongoose.Schema(
   {
@@ -137,6 +138,7 @@ expenseSchema.index({
   date: 1,
 });
 
+expenseSchema.plugin(companyScopePlugin, { financialYear: true });
 export default mongoose.model(
   "Expense",
   expenseSchema

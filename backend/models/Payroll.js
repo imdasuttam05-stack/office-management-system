@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const salaryItemSchema = new mongoose.Schema(
   {
@@ -141,15 +142,11 @@ const payrollSchema = new mongoose.Schema(
   }
 );
 
+payrollSchema.plugin(companyScopePlugin, { financialYear: true });
+
 payrollSchema.index(
-  {
-    employeeId: 1,
-    month: 1,
-    year: 1,
-  },
-  {
-    unique: true,
-  }
+  { companyId: 1, financialYear: 1, employeeId: 1, month: 1, year: 1 },
+  { unique: true }
 );
 
 const Payroll =

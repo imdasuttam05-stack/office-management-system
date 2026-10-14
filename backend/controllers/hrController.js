@@ -673,14 +673,44 @@ export async function listCompanies(req, res) {
   }
 }
 
+const COMPANY_FIELDS = [
+  "name", "mailingName", "address", "country", "state", "pincode",
+  "phone", "mobile", "email", "gstin", "pan", "currencySymbol",
+  "financialYearFrom", "booksBeginFrom",
+];
+
+function companyPayload(body = {}) {
+  const payload = {};
+  for (const field of COMPANY_FIELDS) {
+    if (body[field] !== undefined) payload[field] = clean(body[field]);
+  }
+  if (payload.name !== undefined) payload.name = payload.name.trim();
+  if (payload.email !== undefined) payload.email = payload.email.toLowerCase();
+  if (payload.gstin !== undefined) payload.gstin = payload.gstin.toUpperCase();
+  if (payload.pan !== undefined) payload.pan = payload.pan.toUpperCase();
+  return payload;
+}
+
 export async function createCompany(req, res) {
   try {
-    const name = clean(req.body?.name);
-    if (!name) return res.status(400).json({ success: false, message: "Company name is required." });
-    const company = await Company.create({ name });
+    const payload = companyPayload(req.body);
+    if (!payload.name) return res.status(400).json({ success: false, message: "Company name is required." });
+    const company = await Company.create(payload);
     res.status(201).json({ success: true, message: "Company created.", company });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.code === 11000 ? "Company already exists." : error.message });
+    res.status(400).json({ success: false, message: error.code === 11000 ? "A company with this name already exists." : error.message });
+  }
+}
+
+export async function updateCompany(req, res) {
+  try {
+    const payload = companyPayload(req.body);
+    if (payload.name !== undefined && !payload.name) return res.status(400).json({ success: false, message: "Company name is required." });
+    const company = await Company.findByIdAndUpdate(req.params.id, { $set: payload }, { new: true, runValidators: true });
+    if (!company) return res.status(404).json({ success: false, message: "Company not found." });
+    res.json({ success: true, message: "Company details updated.", company });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.code === 11000 ? "A company with this name already exists." : error.message });
   }
 }
 

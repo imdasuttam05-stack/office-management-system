@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const purchaseLineSchema = new mongoose.Schema(
   {
@@ -27,7 +28,7 @@ const purchaseLineSchema = new mongoose.Schema(
 
 const rawMaterialPurchaseSchema = new mongoose.Schema(
   {
-    purchaseNo: { type: String, required: true, unique: true, index: true },
+    purchaseNo: { type: String, required: true, index: true },
     date: { type: Date, required: true, index: true },
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", default: null, index: true },
     location: { type: String, required: true, trim: true, maxlength: 120, index: true },
@@ -57,4 +58,6 @@ rawMaterialPurchaseSchema.index({ companyId: 1, date: -1 });
 rawMaterialPurchaseSchema.index({ location: 1, date: -1 });
 rawMaterialPurchaseSchema.index({ supplierName: 1, date: -1 });
 
+rawMaterialPurchaseSchema.index({ companyId: 1, financialYear: 1, purchaseNo: 1 }, { unique: true });
+rawMaterialPurchaseSchema.plugin(companyScopePlugin, { financialYear: true });
 export default mongoose.model("RawMaterialPurchase", rawMaterialPurchaseSchema);

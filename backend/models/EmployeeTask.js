@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const employeeTaskSchema = new mongoose.Schema(
   {
@@ -13,5 +14,7 @@ const employeeTaskSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+employeeTaskSchema.plugin(companyScopePlugin, { financialYear: true });
 
 export default mongoose.model("EmployeeTask", employeeTaskSchema);

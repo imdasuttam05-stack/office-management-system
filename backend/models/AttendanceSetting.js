@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const dayRule = new mongoose.Schema({
   type: { type: String, enum: ["Working", "Half Day", "Week Off"], default: "Working" },
@@ -11,7 +12,7 @@ const dayRule = new mongoose.Schema({
 }, { _id: false });
 
 const schema = new mongoose.Schema({
-  key: { type: String, unique: true, default: "default" },
+  key: { type: String, default: "default", index: true },
   saturday: { type: dayRule, default: () => ({ type: "Working" }) },
   days: {
     monday: { type: dayRule, default: () => ({ type: "Working" }) },
@@ -35,5 +36,8 @@ const schema = new mongoose.Schema({
     note: { type: String, default: "" }
   }]
 }, { timestamps: true });
+
+schema.index({ companyId: 1, key: 1 }, { unique: true });
+schema.plugin(companyScopePlugin, { financialYear: false });
 
 export default mongoose.model("AttendanceSetting", schema);

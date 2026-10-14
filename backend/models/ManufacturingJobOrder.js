@@ -1,11 +1,14 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 const line = new mongoose.Schema({
   stockId:{type:mongoose.Schema.Types.ObjectId,ref:"InventoryStock",default:null},
   itemId:{type:mongoose.Schema.Types.ObjectId,ref:"InventoryItemMaster",default:null},
   itemName:{type:String,required:true,trim:true}, unit:{type:String,default:"KG"}, qty:{type:Number,required:true,min:0}, rate:{type:Number,default:0,min:0}, value:{type:Number,default:0,min:0}, hsn:{type:String,default:""}, batchNo:{type:String,default:""}, barcode:{type:String,default:""}, purchaseAllocations:{type:[new mongoose.Schema({purchaseId:{type:mongoose.Schema.Types.ObjectId,ref:"RawMaterialPurchase"},lineId:{type:mongoose.Schema.Types.ObjectId},purchaseNo:{type:String,default:""},date:{type:Date},supplierName:{type:String,default:""},qty:{type:Number,default:0},purchaseQty:{type:Number,default:0},pendingAfter:{type:Number,default:0},rate:{type:Number,default:0},unit:{type:String,default:"KG"}},{_id:false})],default:[]}
 },{_id:false});
 const schema=new mongoose.Schema({
- jobNo:{type:String,unique:true,index:true}, companyId:{type:mongoose.Schema.Types.ObjectId,ref:"Company",default:null,index:true}, date:{type:Date,default:Date.now,index:true}, type:{type:String,enum:["GRADING","FINISHED_GOODS"],required:true,index:true}, location:{type:String,required:true,index:true}, partyId:{type:mongoose.Schema.Types.ObjectId,ref:"CustomerMaster",default:null}, partyName:{type:String,default:""}, sourceItems:{type:[line],default:[]}, outputItems:{type:[line],default:[]}, labourCost:{type:Number,default:0,min:0}, transportCost:{type:Number,default:0,min:0}, otherCost:{type:Number,default:0,min:0}, totalCost:{type:Number,default:0,min:0}, notes:{type:String,default:""}, status:{type:String,enum:["POSTED","COMPLETED","CANCELLED"],default:"POSTED",index:true}, createdBy:{type:mongoose.Schema.Types.ObjectId,ref:"User",required:true}
+ jobNo:{type:String,index:true}, companyId:{type:mongoose.Schema.Types.ObjectId,ref:"Company",default:null,index:true}, date:{type:Date,default:Date.now,index:true}, type:{type:String,enum:["GRADING","FINISHED_GOODS"],required:true,index:true}, location:{type:String,required:true,index:true}, partyId:{type:mongoose.Schema.Types.ObjectId,ref:"CustomerMaster",default:null}, partyName:{type:String,default:""}, sourceItems:{type:[line],default:[]}, outputItems:{type:[line],default:[]}, labourCost:{type:Number,default:0,min:0}, transportCost:{type:Number,default:0,min:0}, otherCost:{type:Number,default:0,min:0}, totalCost:{type:Number,default:0,min:0}, notes:{type:String,default:""}, status:{type:String,enum:["POSTED","COMPLETED","CANCELLED"],default:"POSTED",index:true}, createdBy:{type:mongoose.Schema.Types.ObjectId,ref:"User",required:true}
 },{timestamps:true});
 schema.index({type:1,date:-1,location:1});
+schema.index({ companyId: 1, financialYear: 1, jobNo: 1 }, { unique: true });
+schema.plugin(companyScopePlugin, { financialYear: true });
 export default mongoose.model("ManufacturingJobOrder",schema);

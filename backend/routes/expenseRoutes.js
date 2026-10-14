@@ -11,13 +11,14 @@ import {
 } from "../controllers/expenseController.js";
 
 import auth from "../middleware/auth.js";
+import requireCompanyContext from "../middleware/companyContext.js";
 import requireRole from "../middleware/role.js";
 
 const router = express.Router();
+router.use(auth, requireCompanyContext);
 
 router.post(
   "/",
-  auth,
   requireRole(
     "Admin",
     "Manager",
@@ -28,32 +29,27 @@ router.post(
 
 router.get(
   "/",
-  auth,
   getExpenses
 );
 
 router.get(
   "/:id",
-  auth,
   getExpenseById
 );
 
 router.put(
   "/:id",
-  auth,
   updateExpense
 );
 
 router.delete(
   "/:id",
-  auth,
   requireRole("Admin"),
   deleteExpense
 );
 
 router.patch(
   "/:id/approve",
-  auth,
   requireRole(
     "Admin",
     "Manager"
@@ -63,7 +59,6 @@ router.patch(
 
 router.patch(
   "/:id/reject",
-  auth,
   requireRole(
     "Admin",
     "Manager"

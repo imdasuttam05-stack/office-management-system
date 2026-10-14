@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const accountsMasterSchema = new mongoose.Schema({
   masterType: { type: String, required: true, index: true },
@@ -40,4 +41,5 @@ const accountsMasterSchema = new mongoose.Schema({
 
 accountsMasterSchema.index({ masterType: 1, name: 1 });
 
+accountsMasterSchema.plugin(companyScopePlugin, { financialYear: false });
 export default mongoose.models.AccountsMaster || mongoose.model("AccountsMaster", accountsMasterSchema);

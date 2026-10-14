@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const ledgerSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 160 },
@@ -13,5 +14,6 @@ const ledgerSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });
 
-ledgerSchema.index({ name: 1, group: 1 }, { unique: true });
+ledgerSchema.index({ companyId: 1, name: 1, group: 1 }, { unique: true });
+ledgerSchema.plugin(companyScopePlugin, { financialYear: false });
 export default mongoose.model("Ledger", ledgerSchema);

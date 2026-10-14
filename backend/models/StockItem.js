@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import companyScopePlugin from "./companyScopePlugin.js";
 
 const stockItemSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 160 },
@@ -13,5 +14,6 @@ const stockItemSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });
 
-stockItemSchema.index({ name: 1 }, { unique: true });
+stockItemSchema.index({ companyId: 1, name: 1 }, { unique: true });
+stockItemSchema.plugin(companyScopePlugin, { financialYear: false });
 export default mongoose.model("StockItem", stockItemSchema);
