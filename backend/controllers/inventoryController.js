@@ -117,8 +117,26 @@ async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narratio
  const normalized=lines.map(x=>({ledger:x.ledger,debit:r2(x.debit),credit:r2(x.credit),narration:x.narration||narration||""}));
  const totalDebit=r2(normalized.reduce((s,x)=>s+x.debit,0)),totalCredit=r2(normalized.reduce((s,x)=>s+x.credit,0));
  if(totalDebit<=0||Math.abs(totalDebit-totalCredit)>0.005)throw new Error("Automatic accounting voucher is not balanced.");
- const prefix=type.slice(0,3).toUpperCase(),count=await Voucher.countDocuments({type}),voucherNo=`${prefix}-${new Date(date).getFullYear()}-${String(count+1).padStart(5,"0")}`;
- return Voucher.create({voucherNo,date,type,partyLedger,referenceNo,narration,lines:normalized,totalDebit,totalCredit,sourceType,sourceId,createdBy:req.user._id});
+ const prefix=type.slice(0,3).toUpperCase();
+ const year=new Date(date).getFullYear();
+ const pattern=`^${prefix}-${year}-\\d{5}$`;
+ const base={date,type,partyLedger,referenceNo,narration,lines:normalized,totalDebit,totalCredit,sourceType,sourceId,createdBy:req.user._id};
+ // Do not use countDocuments({type}) for numbering: scoped queries and deleted/gapped
+ // voucher numbers can make the count point to an already-used voucherNo.
+ // Read the latest number from the raw collection to bypass company-scoped middleware.
+ for(let attempt=0;attempt<10;attempt++){
+  const latestRows=await Voucher.collection.find({voucherNo:{$regex:pattern}}).sort({voucherNo:-1}).limit(1).toArray();
+  const latest=latestRows[0]?.voucherNo||"";
+  const lastSeq=latest?Number(latest.slice(latest.lastIndexOf("-")+1))||0:0;
+  const voucherNo=`${prefix}-${year}-${String(lastSeq+1).padStart(5,"0")}`;
+  try{
+   return await Voucher.create({...base,voucherNo});
+  }catch(error){
+   // If another request used the same number concurrently, retry from the new maximum.
+   if(error?.code!==11000 || !(error?.keyPattern?.voucherNo || /voucherNo_1/.test(error?.message||"")))throw error;
+  }
+ }
+ throw new Error(`Could not allocate a unique ${prefix} voucher number after several attempts. Please retry Save.`);
 }
 
 export async function getPurchaseMasters(req,res){
