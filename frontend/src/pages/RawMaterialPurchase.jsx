@@ -71,6 +71,10 @@ export default function RawMaterialPurchase() {
   const [page, setPage] = useState(1);
   const [stockPage, setStockPage] = useState(1);
 
+  function locationLabel(value) {
+    return masters.locations.find((location) => String(location._id) === String(value))?.name || value || "-";
+  }
+
   const [pagination, setPagination] = useState({
     page: 1,
     pages: 1,
@@ -1507,7 +1511,7 @@ export default function RawMaterialPurchase() {
                       </td>
 
                       <td>
-                        {p.location}
+                        {locationLabel(p.location)}
                       </td>
 
                       <td>
@@ -1574,7 +1578,7 @@ export default function RawMaterialPurchase() {
                       </td>
 
                       <td>
-                        {s.location}
+                        {locationLabel(s.location)}
                       </td>
 
                       <td>
@@ -1697,7 +1701,7 @@ export default function RawMaterialPurchase() {
               <div>
                 <h2 id="rmp-movement-title">Stock Movement</h2>
                 <p>
-                  {selectedStock.itemName} · {selectedStock.location}
+                  {selectedStock.itemName} · {locationLabel(selectedStock.location)}
                   {selectedStock.batchNo ? ` · Batch ${selectedStock.batchNo}` : ""}
                 </p>
               </div>
