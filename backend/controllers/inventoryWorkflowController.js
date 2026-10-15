@@ -12,6 +12,7 @@ import Group from "../models/Group.js";
 import Voucher from "../models/Voucher.js";
 import InventoryCounter from "../models/InventoryCounter.js";
 const clean=v=>String(v??"").trim(); const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0}; const r2=v=>Math.round((num(v)+Number.EPSILON)*100)/100;
+const bomCostAmount=(qty,unit,rate)=>{const normalized=clean(unit).toLowerCase();const divisor=["g","gm","gram","grams","ml","milliliter","milliliters","millilitre","millilitres"].includes(normalized)?1000:normalized==="mg"?1000000:1;return r2(num(qty)*num(rate)/divisor)};
 async function next(key,prefix){const y=new Date().getFullYear();const c=await InventoryCounter.findOneAndUpdate({key:`${key}_${y}`},{$inc:{seq:1}},{upsert:true,new:true,setDefaultsOnInsert:true});return `${prefix}-${y}-${String(c.seq).padStart(5,"0")}`}
 async function ledger(name,groupName,nature,req){let l=await Ledger.findOne({name,isActive:true});if(l)return l;let g=await Group.findOne({name:groupName,parent:null});if(!g)g=await Group.create({name:groupName,parent:null,nature,isSystem:true});return Ledger.create({name,group:g._id,createdBy:req.user._id});}
 async function voucher(req,date,type,partyLedger,referenceNo,lines,narration,sourceId){const cleanLines=lines.map(x=>({ledger:x.ledger,debit:r2(x.debit),credit:r2(x.credit),narration:x.narration||narration}));const d=r2(cleanLines.reduce((s,x)=>s+x.debit,0)),c=r2(cleanLines.reduce((s,x)=>s+x.credit,0));if(d<=0||Math.abs(d-c)>0.005)throw Error("Accounting voucher is not balanced.");const no=await next("WF_VOUCHER",type.slice(0,3).toUpperCase());return Voucher.create({voucherNo:no,date,type,partyLedger,referenceNo,narration,lines:cleanLines,totalDebit:d,totalCredit:c,sourceType:"INVENTORY_WORKFLOW",sourceId,createdBy:req.user._id})}
@@ -19,7 +20,42 @@ export async function getWorkflowMasters(req,res){try{const companyId=req.user?.
 
 export async function getPurchaseRate(req,res){try{const itemId=clean(req.query.itemId),itemName=clean(req.query.itemName);const filter={status:"POSTED"};if(req.user?.companyId)filter.companyId=req.user.companyId;const rows=await RawMaterialPurchase.find(filter).sort({date:-1,createdAt:-1}).lean();for(const p of rows){for(const l of p.lines||[]){if((itemId&&String(l.itemId)===String(itemId))||(!itemId&&itemName&&clean(l.itemName).toLowerCase()===itemName.toLowerCase()))return res.json({success:true,rate:num(l.purchaseRate),purchaseNo:p.purchaseNo,date:p.date,supplierName:p.supplierName});}}return res.json({success:true,rate:0});}catch(e){res.status(500).json({success:false,message:e.message})}}
 export async function listBoms(req,res){const filter={active:true,companyId:req.user?.companyId||null};res.json({success:true,items:await BOM.find(filter).sort({name:1}).lean()})}
-export async function createBom(req,res){try{const b=req.body||{},companyId=req.user?.companyId||null,out=await InventoryItemMaster.findOne({_id:b.outputItemId,companyId,active:true});if(!out)throw Error("Output product must be selected from Product Master.");const materials=Array.isArray(b.materials)?b.materials:[];if(!materials.length)throw Error("BOM needs at least one material.");let materialCost=0;const lines=[];for(const x of materials){const item=await InventoryItemMaster.findOne({_id:x.itemId,companyId,active:true});if(!item)throw Error("BOM material not found in Product Master.");const qty=num(x.qtyPerUnit);if(qty<=0)throw Error(`Invalid BOM quantity for ${item.name}.`);const rate=num(x.rate);const cost=r2(qty*rate);materialCost+=cost;lines.push({itemId:item._id,itemName:item.name,qtyPerUnit:qty,unit:clean(x.unit)||item.unit,rate,cost})}const labour=Math.max(0,num(b.labourCost)),packing=Math.max(0,num(b.packingCost)),other=Math.max(0,num(b.otherCost)),total=r2(materialCost+labour+packing+other),per=r2(total/(num(b.outputQty)||1)),values={name:clean(b.name),outputItemId:out._id,outputItemName:out.name,outputUnit:out.unit,outputQty:num(b.outputQty)||1,materials:lines,labourCost:labour,packingCost:packing,otherCost:other,totalCost:total,costPerUnit:per,active:true,createdBy:req.user._id};let row;if(b._id){row=await BOM.findOneAndUpdate({_id:b._id,companyId},{$set:values},{new:true,runValidators:true});if(!row)throw Error("BOM not found.")}else{row=await BOM.findOneAndUpdate({companyId,name:values.name},{$set:values,$setOnInsert:{companyId}},{upsert:true,new:true,runValidators:true,setDefaultsOnInsert:true})}res.status(b._id?200:201).json({success:true,message:b._id?"BOM updated.":"BOM saved.",item:row})}catch(e){res.status(400).json({success:false,message:e.message})}}
+export async function createBom(req,res){
+ try{
+  const b=req.body||{},companyId=req.user?.companyId||null,out=await InventoryItemMaster.findOne({_id:b.outputItemId,companyId,active:true});
+  if(!out)throw Error("Output product must be selected from Product Master.");
+  const materials=Array.isArray(b.materials)?b.materials:[];
+  if(!materials.length)throw Error("BOM needs at least one material.");
+  let materialCost=0;
+  const lines=[];
+  for(const x of materials){
+   const item=await InventoryItemMaster.findOne({_id:x.itemId,companyId,active:true});
+   if(!item)throw Error("BOM material not found in Product Master.");
+   const qty=num(x.qtyPerUnit);
+   if(qty<=0)throw Error(`Invalid BOM quantity for ${item.name}.`);
+   const rate=num(x.rate),cost=r2(qty*rate);
+   materialCost+=cost;
+   lines.push({itemId:item._id,itemName:item.name,qtyPerUnit:qty,unit:clean(x.unit)||item.unit,rate,cost});
+  }
+  const costItems=(Array.isArray(b.costItems)?b.costItems:[]).map(x=>{
+   const name=clean(x.name),unit=clean(x.unit),qty=num(x.qty),rate=num(x.rate);
+   if(!name||qty<=0||rate<0)throw Error("Each BOM cost item needs a name, quantity and valid rate.");
+   return {name,unit,qty,rate,cost:bomCostAmount(qty,unit,rate)};
+  });
+  const costItemsTotal=r2(costItems.reduce((sum,item)=>sum+item.cost,0));
+  const labour=Math.max(0,num(b.labourCost)),packing=Math.max(0,num(b.packingCost)),other=Math.max(0,num(b.otherCost));
+  const total=r2(materialCost+costItemsTotal+labour+packing+other),outputQty=num(b.outputQty)||1,per=r2(total/outputQty);
+  const values={name:clean(b.name),outputItemId:out._id,outputItemName:out.name,outputUnit:out.unit,outputQty,materials:lines,costItems,labourCost:labour,packingCost:packing,otherCost:other,totalCost:total,costPerUnit:per,active:true,createdBy:req.user._id};
+  let row;
+  if(b._id){
+   row=await BOM.findOneAndUpdate({_id:b._id,companyId},{$set:values},{new:true,runValidators:true});
+   if(!row)throw Error("BOM not found.");
+  }else{
+   row=await BOM.findOneAndUpdate({companyId,name:values.name},{$set:values,$setOnInsert:{companyId}},{upsert:true,new:true,runValidators:true,setDefaultsOnInsert:true});
+  }
+  res.status(b._id?200:201).json({success:true,message:b._id?"BOM updated.":"BOM saved.",item:row});
+ }catch(e){res.status(400).json({success:false,message:e.message})}
+}
 export async function costing(req,res){try{const b=req.body||{},materials=Array.isArray(b.materials)?b.materials:[];const rows=materials.map(x=>({name:clean(x.name),qty:num(x.qty),rate:num(x.rate),cost:r2(num(x.qty)*num(x.rate))}));const material=r2(rows.reduce((s,x)=>s+x.cost,0)),labour=Math.max(0,num(b.labourCost)),packing=Math.max(0,num(b.packingCost)),other=Math.max(0,num(b.otherCost)),total=r2(material+labour+packing+other),outputQty=num(b.outputQty)||1;res.json({success:true,materials:rows,materialCost:material,labourCost:labour,packingCost:packing,otherCost:other,totalCost:total,outputQty,costPerUnit:r2(total/outputQty)})}catch(e){res.status(400).json({success:false,message:e.message})}}
 async function stockMove({req,location,line,mode,value,sourceType,sourceNo}){const filter={companyId:req.user?.companyId||null,location,itemType:line.itemType,itemName:line.itemName,batchNo:clean(line.batchNo),barcode:clean(line.barcode)};const old=await InventoryStock.findOne(filter).lean();const oq=num(old?.qty),ov=num(old?.stockValue),q=num(line.qty),v=r2(value);if(mode==="OUT"&&oq<q-0.000001)throw Error(`Insufficient ${line.itemType} stock for ${line.itemName}. Available ${oq}, required ${q}.`);const nq=r2(mode==="OUT"?oq-q:oq+q),nv=r2(Math.max(0,mode==="OUT"?ov-v:ov+v));await InventoryStock.findOneAndUpdate(filter,{$set:{unit:clean(line.unit)||"KG",averageRate:nq?r2(nv/nq):0},$inc:{qty:mode==="OUT"?-q:q,stockValue:mode==="OUT"?-v:v},$setOnInsert:{companyId:req.user?.companyId||null,location,itemType:line.itemType,itemName:line.itemName,batchNo:clean(line.batchNo),barcode:clean(line.barcode)}},{upsert:true,new:true});await InventoryMovement.create({companyId:req.user?.companyId||null,date:new Date(),location,itemName:line.itemName,itemType:line.itemType,unit:line.unit||"KG",qtyIn:mode==="IN"?q:0,qtyOut:mode==="OUT"?q:0,valueIn:mode==="IN"?v:0,valueOut:mode==="OUT"?v:0,balanceQty:nq,sourceType,sourceNo,batchNo:clean(line.batchNo),barcode:clean(line.barcode),createdBy:req.user?._id});return nq}
 export async function createPI(req,res){try{const b=req.body||{},customer=await CustomerMaster.findOne({_id:b.partyId,companyId:req.user?.companyId||null,active:true});if(!customer)throw Error("Customer / Party must come from Customer Master.");const lines=(Array.isArray(b.lines)?b.lines:[]).map(x=>({itemId:x.itemId,itemName:clean(x.itemName),itemType:clean(x.itemType)||"FINISHED_GOODS",unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)}));if(!lines.length||lines.some(x=>!x.itemName||x.qty<=0))throw Error("PI needs valid product lines.");const total=r2(lines.reduce((s,x)=>s+x.value,0)),no=await next("PI","PI");const row=await InventoryWorkflow.create({companyId:req.user?.companyId||null,docNo:no,docType:"PI",date:new Date(b.date||Date.now()),location:clean(b.location),partyId:customer._id,partyName:customer.name,sourceLines:lines,totalValue:total,referenceNo:clean(b.referenceNo),notes:clean(b.notes),createdBy:req.user._id});res.status(201).json({success:true,message:`PI ${no} saved. No stock has been reduced.`,item:row})}catch(e){res.status(400).json({success:false,message:e.message})}}
