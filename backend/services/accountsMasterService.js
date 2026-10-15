@@ -29,9 +29,14 @@ function inferNature(name, fallback="Asset") {
   return fallback;
 }
 
-async function ensureRealGroup(name, nature, userId) {
+async function ensureRealGroup(name, nature, userId, parentName = "") {
   const groupName = clean(name) || "Current Assets";
-  let row = await Group.findOne({name:groupName,parent:null});
+  const parentLabel = clean(parentName).toLowerCase() === "primary" ? "" : clean(parentName);
+  const parent = parentLabel ? await Group.findOne({name:parentLabel}) : null;
+  if (parentLabel && !parent) throw new Error(`Parent group ${parentLabel} not found.`);
+  const parentId = parent?._id || null;
+  let row = await Group.findOne({name:groupName,parent:parentId});
+  if (!row && !parentId) row = await Group.findOne({name:groupName});
   const sharedGroupFilter = {
     name:groupName,
     parent:null,
@@ -41,11 +46,12 @@ async function ensureRealGroup(name, nature, userId) {
   if (!row) row = await Group.collection.findOne(sharedGroupFilter);
   if (!row) {
     try {
-      row = await Group.create({name:groupName,parent:null,nature:inferNature(groupName,nature),isSystem:false});
+      row = await Group.create({name:groupName,parent:parentId,nature:inferNature(groupName,nature),isSystem:false});
     } catch (error) {
       if (error?.code !== 11000) throw error;
-      row = await Group.findOne({name:groupName,parent:null});
-      if (!row) row = await Group.collection.findOne(sharedGroupFilter);
+      row = await Group.findOne({name:groupName,parent:parentId});
+      if (!row && !parentId) row = await Group.findOne({name:groupName});
+      if (!row && !parentId) row = await Group.collection.findOne(sharedGroupFilter);
       if (!row) throw error;
     }
   }
@@ -118,7 +124,7 @@ async function syncTransactionMaster(master, ctx, previousName = "") {
   const createdBy=user._id;
 
   if (master.masterType === "group") {
-    await ensureRealGroup(master.name, master.nature || "Liability", createdBy);
+    await ensureRealGroup(master.name, master.nature || "Liability", createdBy, master.under);
     return;
   }
 
