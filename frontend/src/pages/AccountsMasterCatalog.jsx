@@ -69,7 +69,7 @@ const blank = {
   }
 };
 
-function SearchableSelect({ value, options, onChange, placeholder="Select or type..." }) {
+function SearchableSelect({ value, options, onChange, placeholder="Select or type...", onCreateShortcut }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -96,6 +96,12 @@ function SearchableSelect({ value, options, onChange, placeholder="Select or typ
   }
 
   function handleKeyDown(event) {
+    if (event.altKey && event.key.toLowerCase() === "c" && onCreateShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      onCreateShortcut();
+      return;
+    }
     if (event.key === "Escape" && open) {
       event.preventDefault();
       event.stopPropagation();
@@ -174,6 +180,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
   const pinLookupRef = useRef(0);
   const [gstLookup, setGstLookup] = useState("");
   const gstLookupRef = useRef(0);
+  const [unitCreateOpen, setUnitCreateOpen] = useState(false);
 
   useEffect(() => {
     if (initialType && blank[initialType]) {
@@ -257,6 +264,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.altKey && e.key.toLowerCase() === "c") {
+        if (unitCreateOpen) return;
         e.preventDefault();
         openCreate(type);
         return;
@@ -289,7 +297,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [type, mode]);
+  }, [type, mode, unitCreateOpen]);
 
   function update(key, value) {
     setForm(f => {
@@ -585,7 +593,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
                 <div className="field"><label>Product Code</label><input value={form.code||""} placeholder="Auto / optional" onChange={e=>update("code",e.target.value)}/></div>
                 <div className="field"><label>Item Type</label><SearchableSelect value={form.itemType||"FINISHED_GOODS"} options={asOptions(["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"])} onChange={value=>update("itemType",value)} placeholder="Search item types..." /></div>
                 <div className="field"><label>HSN</label><input value={form.hsn||""} onChange={e=>update("hsn",e.target.value)}/></div>
-                <div className="field"><label>Unit *</label><SearchableSelect value={form.unit||""} options={asOptions([{value:"",label:"Select Unit"},...units.map(x=>({value:x.code||x.name,label:`${x.code||x.name} — ${x.name}`}))])} onChange={value=>update("unit",value)} placeholder="Search units..." /></div>
+                <div className="field"><label>Unit *</label><SearchableSelect value={form.unit||""} options={asOptions([{value:"",label:"Select Unit"},...units.map(x=>({value:x.code||x.name,label:`${x.code||x.name} — ${x.name}`}))])} onChange={value=>update("unit",value)} onCreateShortcut={()=>setUnitCreateOpen(true)} placeholder="Search units..." /></div>
                 <div className="field"><label>GST %</label><input type="number" value={form.gstRate||""} onChange={e=>update("gstRate",e.target.value)}/></div>
                 <div className="field"><label>Under / Stock Ledger</label><SearchableSelect value={form.under||"Stock-in-Hand"} options={asOptions(["Stock-in-Hand",...groups])} onChange={value=>update("under",value)} placeholder="Search stock groups..." /></div>
                 <div className="field"><label>Purchase Rate</label><input type="number" value={form.purchaseRate||""} onChange={e=>update("purchaseRate",e.target.value)}/></div>
@@ -619,6 +627,32 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
           </div>
         )}
       </main>
+      {unitCreateOpen && (
+        <div
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setUnitCreateOpen(false);
+          }}
+          style={{position:"fixed",inset:0,zIndex:2000,display:"grid",placeItems:"center",padding:16,background:"rgba(16,24,40,.58)"}}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Create Unit"
+            style={{width:"min(900px,100%)",maxHeight:"92vh",overflow:"auto",background:"#fff",borderRadius:4}}
+          >
+            <AccountsMasterCatalog
+              initialType="unit"
+              initialMode="create"
+              onSaved={async saved => {
+                const unit = saved?.data || saved?.master || saved;
+                await loadLookups();
+                update("unit", unit?.code || unit?.name || "");
+                setUnitCreateOpen(false);
+              }}
+            />
+          </section>
+        </div>
+      )}
     </div>
   );
 }
