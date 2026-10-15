@@ -248,6 +248,19 @@ export async function createMaster(payload = {}, ctx = {}) {
   if (masterType === "party") { data.under=data.under||"Sundry Debtors"; data.partyType=data.partyType||"CUSTOMER"; data.nature=data.nature||"Current Assets"; }
   if (masterType === "supplier") { data.under=data.under||"Sundry Creditors"; data.partyType=data.partyType||"SUPPLIER"; data.nature=data.nature||"Current Liabilities"; }
   if (masterType === "product") { data.under=data.under||"Stock-in-Hand"; data.itemType=data.itemType||"RAW_MATERIAL"; data.unit=data.unit||"KG"; }
+  if (masterType === "unit") {
+    data.code=clean(payload.code).toUpperCase().replace(/\s+/g,"_");
+    if (!data.code) throw Object.assign(new Error("Unit name and unit code are required."),{code:"UNIT_VALIDATION"});
+    const companyId=ctx.user?.companyId||null;
+    const [accountUnit,inventoryUnit]=await Promise.all([
+      AccountsMaster.findOne({masterType:"unit",name}),
+      UnitMaster.findOne({companyId,$or:[{name},{code:data.code}]}),
+    ]);
+    if (accountUnit) throw Object.assign(new Error("A Unit with this name already exists."),{code:"UNIT_DUPLICATE"});
+    if (inventoryUnit && (inventoryUnit.name!==name || inventoryUnit.code!==data.code)) {
+      throw Object.assign(new Error("A Unit with this name or code already exists. Use its existing name and code."),{code:"UNIT_DUPLICATE"});
+    }
+  }
   if (masterType === "location") {
     data.code=data.code||name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
     if (data.pin && !/^\d{6}$/.test(data.pin)) throw new Error("PIN must be exactly 6 digits.");
@@ -255,7 +268,17 @@ export async function createMaster(payload = {}, ctx = {}) {
   if (masterType === "unit") { data.code=data.code||name.toUpperCase().replace(/\s+/g,"_"); data.decimalPlaces=Math.max(0, Math.min(6, Number(data.decimalPlaces ?? 2))); }
 
   const created = await AccountsMaster.create(data);
-  await syncTransactionMaster(created.toObject(), ctx);
+  try {
+    await syncTransactionMaster(created.toObject(), ctx);
+  } catch (error) {
+    if (masterType === "unit") {
+      await AccountsMaster.deleteOne({_id:created._id});
+      if (error?.code === 11000) {
+        throw Object.assign(new Error("A Unit with this name or code already exists. Use its existing name and code."),{code:"UNIT_DUPLICATE"});
+      }
+    }
+    throw error;
+  }
   return created.toObject();
 }
 
