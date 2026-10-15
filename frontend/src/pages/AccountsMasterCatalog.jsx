@@ -242,6 +242,10 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
     `${x.name||""} ${x.code||""} ${x.gstin||""} ${x.state||""} ${x.under||""}`
       .toLowerCase().includes(search.toLowerCase())
   ), [rows, search]);
+  const ledgerGroupOptions = useMemo(
+    () => Array.from(new Set([...GROUPS, ...groups.map(group => group.name).filter(Boolean)])),
+    [groups]
+  );
 
   function openCreate(nextType = type) {
     setType(nextType);
@@ -523,7 +527,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
                   <div className="section-grid">
                     <div className="field"><label>Name *</label><input autoFocus value={form.name||""} onChange={e=>update("name",e.target.value)} /></div>
                     <div className="field"><label>Alias</label><input value={form.alias||""} onChange={e=>update("alias",e.target.value)} /></div>
-                    <div className="field"><label>Under *</label><SearchableSelect value={form.under||"Sundry Debtors"} options={asOptions(GROUPS)} onChange={value=>update("under",value)} placeholder="Search groups..." /></div>
+                    <div className="field"><label>Under *</label><SearchableSelect value={form.under||"Sundry Debtors"} options={asOptions(ledgerGroupOptions)} onChange={value=>update("under",value)} placeholder="Search groups..." /></div>
                   </div>
                 </section>
                 <section className="field-section">
@@ -570,7 +574,7 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
               </>}
 
               {type==="group" && <>
-                <div className="field"><label>Under</label><SearchableSelect value={form.under||""} options={asOptions([{value:"",label:"Primary"},...GROUPS])} onChange={value=>update("under",value)} placeholder="Search groups..." /></div>
+                <div className="field"><label>Under</label><SearchableSelect value={form.under||""} options={asOptions([{value:"",label:"Primary"},...ledgerGroupOptions.filter(name=>name!==(editing?.name||form.name))])} onChange={value=>update("under",value)} placeholder="Search groups..." /></div>
                 <div className="field"><label>Nature</label><SearchableSelect value={form.nature||"Liability"} options={asOptions(["Asset","Liability","Income","Expense"])} onChange={value=>update("nature",value)} placeholder="Search nature..." /></div>
               </>}
 
