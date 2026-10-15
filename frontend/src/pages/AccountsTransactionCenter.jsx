@@ -14,6 +14,12 @@ const bomCostAmount = (qty, unit, rate) => {
   const divisor = ["g", "gm", "gram", "grams", "ml", "milliliter", "milliliters", "millilitre", "millilitres"].includes(normalized) ? 1000 : normalized === "mg" ? 1000000 : 1;
   return round2((n(qty) * n(rate)) / divisor);
 };
+const packageWeightGrams = name => {
+  const match = String(name || "").match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  return /^mg$/i.test(match[2]) ? amount / 1000 : /^kg/i.test(match[2]) ? amount * 1000 : amount;
+};
 
 const txTabs = [
   ["purchase","Purchase"],["sale","Sale"],["job","Job Order"],["production","Production"],
@@ -93,6 +99,9 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const [pack,setPack]=useState({date:today(),location:"",conversionCharge:0,notes:""}), [packSrc,setPackSrc]=useState([blankLine("RAW_MATERIAL")]), [packOut,setPackOut]=useState([blankLine("PACKED_GOODS")]);
   const [stockType,setStockType]=useState("RAW_MATERIAL"), [stockLocation,setStockLocation]=useState("");
   const [bom,setBom]=useState({name:"",outputItemId:"",outputQty:1,labourCost:0,packingCost:0,otherCost:0,materials:[{itemId:"",itemName:"",qtyPerUnit:1,rate:0}],costItems:[]});
+  const [bomCostItemMasters,setBomCostItemMasters]=useState([]);
+  const [costMasterForm,setCostMasterForm]=useState({name:"",unit:"g",standardRate:""});
+  const [editingCostMasterId,setEditingCostMasterId]=useState("");
   const [cost,setCost]=useState({outputQty:1,labourCost:0,packingCost:0,otherCost:0,materials:[{name:"",qty:1,rate:0}]});
   const [costResult,setCostResult]=useState(null);
   const bomCostItemsTotal=(bom.costItems||[]).reduce((sum,item)=>sum+bomCostAmount(item.qty,item.unit,item.rate),0);
@@ -104,12 +113,27 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const [bomPurchasePicker,setBomPurchasePicker]=useState(null);
 
   useEffect(()=>{setTab(initialTab || "purchase")},[initialTab]);
-  useEffect(()=>{loadMasters();},[]);
+  useEffect(()=>{
+    setBom(current=>{
+      let changed=false;
+      const costItems=(current.costItems||[]).map(line=>{
+        const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
+        if(!master)return line;
+        const qty=costItemQuantity(master,current.outputItemId,current.outputQty);
+        if(line.name===master.name&&line.unit===master.unit&&n(line.rate)===n(master.standardRate)&&n(line.qty)===qty)return line;
+        changed=true;
+        return {...line,name:master.name,unit:master.unit,rate:master.standardRate,qty};
+      });
+      return changed?{...current,costItems}:current;
+    });
+  },[bom.outputItemId,bom.outputQty,bomCostItemMasters,m.items]);
+  useEffect(()=>{loadMasters();loadCostItemMasters();},[]);
   useEffect(()=>{if(tab==="stock")loadStock(); if(tab==="documents")loadDocs(); if(tab==="production")loadJobs(); if(tab==="job"||tab==="job-history"||tab==="job-return")loadJobs(); if(tab==="purchase"||tab==="purchase-history")loadPurchaseHistory();},[tab,stockType,stockLocation]);
 
   async function get(path){const r=await fetch(`${API}${path}`,{headers:auth()});const d=await r.json();if(!r.ok)throw Error(d.message||"Request failed");return d;}
   async function post(path,body){const r=await fetch(`${API}${path}`,{method:"POST",headers:auth(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.message||"Save failed");return d;}
   async function put(path,body){const r=await fetch(`${API}${path}`,{method:"PUT",headers:auth(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.message||"Update failed");return d;}
+  async function loadCostItemMasters(){try{const d=await get("/api/inventory/workflow/bom-cost-items");setBomCostItemMasters(d.items||[])}catch(e){setErr(e.message)}}
   async function loadMasters(){try{const [d,b,p]=await Promise.all([get("/api/inventory/workflow/masters"),get("/api/inventory/workflow/boms"),get("/api/inventory/raw-material-masters")]);const accountMasters=await Promise.allSettled(["party","supplier","ledger"].map(type=>get(`/api/accounts-masters?type=${type}`)));const options=new Map();for(const row of [...(d.customers||[]),...(d.suppliers||[]),...accountMasters.flatMap(result=>result.status==="fulfilled"?(result.value.data||result.value.masters||[]):[])]){const name=String(row.name||"").trim(),key=name.toLowerCase();if(name&&key&&!options.has(key))options.set(key,{...row,name})}setM({...d,creditorLedgers:p.creditorLedgers||[],jobParties:[...options.values()]});setBoms(b.items||[])}catch(e){setErr(e.message)}}
   async function loadPurchaseHistory(){setPurchaseHistoryLoading(true);try{const d=await get("/api/inventory/raw-material-purchases?page=1&limit=100");setPurchaseRows(d.items||[])}catch(e){setErr(e.message)}finally{setPurchaseHistoryLoading(false)}}
   async function loadStock(){try{const d=await get(`/api/inventory/stock?itemType=${encodeURIComponent(stockType)}${stockLocation?`&location=${encodeURIComponent(stockLocation)}`:""}&limit=200`);setStock(d.items||[])}catch(e){setErr(e.message)}}
@@ -187,6 +211,59 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     setBom(b=>({...b,materials:b.materials.map((line,i)=>i===index?{...line,rate:option.rate,unit:option.unit,purchaseId:option.purchaseId,purchaseLineId:option.lineId,purchaseNo:option.purchaseNo,supplierName:option.supplierName,purchaseDate:option.date}:line)}));
     setBomPurchasePicker(null);
   }
+  function costItemQuantity(master,outputItemId,outputQty){
+    const unit=String(master?.unit||"").trim().toLowerCase();
+    const packageGrams=packageWeightGrams(m.items.find(item=>String(item._id)===String(outputItemId))?.name);
+    const count=n(outputQty)||1;
+    if(["pkt","pack","packet","pcs","pc","piece","pieces","ea"].includes(unit))return count;
+    if(["g","gm","gram","grams"].includes(unit))return packageGrams?round2(packageGrams*count):count;
+    if(["kg","kgs","kilogram","kilograms"].includes(unit))return packageGrams?round2(packageGrams*count/1000):count;
+    return count;
+  }
+  function chooseBomOutput(id){
+    setBom(current=>({...current,outputItemId:id,costItems:(current.costItems||[]).map(line=>{
+      const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
+      return master?{...line,name:master.name,unit:master.unit,rate:master.standardRate,qty:costItemQuantity(master,id,current.outputQty)}:line;
+    })}));
+  }
+  function updateBomOutputQty(value){
+    setBom(current=>({...current,outputQty:value,costItems:(current.costItems||[]).map(line=>{
+      const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
+      return master?{...line,qty:costItemQuantity(master,current.outputItemId,value)}:line;
+    })}));
+  }
+  function chooseBomCostItem(index,masterId){
+    const master=bomCostItemMasters.find(item=>String(item._id)===String(masterId));
+    if(!master)return;
+    setBom(current=>({...current,costItems:current.costItems.map((line,rowIndex)=>rowIndex===index?{masterId:master._id,name:master.name,unit:master.unit,qty:costItemQuantity(master,current.outputItemId,current.outputQty),rate:master.standardRate}:line)}));
+  }
+  function editCostItemMaster(item){
+    setEditingCostMasterId(item._id);
+    setCostMasterForm({name:item.name,unit:item.unit,standardRate:String(item.standardRate)});
+    resetFeedback();
+  }
+  async function saveCostItemMaster(){
+    resetFeedback();
+    try{
+      const path=`/api/inventory/workflow/bom-cost-items${editingCostMasterId?`/${editingCostMasterId}`:""}`;
+      const data=editingCostMasterId?await put(path,costMasterForm):await post(path,costMasterForm);
+      setMsg(data.message||"Cost item master saved.");
+      setEditingCostMasterId("");
+      setCostMasterForm({name:"",unit:"g",standardRate:""});
+      await loadCostItemMasters();
+    }catch(e){setErr(e.message)}
+  }
+  async function deleteCostItemMaster(item){
+    if(!window.confirm(`Deactivate cost item master ${item.name}?`))return;
+    resetFeedback();
+    try{
+      const response=await fetch(`${API}/api/inventory/workflow/bom-cost-items/${item._id}`,{method:"DELETE",headers:auth()});
+      const data=await response.json();
+      if(!response.ok)throw Error(data.message||"Cost item master delete failed.");
+      setMsg(data.message||"Cost item master deactivated.");
+      await loadCostItemMasters();
+    }catch(e){setErr(e.message)}
+  }
   function editBom(row){
     setBom({...row,outputItemId:String(row.outputItemId||""),materials:(row.materials||[]).map(line=>({...line,itemId:String(line.itemId||""),qtyPerUnit:n(line.qtyPerUnit),rate:n(line.rate)})),costItems:(row.costItems||[]).map(line=>({...line,qty:n(line.qty),rate:n(line.rate)}))});
     setTab("bom");
@@ -255,7 +332,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     return <><div className="tx-table-wrap tx-line-table-wrap"><table className="tx-table tx-line-table" style={{width:"100%",minWidth:showGst?1120:760,tableLayout:"fixed",borderCollapse:"separate",borderSpacing:0}}><colgroup><col style={{width:showGst?"21%":"35%"}}/><col style={{width:showGst?"7%":"10%"}}/><col style={{width:showGst?"6%":"9%"}}/><col style={{width:showGst?"8%":"12%"}}/>{showGst&&<><col style={{width:"6%"}}/><col style={{width:"10%"}}/><col style={{width:"7%"}}/><col style={{width:"7%"}}/><col style={{width:"7%"}}/><col style={{width:"9%"}}/></>}<col style={{width:showGst?"9%":"12%"}}/><col style={{width:"3%"}}/></colgroup><thead><tr><th>{title||"Item"}</th><th>Qty</th><th>Unit</th><th>Rate</th>{showGst&&<><th>GST %</th><th>GST Type</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total GST</th></>}<th>Value</th><th></th></tr></thead><tbody>{lines.map((x,i)=>{const tax=showGst?purchaseTaxForLine(x):null;return <tr key={i}><td><SearchableSelect value={x.itemId||""} placeholder="Search item name" masterType="product" onOpenMaster={openMaster} options={options.map(o=>({value:o._id,label:`${o.name} · ${o.itemType}`}))} onChange={e=>chooseItem(setter,i,e.target.value)}/></td><td><input type="number" min="0" step="0.001" inputMode="decimal" value={x.qty ?? ""} onChange={e=>setLine(setter,i,"qty",e.target.value)} style={{width:"100%",minWidth:0,padding:"6px 4px",fontSize:12,textAlign:"right",boxSizing:"border-box",color:"#172b4d",background:"#fff"}}/></td><td><input value={x.unit||"KG"} onChange={e=>setLine(setter,i,"unit",e.target.value)} style={{width:"100%",minWidth:0,padding:"6px 4px",fontSize:12,boxSizing:"border-box",color:"#172b4d",background:"#fff"}}/></td><td><input type="number" min="0" step="0.01" inputMode="decimal" value={x.rate ?? ""} onChange={e=>setLine(setter,i,"rate",e.target.value)} style={{width:"100%",minWidth:0,padding:"6px 4px",fontSize:12,textAlign:"right",boxSizing:"border-box",color:"#172b4d",background:"#fff"}}/></td>{showGst&&<><td><input type="number" min="0" max="100" step="0.01" value={x.gstRate??""} onChange={e=>setLine(setter,i,"gstRate",e.target.value)} style={{width:"100%",minWidth:0,padding:"6px 3px",fontSize:11,textAlign:"right",boxSizing:"border-box"}}/></td><td><select value={x.gstType||"NONE"} onChange={e=>setLine(setter,i,"gstType",e.target.value)} style={{width:"100%",minWidth:0,padding:"6px 2px",fontSize:10,boxSizing:"border-box",whiteSpace:"normal"}}><option value="NONE">None</option><option value="CGST_SGST">CGST + SGST</option><option value="IGST">IGST</option></select></td><td>₹ {money(tax.cgst)}</td><td>₹ {money(tax.sgst)}</td><td>₹ {money(tax.igst)}</td><td><b>₹ {money(tax.gst)}</b></td></>}<td style={{whiteSpace:"nowrap",fontSize:11,textAlign:"right",padding:"6px 3px"}}>₹ {money(lineValue(x))}</td><td style={{padding:"4px 2px",textAlign:"center"}}><button type="button" className="tx-mini-danger" onClick={()=>setter(a=>a.filter((_,j)=>j!==i))}>×</button></td></tr>})}</tbody></table></div>{showGst&&<div className="tx-kpis" style={{marginTop:12}}><div className="tx-kpi"><b>Subtotal</b><strong>₹ {money(purchaseTotals.subtotal)}</strong></div><div className="tx-kpi"><b>Total CGST</b><strong>₹ {money(purchaseTotals.cgst)}</strong></div><div className="tx-kpi"><b>Total SGST</b><strong>₹ {money(purchaseTotals.sgst)}</strong></div><div className="tx-kpi"><b>Total IGST</b><strong>₹ {money(purchaseTotals.igst)}</strong></div><div className="tx-kpi"><b>Transport + Other</b><strong>₹ {money(purchaseTotals.transport+purchaseTotals.other)}</strong></div><div className="tx-kpi"><b>Grand Total</b><strong>₹ {money(purchaseTotals.grandTotal)}</strong></div></div>}</>
   },[]);
   function addLine(setter,type){setter(a=>[...a,blankLine(type)])}
-  const commonSelect=(value,onChange,opts,placeholder)=> {const choices=placeholder==="Select customer / party"?m.jobParties||opts:opts;const masterType=/location/i.test(placeholder||"")?"location":/supplier/i.test(placeholder||"")?"supplier":/customer|party/i.test(placeholder||"")?"party":"product";return <SearchableSelect value={value||""} onChange={onChange} placeholder={placeholder||"Search name"} masterType={masterType} onOpenMaster={openMaster} options={choices.map(x=>({value:x._id,label:x.name}))}/>};
+  const commonSelect=(value,onChange,opts,placeholder)=> {const choices=placeholder==="Select customer / party"?m.jobParties||opts:opts;const masterType=/location/i.test(placeholder||"")?"location":/supplier/i.test(placeholder||"")?"supplier":/customer|party/i.test(placeholder||"")?"party":"product";const handleChange=placeholder==="Select output"?event=>chooseBomOutput(event.target.value):onChange;return <SearchableSelect value={value||""} onChange={handleChange} placeholder={placeholder||"Search name"} masterType={masterType} onOpenMaster={openMaster} options={choices.map(x=>({value:x._id,label:x.name}))}/>};
   const bomHistoryContent=<div className="tx-card"><div className="tx-title"><div><h3>BOM History</h3><p>Saved product recipes and costing</p></div><button type="button" className="tx-btn" onClick={loadMasters}>Refresh</button></div><div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>BOM</th><th>Output Product</th><th>Output Qty</th><th>Materials</th><th>Cost Items</th><th>Cost / Unit</th><th></th></tr></thead><tbody>{boms.map(row=><tr key={row._id}><td><b>{row.name}</b></td><td>{row.outputItemName}</td><td>{row.outputQty} {row.outputUnit||""}</td><td>{(row.materials||[]).map(line=><div key={line.itemId||line.itemName}>{line.itemName}: {line.qtyPerUnit} {line.unit||"KG"} @ ₹ {money(line.rate)}</div>)}</td><td>{(row.costItems||[]).map((line,index)=><div key={`${line.name}-${index}`}>{line.name}: {line.qty} {line.unit} @ ₹ {money(line.rate)} = ₹ {money(line.cost)}</div>)}{!(row.costItems||[]).length?"-":null}</td><td>₹ {money(row.costPerUnit)}</td><td><button type="button" className="tx-btn" onClick={()=>editBom(row)}>Edit</button></td></tr>)}{!boms.length&&<tr><td colSpan="7">No BOM records found.</td></tr>}</tbody></table></div></div>;
   const purchaseHistoryContent=<div className="tx-card"><div className="tx-title" style={{marginBottom:10}}><h3>Purchase History</h3><button className="tx-btn" onClick={loadPurchaseHistory}>Refresh</button></div>{purchaseHistoryLoading?<div>Loading purchase history...</div>:<div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>Purchase No.</th><th>Date</th><th>Supplier</th><th>Invoice No.</th><th>Location</th><th>Items</th><th>Total</th><th>Actions</th></tr></thead><tbody>{purchaseRows.map(row=><tr key={row._id}><td><b>{row.purchaseNo}</b></td><td>{new Date(row.date).toLocaleDateString("en-IN")}</td><td>{row.supplierName}</td><td>{row.supplierInvoiceNo||"-"}</td><td>{locationLabel(row.location)}</td><td>{(row.lines||[]).map(line=>`${line.itemName} × ${line.qty} ${line.unit||""}`).join(", ")}</td><td>₹ {money(row.grandTotal)}</td><td><div className="tx-subnav"><button className="tx-btn" disabled={busy} onClick={()=>editPurchase(row)}>Edit</button><button className="tx-btn danger" disabled={busy} onClick={()=>deletePurchase(row)}>Delete</button></div></td></tr>)}{!purchaseRows.length&&<tr><td colSpan="8">No purchase entries found.</td></tr>}</tbody></table></div>}</div>;
   const jobHistoryContent=<div className="tx-card"><div className="tx-title" style={{marginBottom:10}}><h3>Job Order History</h3><button className="tx-btn" onClick={loadJobs}>Refresh</button></div>{jobHistoryLoading?<div>Loading job order history...</div>:<div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>Job No.</th><th>Date</th><th>Party</th><th>Type</th><th>Location</th><th>Raw Material Issue / Return</th><th>Finished Goods Progress</th><th>Status</th><th>Actions</th></tr></thead><tbody>{allJobs.map(j=><tr key={j._id}><td><b>{j.jobNo}</b></td><td>{new Date(j.date).toLocaleDateString("en-IN")}</td><td>{j.partyName||"-"}</td><td>{j.type}</td><td>{j.location}</td><td>{(j.sourceItems||[]).map(x=><div key={`${x.itemName}-${x.batchNo||""}-${x.barcode||""}`}>{x.itemName}: issued {x.qty} {x.unit}, returned {x.returnedQty||0}, remaining {x.remainingReturnQty??x.qty}</div>)}</td><td>{(j.remainingOutputItems||[]).map(x=><div key={x.itemName}>{x.itemName}: planned {x.qty}, produced {x.producedQty||0}, remaining {x.remainingQty}</div>)}</td><td>{j.status}</td><td><button className="tx-btn" disabled={busy} onClick={()=>{setSelectedJob(j);setTab("production")}}>Production</button></td></tr>)}{!allJobs.length&&<tr><td colSpan="9">No job orders found.</td></tr>}</tbody></table></div>}</div>;
@@ -277,6 +354,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     {(tab==="job"||tab==="job-history"||tab==="job-return")&&<div className="tx-subnav"><button className={`tx-btn ${tab==="job"?"primary":""}`} onClick={()=>{setTab("job");resetFeedback()}}>Job Order Entry</button><button className={`tx-btn ${tab==="job-history"?"primary":""}`} onClick={()=>{setTab("job-history");resetFeedback()}}>Job Order History</button><button className={`tx-btn ${tab==="job-return"?"primary":""}`} onClick={()=>{setTab("job-return");resetFeedback()}}>Return Raw Material</button></div>}
     {tab==="purchase"&&purchaseEditId&&<div className="tx-note ok">Editing {purchaseEditNo}. Save Purchase will update this entry. <button className="tx-btn" onClick={()=>{setPurchaseEditId("");setPurchaseEditNo("");setPurchase({date:today(),location:"",supplierId:"",supplierName:"",supplierGSTIN:"",supplierInvoiceNo:"",supplierInvoiceDate:"",transportCost:0,otherCost:0,remarks:""});setPLines([blankLine()]);resetFeedback()}}>Cancel Edit</button></div>}
     {msg&&<div className="tx-note ok">{msg}</div>}{err&&<div className="tx-note err">{err}</div>}
+    {tab==="bom"&&<div className="tx-card"><div className="tx-title"><div><h3>Cost Item Masters</h3><p>Set each standard rate once; select it in any BOM to reuse it.</p></div></div><div className="tx-grid"><div className="tx-field"><label>Cost Item Name</label><input value={costMasterForm.name} placeholder="Transportation (Factory to Distributor)" onChange={event=>setCostMasterForm(current=>({...current,name:event.target.value}))}/></div><div className="tx-field"><label>Unit / Rate Basis</label><input value={costMasterForm.unit} placeholder="g, Kg or PKT" onChange={event=>setCostMasterForm(current=>({...current,unit:event.target.value}))}/></div><div className="tx-field"><label>Standard Cost</label><input type="number" min="0" step="0.0001" value={costMasterForm.standardRate} onChange={event=>setCostMasterForm(current=>({...current,standardRate:event.target.value}))}/></div></div><div className="tx-actions"><button type="button" className="tx-btn" onClick={()=>{setEditingCostMasterId("");setCostMasterForm({name:"",unit:"g",standardRate:""})}}>Clear</button><button type="button" className="tx-btn primary" onClick={saveCostItemMaster}>{editingCostMasterId?"Update Cost Master":"Save Cost Master"}</button></div>{bomCostItemMasters.length>0&&<div className="tx-table-wrap" style={{marginTop:12}}><table className="tx-table"><thead><tr><th>Cost Item</th><th>Unit</th><th>Standard Cost</th><th></th></tr></thead><tbody>{bomCostItemMasters.map(item=><tr key={item._id}><td>{item.name}</td><td>{item.unit}</td><td>₹ {money(item.standardRate)} / {item.unit.toLowerCase()==="g"?"Kg":item.unit}</td><td><div className="tx-subnav"><button type="button" className="tx-btn" onClick={()=>editCostItemMaster(item)}>Edit</button><button type="button" className="tx-btn danger" onClick={()=>deleteCostItemMaster(item)}>Deactivate</button></div></td></tr>)}</tbody></table></div>}</div>}
     {tab === "bom" && (
       <div className="tx-card">
         <div className="tx-title">
@@ -291,10 +369,10 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
             <tbody>
               {(bom.costItems || []).map((item, index) => (
                 <tr key={`${item.name || "cost"}-${index}`}>
-                  <td><input aria-label="Cost item name" value={item.name || ""} placeholder="e.g. Transportation" onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, name: event.target.value} : row)}))} /></td>
-                  <td><input aria-label="Cost item unit" value={item.unit || ""} placeholder="g / Kg / PKT" onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, unit: event.target.value} : row)}))} /></td>
-                  <td><input aria-label="Cost item quantity" type="number" min="0" step="0.001" value={item.qty ?? ""} onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, qty: event.target.value} : row)}))} /></td>
-                  <td><input aria-label="Cost item standard cost" type="number" min="0" step="0.0001" value={item.rate ?? ""} onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, rate: event.target.value} : row)}))} /></td>
+                  <td><SearchableSelect value={item.masterId||""} placeholder="Select cost master" options={bomCostItemMasters.map(master=>({value:master._id,label:`${master.name} · ${master.unit} · ₹${money(master.standardRate)}`}))} onChange={event=>chooseBomCostItem(index,event.target.value)}/></td>
+                  <td>{item.unit||"-"}</td>
+                  <td><input aria-label="Auto calculated cost quantity" type="number" value={item.qty??""} readOnly={!!item.masterId} onChange={event=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,qty:event.target.value}:row)}))}/></td>
+                  <td><input aria-label="Standard cost from master" type="number" value={item.rate??""} readOnly={!!item.masterId} onChange={event=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,rate:event.target.value}:row)}))}/></td>
                   <td>₹ {money(bomCostAmount(item.qty, item.unit, item.rate))}</td>
                   <td><button type="button" className="tx-mini-danger" aria-label={`Remove ${item.name || "cost item"}`} onClick={() => setBom(current => ({...current, costItems: current.costItems.filter((_, rowIndex) => rowIndex !== index)}))}>×</button></td>
                 </tr>
@@ -303,7 +381,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
           </table>
         </div>
         <div className="tx-subnav" style={{marginTop: 12}}>
-          <button type="button" className="tx-btn" onClick={() => setBom(current => ({...current, costItems: [...current.costItems, {name: "", unit: "g", qty: "", rate: ""}]}))}>+ Add Cost Item</button>
+          <button type="button" className="tx-btn" onClick={() => setBom(current => ({...current, costItems: [...current.costItems, {masterId:"",name: "", unit: "g", qty: "", rate: ""}]}))}>+ Add Cost Item</button>
         </div>
         <div className="tx-kpis" style={{marginTop: 12}}>
           <div className="tx-kpi"><b>Additional Costs / Batch</b><strong>₹ {money(bomCostItemsTotal)}</strong></div>
