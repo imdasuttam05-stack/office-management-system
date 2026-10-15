@@ -6,6 +6,7 @@ const schema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   unit: { type: String, required: true, trim: true, maxlength: 20 },
   standardRate: { type: Number, required: true, min: 0 },
+  quantityMultiplier: { type: Number, default: 1, min: 0 },
   active: { type: Boolean, default: true, index: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });
