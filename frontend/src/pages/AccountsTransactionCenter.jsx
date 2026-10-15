@@ -277,7 +277,40 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     {(tab==="job"||tab==="job-history"||tab==="job-return")&&<div className="tx-subnav"><button className={`tx-btn ${tab==="job"?"primary":""}`} onClick={()=>{setTab("job");resetFeedback()}}>Job Order Entry</button><button className={`tx-btn ${tab==="job-history"?"primary":""}`} onClick={()=>{setTab("job-history");resetFeedback()}}>Job Order History</button><button className={`tx-btn ${tab==="job-return"?"primary":""}`} onClick={()=>{setTab("job-return");resetFeedback()}}>Return Raw Material</button></div>}
     {tab==="purchase"&&purchaseEditId&&<div className="tx-note ok">Editing {purchaseEditNo}. Save Purchase will update this entry. <button className="tx-btn" onClick={()=>{setPurchaseEditId("");setPurchaseEditNo("");setPurchase({date:today(),location:"",supplierId:"",supplierName:"",supplierGSTIN:"",supplierInvoiceNo:"",supplierInvoiceDate:"",transportCost:0,otherCost:0,remarks:""});setPLines([blankLine()]);resetFeedback()}}>Cancel Edit</button></div>}
     {msg&&<div className="tx-note ok">{msg}</div>}{err&&<div className="tx-note err">{err}</div>}
-    {tab==="bom"&&<div className="tx-card"><div className="tx-title"><div><h3>Additional Cost Items</h3><p>Enter charges per BOM output batch. Gram and millilitre rates are treated as per kg / litre.</p></div></div><div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>Cost Item</th><th>Unit</th><th>Quantity</th><th>Standard Cost</th><th>Amount</th><th></th></tr></thead><tbody>{(bom.costItems||[]).map((item,index)=><tr key={`${item.name||"cost"}-${index}`}><td><input aria-label="Cost item name" value={item.name||""} placeholder="e.g. Transportation" onChange={e=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,name:e.target.value}:row)}))}/></td><td><input aria-label="Cost item unit" value={item.unit||""} placeholder="g / Kg / PKT" onChange={e=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,unit:e.target.value}:row)}))}/></td><td><input aria-label="Cost item quantity" type="number" min="0" step="0.001" value={item.qty??""} onChange={e=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,qty:e.target.value}:row)}))}/></td><td><input aria-label="Cost item standard cost" type="number" min="0" step="0.0001" value={item.rate??""} onChange={e=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,rate:e.target.value}:row)}))}/></td><td>₹ {money(bomCostAmount(item.qty,item.unit,item.rate))}</td><td><button type="button" className="tx-mini-danger" aria-label={`Remove ${item.name||"cost item"}`} onClick={()=>setBom(current=>({...current,costItems:current.costItems.filter((_,rowIndex)=>rowIndex!==index)}))}>×</button></td></tr>)}</tbody></table></div><div className="tx-subnav" style={{marginTop:12}}><button type="button" className="tx-btn" onClick={()=>setBom(current=>({...current,costItems:[...current.costItems,{name:"",unit:"g",qty:"",rate:""]}))}>+ Add Cost Item</button></div><div className="tx-kpis" style={{marginTop:12}}><div className="tx-kpi"><b>Additional Costs / Batch</b><strong>₹ {money(bomCostItemsTotal)}</strong></div><div className="tx-kpi"><b>Estimated Total / Output Unit</b><strong>₹ {money(bomEstimatedUnitCost)}</strong></div></div></div>}
+    {tab === "bom" && (
+      <div className="tx-card">
+        <div className="tx-title">
+          <div>
+            <h3>Additional Cost Items</h3>
+            <p>Enter charges per BOM output batch. Gram and millilitre rates are treated as per kg / litre.</p>
+          </div>
+        </div>
+        <div className="tx-table-wrap">
+          <table className="tx-table">
+            <thead><tr><th>Cost Item</th><th>Unit</th><th>Quantity</th><th>Standard Cost</th><th>Amount</th><th></th></tr></thead>
+            <tbody>
+              {(bom.costItems || []).map((item, index) => (
+                <tr key={`${item.name || "cost"}-${index}`}>
+                  <td><input aria-label="Cost item name" value={item.name || ""} placeholder="e.g. Transportation" onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, name: event.target.value} : row)}))} /></td>
+                  <td><input aria-label="Cost item unit" value={item.unit || ""} placeholder="g / Kg / PKT" onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, unit: event.target.value} : row)}))} /></td>
+                  <td><input aria-label="Cost item quantity" type="number" min="0" step="0.001" value={item.qty ?? ""} onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, qty: event.target.value} : row)}))} /></td>
+                  <td><input aria-label="Cost item standard cost" type="number" min="0" step="0.0001" value={item.rate ?? ""} onChange={event => setBom(current => ({...current, costItems: current.costItems.map((row, rowIndex) => rowIndex === index ? {...row, rate: event.target.value} : row)}))} /></td>
+                  <td>₹ {money(bomCostAmount(item.qty, item.unit, item.rate))}</td>
+                  <td><button type="button" className="tx-mini-danger" aria-label={`Remove ${item.name || "cost item"}`} onClick={() => setBom(current => ({...current, costItems: current.costItems.filter((_, rowIndex) => rowIndex !== index)}))}>×</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="tx-subnav" style={{marginTop: 12}}>
+          <button type="button" className="tx-btn" onClick={() => setBom(current => ({...current, costItems: [...current.costItems, {name: "", unit: "g", qty: "", rate: ""}]}))}>+ Add Cost Item</button>
+        </div>
+        <div className="tx-kpis" style={{marginTop: 12}}>
+          <div className="tx-kpi"><b>Additional Costs / Batch</b><strong>₹ {money(bomCostItemsTotal)}</strong></div>
+          <div className="tx-kpi"><b>Estimated Total / Output Unit</b><strong>₹ {money(bomEstimatedUnitCost)}</strong></div>
+        </div>
+      </div>
+    )}
 
     {tab==="purchase-history"&&purchaseHistoryContent}
     {tab==="job-history"&&jobHistoryContent}
