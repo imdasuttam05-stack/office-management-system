@@ -175,16 +175,18 @@ async function syncTransactionMaster(master, ctx, previousName = "") {
     const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)?master.itemType:"RAW_MATERIAL";
     const oldName=clean(previousName);
     if(oldName && oldName!==master.name){
-      const oldItem=await InventoryItemMaster.findOne({companyId,name:oldName});
+      const oldItems=await InventoryItemMaster.find({companyId,name:oldName}).select("_id").lean();
       const renamedItem=await InventoryItemMaster.findOne({companyId,name:master.name,itemType});
       const values={itemType,hsn:clean(master.hsn),unit:clean(master.unit)||"KG",defaultGstRate:num(master.gstRate),defaultBarcode:clean(master.code),active:true};
-      if(oldItem && renamedItem){
-        await InventoryItemMaster.findByIdAndUpdate(oldItem._id,{$set:{active:false}});
+      if(oldItems.length){
+        await InventoryItemMaster.updateMany({companyId,name:oldName},{$set:{active:false}});
+      }
+      if(renamedItem){
         await InventoryItemMaster.findByIdAndUpdate(renamedItem._id,{$set:values});
         return;
       }
-      if(oldItem){
-        await InventoryItemMaster.findByIdAndUpdate(oldItem._id,{$set:{...values,name:master.name}});
+      if(oldItems.length){
+        await InventoryItemMaster.findOneAndUpdate({companyId,name:master.name},{$set:values,$setOnInsert:{companyId,name:master.name,createdBy}},{upsert:true,new:true,setDefaultsOnInsert:true});
         return;
       }
     }
