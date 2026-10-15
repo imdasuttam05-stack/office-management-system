@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import AccountsMasterCatalog from "./AccountsMasterCatalog.jsx";
 
 const API = (
   import.meta.env.VITE_API_URL ||
@@ -280,6 +281,7 @@ function Lines({
 
                 <select
                   value={row.itemName || ""}
+                  data-master-type="product"
                   onChange={(e) =>
                     selectProduct(
                       index,
@@ -499,6 +501,7 @@ export default function Manufacturing() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [masterModal, setMasterModal] = useState("");
 
   const [products, setProducts] = useState([]);
 
@@ -699,6 +702,19 @@ export default function Manufacturing() {
 
   useEffect(() => {
     refresh();
+  }, []);
+
+  useEffect(() => {
+    const handleMasterShortcut = (event) => {
+      if (!event.altKey || event.key.toLowerCase() !== "c") return;
+      const field = event.target.closest?.("[data-master-type]");
+      if (!field) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setMasterModal(field.dataset.masterType);
+    };
+    window.addEventListener("keydown", handleMasterShortcut, true);
+    return () => window.removeEventListener("keydown", handleMasterShortcut, true);
   }, []);
 
   useEffect(() => {
@@ -1385,6 +1401,7 @@ export default function Manufacturing() {
 
               <Input
                 label="Location / Godown"
+                data-master-type="location"
                 value={purchase.location}
                 onChange={(e) =>
                   setPurchase({
@@ -1397,6 +1414,7 @@ export default function Manufacturing() {
 
               <Input
                 label="Supplier"
+                data-master-type="supplier"
                 value={purchase.supplierName}
                 onChange={(e) =>
                   setPurchase({
@@ -1645,6 +1663,7 @@ export default function Manufacturing() {
 
             <Input
               label="Location / Godown"
+                data-master-type="location"
               value={job.location}
               onChange={(e) =>
                 setJob({
@@ -1916,6 +1935,7 @@ export default function Manufacturing() {
 
               <Input
                 label="Location"
+                data-master-type="location"
                 value={sale.location}
                 onChange={(e) =>
                   setSale({
@@ -2025,6 +2045,7 @@ export default function Manufacturing() {
                         <td>
 
                           <select
+                            data-master-type="product"
                             value={
                               line.itemName ||
                               ""
@@ -2644,6 +2665,32 @@ export default function Manufacturing() {
             </div>
           )}
 
+        </div>
+      )}
+
+      {masterModal && (
+        <div
+          role="presentation"
+          onClick={() => setMasterModal("")}
+          style={{ position: "fixed", inset: 0, zIndex: 3000, display: "grid", placeItems: "center", padding: 16, background: "rgba(16,24,40,.58)" }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Create ${masterModal} master`}
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: "min(1100px, 100%)", maxHeight: "92vh", overflow: "auto", background: "#fff", borderRadius: 8 }}
+          >
+            <AccountsMasterCatalog
+              key={masterModal}
+              initialType={masterModal}
+              initialMode="create"
+              onSaved={async () => {
+                await refresh();
+                setMasterModal("");
+              }}
+            />
+          </section>
         </div>
       )}
 
