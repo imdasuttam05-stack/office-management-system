@@ -1,5 +1,5 @@
 import express from "express";
-import {getWorkflowMasters,listBoms,getPurchaseRate,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
+import {getWorkflowMasters,listBoms,listBomCostItems,saveBomCostItem,deleteBomCostItem,getPurchaseRate,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
 import auth from "../middleware/auth.js";
 import requireCompanyContext from "../middleware/companyContext.js";
 import requireRole from "../middleware/role.js";
@@ -42,6 +42,10 @@ router.get("/gst-report",getGstReport);
 router.get("/workflow/masters",getWorkflowMasters);
 router.get("/workflow/boms",listBoms);
 router.post("/workflow/boms",requireRole("Admin","Manager"),createBom);
+router.get("/workflow/bom-cost-items",listBomCostItems);
+router.post("/workflow/bom-cost-items",requireRole("Admin","Manager"),saveBomCostItem);
+router.put("/workflow/bom-cost-items/:id",requireRole("Admin","Manager"),saveBomCostItem);
+router.delete("/workflow/bom-cost-items/:id",requireRole("Admin","Manager"),deleteBomCostItem);
 router.get("/workflow/purchase-rate",getPurchaseRate);
 router.post("/workflow/costing",costing);
 router.post("/workflow/pi",requireRole("Admin","Manager"),createPI);
