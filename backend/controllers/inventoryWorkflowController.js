@@ -6,6 +6,7 @@ import InventoryStock from "../models/InventoryStock.js";
 import InventoryMovement from "../models/InventoryMovement.js";
 import InventoryWorkflow from "../models/InventoryWorkflow.js";
 import BOM from "../models/BOM.js";
+import BOMCostItemMaster from "../models/BOMCostItemMaster.js";
 import RawMaterialPurchase from "../models/RawMaterialPurchase.js";
 import Ledger from "../models/Ledger.js";
 import Group from "../models/Group.js";
@@ -20,6 +21,9 @@ export async function getWorkflowMasters(req,res){try{const companyId=req.user?.
 
 export async function getPurchaseRate(req,res){try{const itemId=clean(req.query.itemId),itemName=clean(req.query.itemName);const filter={status:"POSTED"};if(req.user?.companyId)filter.companyId=req.user.companyId;const rows=await RawMaterialPurchase.find(filter).sort({date:-1,createdAt:-1}).lean();for(const p of rows){for(const l of p.lines||[]){if((itemId&&String(l.itemId)===String(itemId))||(!itemId&&itemName&&clean(l.itemName).toLowerCase()===itemName.toLowerCase()))return res.json({success:true,rate:num(l.purchaseRate),purchaseNo:p.purchaseNo,date:p.date,supplierName:p.supplierName});}}return res.json({success:true,rate:0});}catch(e){res.status(500).json({success:false,message:e.message})}}
 export async function listBoms(req,res){const filter={active:true,companyId:req.user?.companyId||null};res.json({success:true,items:await BOM.find(filter).sort({name:1}).lean()})}
+export async function listBomCostItems(req,res){try{const items=await BOMCostItemMaster.find({companyId:req.user?.companyId||null,active:true}).sort({name:1}).lean();return res.json({success:true,items})}catch(e){return res.status(500).json({success:false,message:e.message})}}
+export async function saveBomCostItem(req,res){try{const b=req.body||{},companyId=req.user?.companyId||null,name=clean(b.name),unit=clean(b.unit),standardRate=num(b.standardRate);if(!name||!unit||standardRate<0)return res.status(400).json({success:false,message:"Cost item name, unit and a valid standard rate are required."});const values={name,unit,standardRate,active:true};let item;if(req.params.id){item=await BOMCostItemMaster.findOneAndUpdate({_id:req.params.id,companyId},{$set:values},{new:true,runValidators:true});if(!item)return res.status(404).json({success:false,message:"BOM cost item master not found."})}else{item=await BOMCostItemMaster.findOneAndUpdate({companyId,name},{$set:values,$setOnInsert:{companyId,createdBy:req.user._id}},{upsert:true,new:true,runValidators:true,setDefaultsOnInsert:true})}return res.status(req.params.id?200:201).json({success:true,message:req.params.id?"Cost item master updated.":"Cost item master saved.",item})}catch(e){return res.status(e?.code===11000?409:400).json({success:false,message:e?.code===11000?"Cost item master already exists.":e.message})}}
+export async function deleteBomCostItem(req,res){try{const item=await BOMCostItemMaster.findOneAndUpdate({_id:req.params.id,companyId:req.user?.companyId||null},{$set:{active:false}},{new:true});if(!item)return res.status(404).json({success:false,message:"BOM cost item master not found."});return res.json({success:true,message:"Cost item master deactivated."})}catch(e){return res.status(400).json({success:false,message:e.message})}}
 export async function createBom(req,res){
  try{
   const b=req.body||{},companyId=req.user?.companyId||null,out=await InventoryItemMaster.findOne({_id:b.outputItemId,companyId,active:true});
@@ -37,11 +41,14 @@ export async function createBom(req,res){
    materialCost+=cost;
    lines.push({itemId:item._id,itemName:item.name,qtyPerUnit:qty,unit:clean(x.unit)||item.unit,rate,cost});
   }
-  const costItems=(Array.isArray(b.costItems)?b.costItems:[]).map(x=>{
-   const name=clean(x.name),unit=clean(x.unit),qty=num(x.qty),rate=num(x.rate);
+    const costItems=[];
+    for(const x of Array.isArray(b.costItems)?b.costItems:[]){
+     const master=x.masterId?await BOMCostItemMaster.findOne({_id:x.masterId,companyId,active:true}):null;
+     if(x.masterId&&!master)throw Error("Selected BOM cost item master is inactive or unavailable.");
+     const name=master?.name||clean(x.name),unit=master?.unit||clean(x.unit),qty=num(x.qty),rate=master?num(master.standardRate):num(x.rate);
    if(!name||qty<=0||rate<0)throw Error("Each BOM cost item needs a name, quantity and valid rate.");
-   return {name,unit,qty,rate,cost:bomCostAmount(qty,unit,rate)};
-  });
+     costItems.push({masterId:master?._id||null,name,unit,qty,rate,cost:bomCostAmount(qty,unit,rate)});
+    }
   const costItemsTotal=r2(costItems.reduce((sum,item)=>sum+item.cost,0));
   const labour=Math.max(0,num(b.labourCost)),packing=Math.max(0,num(b.packingCost)),other=Math.max(0,num(b.otherCost));
   const total=r2(materialCost+costItemsTotal+labour+packing+other),outputQty=num(b.outputQty)||1,per=r2(total/outputQty);
