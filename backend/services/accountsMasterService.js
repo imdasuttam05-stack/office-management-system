@@ -112,7 +112,7 @@ export async function syncLedgerCounterparty(master, ledger, ctx={}) {
   );
 }
 
-async function syncTransactionMaster(master, ctx) {
+async function syncTransactionMaster(master, ctx, previousName = "") {
   const {user}=requireContext(ctx);
   const companyId=user.companyId || null;
   const createdBy=user._id;
@@ -173,6 +173,21 @@ async function syncTransactionMaster(master, ctx) {
 
   if (master.masterType === "product") {
     const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)?master.itemType:"RAW_MATERIAL";
+    const oldName=clean(previousName);
+    if(oldName && oldName!==master.name){
+      const oldItem=await InventoryItemMaster.findOne({companyId,name:oldName});
+      const renamedItem=await InventoryItemMaster.findOne({companyId,name:master.name,itemType});
+      const values={itemType,hsn:clean(master.hsn),unit:clean(master.unit)||"KG",defaultGstRate:num(master.gstRate),defaultBarcode:clean(master.code),active:true};
+      if(oldItem && renamedItem){
+        await InventoryItemMaster.findByIdAndUpdate(oldItem._id,{$set:{active:false}});
+        await InventoryItemMaster.findByIdAndUpdate(renamedItem._id,{$set:values});
+        return;
+      }
+      if(oldItem){
+        await InventoryItemMaster.findByIdAndUpdate(oldItem._id,{$set:{...values,name:master.name}});
+        return;
+      }
+    }
     await InventoryItemMaster.findOneAndUpdate({companyId,name:master.name},{$set:{itemType,hsn:clean(master.hsn),unit:clean(master.unit)||"KG",defaultGstRate:num(master.gstRate),defaultBarcode:clean(master.code),active:true},$setOnInsert:{companyId,name:master.name,createdBy}},{upsert:true,new:true,setDefaultsOnInsert:true});
     return;
   }
@@ -240,6 +255,7 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
   requireContext(ctx);
   const existing = await AccountsMaster.findById(id);
   if (!existing) throw new Error("Master not found.");
+  const previousName=existing.name;
   const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","bankDetailsProvided","bankAccountName","bankName","bankBranch","bankAccountNumber","bankIfsc","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
   for (const key of allowed) if (payload[key] !== undefined) existing[key]=payload[key];
   existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
@@ -248,7 +264,7 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
     if (clean(existing.pin) && !/^\d{6}$/.test(clean(existing.pin))) throw new Error("PIN must be exactly 6 digits.");
   }
   await existing.save();
-  await syncTransactionMaster(existing.toObject(), ctx);
+  await syncTransactionMaster(existing.toObject(), ctx, previousName);
   return existing.toObject();
 }
 
