@@ -119,7 +119,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
       const costItems=(current.costItems||[]).map(line=>{
         const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
         if(!master)return line;
-        const qty=costItemQuantity(master,current.outputItemId,current.outputQty);
+        const qty=costItemQuantity(master,current.outputItemId,current.outputQty,current.materials);
         if(line.name===master.name&&line.unit===master.unit&&n(line.rate)===n(master.standardRate)&&n(line.quantityMultiplier)===n(master.quantityMultiplier??1)&&n(line.qty)===qty)return line;
         changed=true;
         return {...line,name:master.name,unit:master.unit,rate:master.standardRate,quantityMultiplier:master.quantityMultiplier??1,qty};
@@ -211,32 +211,37 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     setBom(b=>({...b,materials:b.materials.map((line,i)=>i===index?{...line,rate:option.rate,unit:option.unit,purchaseId:option.purchaseId,purchaseLineId:option.lineId,purchaseNo:option.purchaseNo,supplierName:option.supplierName,purchaseDate:option.date}:line)}));
     setBomPurchasePicker(null);
   }
-  function costItemQuantity(master,outputItemId,outputQty){
+  function costItemQuantity(master,outputItemId,outputQty,materials=[]){
     const unit=String(master?.unit||"").trim().toLowerCase();
     const multiplier=n(master?.quantityMultiplier??1);
-    const packageGrams=packageWeightGrams(m.items.find(item=>String(item._id)===String(outputItemId))?.name);
+    const materialGrams=materials.reduce((sum,line)=>{
+      const materialUnit=String(line.unit||"").trim().toLowerCase();
+      const factor=["kg","kgs","kilogram","kilograms"].includes(materialUnit)?1000:["g","gm","gram","grams"].includes(materialUnit)?1:materialUnit==="mg"?0.001:0;
+      return sum+n(line.qtyPerUnit)*factor;
+    },0);
+    const packageGrams=materialGrams||packageWeightGrams(m.items.find(item=>String(item._id)===String(outputItemId))?.name)*(n(outputQty)||1);
     const count=n(outputQty)||1;
     if(["pkt","pack","packet","pcs","pc","piece","pieces","ea"].includes(unit))return round2(count*multiplier);
-    if(["g","gm","gram","grams"].includes(unit))return packageGrams?round2(packageGrams*count*multiplier):null;
-    if(["kg","kgs","kilogram","kilograms"].includes(unit))return packageGrams?round2(packageGrams*count*multiplier/1000):null;
+    if(["g","gm","gram","grams"].includes(unit))return packageGrams?round2(packageGrams*multiplier):null;
+    if(["kg","kgs","kilogram","kilograms"].includes(unit))return packageGrams?round2(packageGrams*multiplier/1000):null;
     return round2(count*multiplier);
   }
   function chooseBomOutput(id){
     setBom(current=>({...current,outputItemId:id,costItems:(current.costItems||[]).map(line=>{
       const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
-      return master?{...line,name:master.name,unit:master.unit,rate:master.standardRate,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,id,current.outputQty)}:line;
+      return master?{...line,name:master.name,unit:master.unit,rate:master.standardRate,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,id,current.outputQty,current.materials)}:line;
     })}));
   }
   function updateBomOutputQty(value){
     setBom(current=>({...current,outputQty:value,costItems:(current.costItems||[]).map(line=>{
       const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
-      return master?{...line,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,current.outputItemId,value)}:line;
+      return master?{...line,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,current.outputItemId,value,current.materials)}:line;
     })}));
   }
   function chooseBomCostItem(index,masterId){
     const master=bomCostItemMasters.find(item=>String(item._id)===String(masterId));
     if(!master)return;
-    setBom(current=>({...current,costItems:current.costItems.map((line,rowIndex)=>rowIndex===index?{masterId:master._id,name:master.name,unit:master.unit,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,current.outputItemId,current.outputQty),rate:master.standardRate}:line)}));
+    setBom(current=>({...current,costItems:current.costItems.map((line,rowIndex)=>rowIndex===index?{masterId:master._id,name:master.name,unit:master.unit,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,current.outputItemId,current.outputQty,current.materials),rate:master.standardRate}:line)}));
   }
   function editCostItemMaster(item){
     setEditingCostMasterId(item._id);
