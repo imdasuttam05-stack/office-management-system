@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import AccountsMasterCatalog from "./AccountsMasterCatalog.jsx";
 
 const API_URL = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
 
@@ -70,9 +71,17 @@ export default function RawMaterialPurchase() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [stockPage, setStockPage] = useState(1);
+  const [masterModal, setMasterModal] = useState("");
 
   function locationLabel(value) {
     return masters.locations.find((location) => String(location._id) === String(value))?.name || value || "-";
+  }
+
+  function openMasterShortcut(event, type) {
+    if (!event.altKey || event.key.toLowerCase() !== "c") return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMasterModal(type);
   }
 
   const [pagination, setPagination] = useState({
@@ -954,6 +963,7 @@ export default function RawMaterialPurchase() {
 
                 <select
                   value={form.location}
+                  onKeyDown={(event) => openMasterShortcut(event, "location")}
                   onChange={(e) =>
                     setField(
                       "location",
@@ -992,6 +1002,7 @@ export default function RawMaterialPurchase() {
                         form.supplierName
                     )?._id || ""
                   }
+                  onKeyDown={(event) => openMasterShortcut(event, "supplier")}
                   onChange={(e) =>
                     selectSupplier(
                       e.target.value
@@ -1129,6 +1140,7 @@ export default function RawMaterialPurchase() {
                                 l.itemName
                             )?._id || ""
                           }
+                          onKeyDown={(event) => openMasterShortcut(event, "product")}
                           onChange={(e) =>
                             selectItem(
                               i,
@@ -1169,6 +1181,7 @@ export default function RawMaterialPurchase() {
                       <td>
                         <input
                           value={l.unit}
+                          onKeyDown={(event) => openMasterShortcut(event, "unit")}
                           onChange={(e) =>
                             setLine(
                               i,
@@ -1757,6 +1770,22 @@ export default function RawMaterialPurchase() {
             ) : (
               <div>No movement history found for this stock batch.</div>
             )}
+          </section>
+        </div>
+      )}
+
+      {masterModal && (
+        <div className="rmp-modal-backdrop" onClick={() => setMasterModal("")}>
+          <section className="rmp-modal" role="dialog" aria-modal="true" aria-label={`Create ${masterModal} master`} onClick={(event) => event.stopPropagation()}>
+            <AccountsMasterCatalog
+              key={masterModal}
+              initialType={masterModal}
+              initialMode="create"
+              onSaved={async () => {
+                await loadMasters();
+                setMasterModal("");
+              }}
+            />
           </section>
         </div>
       )}
