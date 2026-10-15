@@ -32,7 +32,12 @@ router.post("/", async (req, res, next) => {
   try {
     const row = await createMaster(req.body, req);
     res.status(201).json({ success: true, message: "Master saved successfully.", data: row, master: row });
-  } catch (err) { next(err); }
+  } catch (err) {
+    if (["UNIT_DUPLICATE", "UNIT_VALIDATION"].includes(err?.code)) {
+      return res.status(err.code === "UNIT_DUPLICATE" ? 409 : 400).json({ success: false, message: err.message });
+    }
+    next(err);
+  }
 });
 
 router.put("/:id", async (req, res, next) => {
