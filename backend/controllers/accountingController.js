@@ -96,17 +96,52 @@ export async function listVouchers(req, res) {
 }
 
 export async function createVoucher(req, res) {
-  const { date, type, partyLedger = null, referenceNo = "", narration = "", lines = [] } = req.body;
+  const { date, type, partyLedger = null, referenceNo = "", narration = "", lines = [] } = req.body || {};
   if (!date || !type || !Array.isArray(lines) || lines.length < 2) return res.status(400).json({ success: false, message: "Date, voucher type and at least two ledger lines are required." });
+  const voucherDate = new Date(date);
+  if (Number.isNaN(voucherDate.getTime())) return res.status(400).json({ success: false, message: "Enter a valid voucher date." });
   const normalized = lines.map(x => ({ ledger: x.ledger, debit: Number(x.debit) || 0, credit: Number(x.credit) || 0, narration: x.narration || "" }));
   const totalDebit = normalized.reduce((s, x) => s + x.debit, 0);
   const totalCredit = normalized.reduce((s, x) => s + x.credit, 0);
   if (totalDebit <= 0 || Math.abs(totalDebit - totalCredit) > 0.005) return res.status(400).json({ success: false, message: "Debit and Credit totals must be equal and greater than zero." });
-  const prefix = type.slice(0, 3).toUpperCase();
-  const count = await Voucher.countDocuments({ type });
-  const voucherNo = `${prefix}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
-  const voucher = await Voucher.create({ voucherNo, date, type, partyLedger, referenceNo, narration, lines: normalized, totalDebit, totalCredit, createdBy: req.user._id });
-  res.status(201).json({ success: true, voucher });
+
+  const prefix = String(type).slice(0, 3).toUpperCase();
+  const year = voucherDate.getFullYear();
+  const prefixPattern = `^${prefix}-${year}-`;
+  const exactNumber = new RegExp(`^${prefix}-${year}-(\\d+)$`);
+  const base = { date: voucherDate, type, partyLedger, referenceNo, narration, lines: normalized, totalDebit, totalCredit, createdBy: req.user._id };
+
+  // Number vouchers from the raw collection, not a company-scoped count. The
+  // database may still have the legacy globally-unique voucherNo_1 index, so
+  // numbers must not be reused by another company or an older entry.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const existingRows = await Voucher.collection.find(
+      { voucherNo: { $regex: prefixPattern } },
+      { projection: { voucherNo: 1 } }
+    ).toArray();
+    let lastSeq = 0;
+    for (const row of existingRows) {
+      const match = String(row.voucherNo || "").match(exactNumber);
+      if (match) lastSeq = Math.max(lastSeq, Number(match[1]) || 0);
+    }
+    const voucherNo = `${prefix}-${year}-${String(lastSeq + 1).padStart(5, "0")}`;
+
+    try {
+      const voucher = await Voucher.create({ ...base, voucherNo });
+      return res.status(201).json({ success: true, voucher });
+    } catch (error) {
+      const duplicateVoucherNo = error?.code === 11000 && (
+        Boolean(error?.keyPattern?.voucherNo) ||
+        Boolean(error?.keyValue?.voucherNo) ||
+        /voucherNo_1|voucherNo/i.test(error?.message || "")
+      );
+      // A simultaneous save may have claimed this number after the lookup.
+      // Re-read the maximum and try again instead of failing the user's Save.
+      if (!duplicateVoucherNo) throw error;
+    }
+  }
+
+  return res.status(409).json({ success: false, message: "Could not allocate a unique voucher number after several attempts. Please save again." });
 }
 
 export async function ledgerStatement(req, res) {
