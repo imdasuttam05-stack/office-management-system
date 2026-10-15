@@ -100,7 +100,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const [stockType,setStockType]=useState("RAW_MATERIAL"), [stockLocation,setStockLocation]=useState("");
   const [bom,setBom]=useState({name:"",outputItemId:"",outputQty:1,labourCost:0,packingCost:0,otherCost:0,materials:[{itemId:"",itemName:"",qtyPerUnit:1,rate:0}],costItems:[]});
   const [bomCostItemMasters,setBomCostItemMasters]=useState([]);
-  const [costMasterForm,setCostMasterForm]=useState({name:"",unit:"g",standardRate:""});
+  const [costMasterForm,setCostMasterForm]=useState({name:"",unit:"g",standardRate:"",quantityMultiplier:1});
   const [editingCostMasterId,setEditingCostMasterId]=useState("");
   const [cost,setCost]=useState({outputQty:1,labourCost:0,packingCost:0,otherCost:0,materials:[{name:"",qty:1,rate:0}]});
   const [costResult,setCostResult]=useState(null);
@@ -120,9 +120,9 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
         const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
         if(!master)return line;
         const qty=costItemQuantity(master,current.outputItemId,current.outputQty);
-        if(line.name===master.name&&line.unit===master.unit&&n(line.rate)===n(master.standardRate)&&n(line.qty)===qty)return line;
+        if(line.name===master.name&&line.unit===master.unit&&n(line.rate)===n(master.standardRate)&&n(line.quantityMultiplier)===n(master.quantityMultiplier??1)&&n(line.qty)===qty)return line;
         changed=true;
-        return {...line,name:master.name,unit:master.unit,rate:master.standardRate,qty};
+        return {...line,name:master.name,unit:master.unit,rate:master.standardRate,quantityMultiplier:master.quantityMultiplier??1,qty};
       });
       return changed?{...current,costItems}:current;
     });
@@ -213,33 +213,34 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   }
   function costItemQuantity(master,outputItemId,outputQty){
     const unit=String(master?.unit||"").trim().toLowerCase();
+    const multiplier=n(master?.quantityMultiplier??1);
     const packageGrams=packageWeightGrams(m.items.find(item=>String(item._id)===String(outputItemId))?.name);
     const count=n(outputQty)||1;
-    if(["pkt","pack","packet","pcs","pc","piece","pieces","ea"].includes(unit))return count;
-    if(["g","gm","gram","grams"].includes(unit))return packageGrams?round2(packageGrams*count):count;
-    if(["kg","kgs","kilogram","kilograms"].includes(unit))return packageGrams?round2(packageGrams*count/1000):count;
-    return count;
+    if(["pkt","pack","packet","pcs","pc","piece","pieces","ea"].includes(unit))return round2(count*multiplier);
+    if(["g","gm","gram","grams"].includes(unit))return packageGrams?round2(packageGrams*count*multiplier):null;
+    if(["kg","kgs","kilogram","kilograms"].includes(unit))return packageGrams?round2(packageGrams*count*multiplier/1000):null;
+    return round2(count*multiplier);
   }
   function chooseBomOutput(id){
     setBom(current=>({...current,outputItemId:id,costItems:(current.costItems||[]).map(line=>{
       const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
-      return master?{...line,name:master.name,unit:master.unit,rate:master.standardRate,qty:costItemQuantity(master,id,current.outputQty)}:line;
+      return master?{...line,name:master.name,unit:master.unit,rate:master.standardRate,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,id,current.outputQty)}:line;
     })}));
   }
   function updateBomOutputQty(value){
     setBom(current=>({...current,outputQty:value,costItems:(current.costItems||[]).map(line=>{
       const master=bomCostItemMasters.find(item=>String(item._id)===String(line.masterId));
-      return master?{...line,qty:costItemQuantity(master,current.outputItemId,value)}:line;
+      return master?{...line,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,current.outputItemId,value)}:line;
     })}));
   }
   function chooseBomCostItem(index,masterId){
     const master=bomCostItemMasters.find(item=>String(item._id)===String(masterId));
     if(!master)return;
-    setBom(current=>({...current,costItems:current.costItems.map((line,rowIndex)=>rowIndex===index?{masterId:master._id,name:master.name,unit:master.unit,qty:costItemQuantity(master,current.outputItemId,current.outputQty),rate:master.standardRate}:line)}));
+    setBom(current=>({...current,costItems:current.costItems.map((line,rowIndex)=>rowIndex===index?{masterId:master._id,name:master.name,unit:master.unit,quantityMultiplier:master.quantityMultiplier??1,qty:costItemQuantity(master,current.outputItemId,current.outputQty),rate:master.standardRate}:line)}));
   }
   function editCostItemMaster(item){
     setEditingCostMasterId(item._id);
-    setCostMasterForm({name:item.name,unit:item.unit,standardRate:String(item.standardRate)});
+    setCostMasterForm({name:item.name,unit:item.unit,standardRate:String(item.standardRate),quantityMultiplier:String(item.quantityMultiplier??1)});
     resetFeedback();
   }
   async function saveCostItemMaster(){
@@ -249,7 +250,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
       const data=editingCostMasterId?await put(path,costMasterForm):await post(path,costMasterForm);
       setMsg(data.message||"Cost item master saved.");
       setEditingCostMasterId("");
-      setCostMasterForm({name:"",unit:"g",standardRate:""});
+      setCostMasterForm({name:"",unit:"g",standardRate:"",quantityMultiplier:1});
       await loadCostItemMasters();
     }catch(e){setErr(e.message)}
   }
@@ -354,7 +355,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
     {(tab==="job"||tab==="job-history"||tab==="job-return")&&<div className="tx-subnav"><button className={`tx-btn ${tab==="job"?"primary":""}`} onClick={()=>{setTab("job");resetFeedback()}}>Job Order Entry</button><button className={`tx-btn ${tab==="job-history"?"primary":""}`} onClick={()=>{setTab("job-history");resetFeedback()}}>Job Order History</button><button className={`tx-btn ${tab==="job-return"?"primary":""}`} onClick={()=>{setTab("job-return");resetFeedback()}}>Return Raw Material</button></div>}
     {tab==="purchase"&&purchaseEditId&&<div className="tx-note ok">Editing {purchaseEditNo}. Save Purchase will update this entry. <button className="tx-btn" onClick={()=>{setPurchaseEditId("");setPurchaseEditNo("");setPurchase({date:today(),location:"",supplierId:"",supplierName:"",supplierGSTIN:"",supplierInvoiceNo:"",supplierInvoiceDate:"",transportCost:0,otherCost:0,remarks:""});setPLines([blankLine()]);resetFeedback()}}>Cancel Edit</button></div>}
     {msg&&<div className="tx-note ok">{msg}</div>}{err&&<div className="tx-note err">{err}</div>}
-    {tab==="bom"&&<div className="tx-card"><div className="tx-title"><div><h3>Cost Item Masters</h3><p>Set each standard rate once; select it in any BOM to reuse it.</p></div></div><div className="tx-grid"><div className="tx-field"><label>Cost Item Name</label><input value={costMasterForm.name} placeholder="Transportation (Factory to Distributor)" onChange={event=>setCostMasterForm(current=>({...current,name:event.target.value}))}/></div><div className="tx-field"><label>Unit / Rate Basis</label><input value={costMasterForm.unit} placeholder="g, Kg or PKT" onChange={event=>setCostMasterForm(current=>({...current,unit:event.target.value}))}/></div><div className="tx-field"><label>Standard Cost</label><input type="number" min="0" step="0.0001" value={costMasterForm.standardRate} onChange={event=>setCostMasterForm(current=>({...current,standardRate:event.target.value}))}/></div></div><div className="tx-actions"><button type="button" className="tx-btn" onClick={()=>{setEditingCostMasterId("");setCostMasterForm({name:"",unit:"g",standardRate:""})}}>Clear</button><button type="button" className="tx-btn primary" onClick={saveCostItemMaster}>{editingCostMasterId?"Update Cost Master":"Save Cost Master"}</button></div>{bomCostItemMasters.length>0&&<div className="tx-table-wrap" style={{marginTop:12}}><table className="tx-table"><thead><tr><th>Cost Item</th><th>Unit</th><th>Standard Cost</th><th></th></tr></thead><tbody>{bomCostItemMasters.map(item=><tr key={item._id}><td>{item.name}</td><td>{item.unit}</td><td>₹ {money(item.standardRate)} / {item.unit.toLowerCase()==="g"?"Kg":item.unit}</td><td><div className="tx-subnav"><button type="button" className="tx-btn" onClick={()=>editCostItemMaster(item)}>Edit</button><button type="button" className="tx-btn danger" onClick={()=>deleteCostItemMaster(item)}>Deactivate</button></div></td></tr>)}</tbody></table></div>}</div>}
+    {tab==="bom"&&<div className="tx-card"><div className="tx-title"><div><h3>Cost Item Masters</h3><p>Set each standard rate once; select it in any BOM to reuse it.</p></div></div><div className="tx-grid"><div className="tx-field"><label>Cost Item Name</label><input value={costMasterForm.name} placeholder="Transportation (Factory to Distributor)" onChange={event=>setCostMasterForm(current=>({...current,name:event.target.value}))}/></div><div className="tx-field"><label>Unit / Rate Basis</label><input value={costMasterForm.unit} placeholder="g, Kg or PKT" onChange={event=>setCostMasterForm(current=>({...current,unit:event.target.value}))}/></div><div className="tx-field"><label>Standard Cost</label><input type="number" min="0" step="0.0001" value={costMasterForm.standardRate} onChange={event=>setCostMasterForm(current=>({...current,standardRate:event.target.value}))}/></div><div className="tx-field"><label>Quantity Multiplier</label><input type="number" min="0" step="0.0001" value={costMasterForm.quantityMultiplier} onChange={event=>setCostMasterForm(current=>({...current,quantityMultiplier:event.target.value}))}/><small>For g/Kg, 1 means full pack weight; 0.02 means 2% of pack weight. For PKT, it multiplies packet count.</small></div></div><div className="tx-actions"><button type="button" className="tx-btn" onClick={()=>{setEditingCostMasterId("");setCostMasterForm({name:"",unit:"g",standardRate:"",quantityMultiplier:1})}}>Clear</button><button type="button" className="tx-btn primary" onClick={saveCostItemMaster}>{editingCostMasterId?"Update Cost Master":"Save Cost Master"}</button></div>{bomCostItemMasters.length>0&&<div className="tx-table-wrap" style={{marginTop:12}}><table className="tx-table"><thead><tr><th>Cost Item</th><th>Unit</th><th>Standard Cost</th><th>Multiplier</th><th></th></tr></thead><tbody>{bomCostItemMasters.map(item=><tr key={item._id}><td>{item.name}</td><td>{item.unit}</td><td>₹ {money(item.standardRate)} / {item.unit.toLowerCase()==="g"?"Kg":item.unit}</td><td>{item.quantityMultiplier??1}</td><td><div className="tx-subnav"><button type="button" className="tx-btn" onClick={()=>editCostItemMaster(item)}>Edit</button><button type="button" className="tx-btn danger" onClick={()=>deleteCostItemMaster(item)}>Deactivate</button></div></td></tr>)}</tbody></table></div>}</div>}
     {tab === "bom" && (
       <div className="tx-card">
         <div className="tx-title">
@@ -371,7 +372,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
                 <tr key={`${item.name || "cost"}-${index}`}>
                   <td><SearchableSelect value={item.masterId||""} placeholder="Select cost master" options={bomCostItemMasters.map(master=>({value:master._id,label:`${master.name} · ${master.unit} · ₹${money(master.standardRate)}`}))} onChange={event=>chooseBomCostItem(index,event.target.value)}/></td>
                   <td>{item.unit||"-"}</td>
-                  <td><input aria-label="Auto calculated cost quantity" type="number" value={item.qty??""} readOnly={!!item.masterId} onChange={event=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,qty:event.target.value}:row)}))}/></td>
+                  <td><input aria-label="Auto calculated cost quantity" type="number" min="0" step="0.001" value={item.qty??""} readOnly={!!item.masterId&&item.qty!==null&&item.qty!==undefined} onChange={event=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,qty:event.target.value}:row)}))}/></td>
                   <td><input aria-label="Standard cost from master" type="number" value={item.rate??""} readOnly={!!item.masterId} onChange={event=>setBom(current=>({...current,costItems:current.costItems.map((row,rowIndex)=>rowIndex===index?{...row,rate:event.target.value}:row)}))}/></td>
                   <td>₹ {money(bomCostAmount(item.qty, item.unit, item.rate))}</td>
                   <td><button type="button" className="tx-mini-danger" aria-label={`Remove ${item.name || "cost item"}`} onClick={() => setBom(current => ({...current, costItems: current.costItems.filter((_, rowIndex) => rowIndex !== index)}))}>×</button></td>
