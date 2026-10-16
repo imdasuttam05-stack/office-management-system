@@ -119,26 +119,21 @@ async function createAutoVoucher({req,date,type,partyLedger,referenceNo,narratio
  if(totalDebit<=0||Math.abs(totalDebit-totalCredit)>0.005)throw new Error("Automatic accounting voucher is not balanced.");
  const prefix=type.slice(0,3).toUpperCase();
  const year=new Date(date).getFullYear();
- const prefixPattern=`^${prefix}-${year}-`;
- const exactNumber=new RegExp(`^${prefix}-${year}-(\\d+)$`);
+ const pattern=`^${prefix}-${year}-\\d{5}$`;
  const base={date,type,partyLedger,referenceNo,narration,lines:normalized,totalDebit,totalCredit,sourceType,sourceId,createdBy:req.user._id};
  // Do not use countDocuments({type}) for numbering: scoped queries and deleted/gapped
  // voucher numbers can make the count point to an already-used voucherNo.
- // Read every matching number from the raw collection to bypass company-scoped middleware
- // and avoid relying on lexicographic sort or the legacy global voucherNo_1 index.
+ // Read the latest number from the raw collection to bypass company-scoped middleware.
  for(let attempt=0;attempt<10;attempt++){
-  const existingRows=await Voucher.collection.find({voucherNo:{$regex:prefixPattern}},{projection:{voucherNo:1}}).toArray();
-  let lastSeq=0;
-  for(const row of existingRows){
-   const match=String(row.voucherNo||"").match(exactNumber);
-   if(match)lastSeq=Math.max(lastSeq,Number(match[1])||0);
-  }
+  const latestRows=await Voucher.collection.find({voucherNo:{$regex:pattern}}).sort({voucherNo:-1}).limit(1).toArray();
+  const latest=latestRows[0]?.voucherNo||"";
+  const lastSeq=latest?Number(latest.slice(latest.lastIndexOf("-")+1))||0:0;
   const voucherNo=`${prefix}-${year}-${String(lastSeq+1).padStart(5,"0")}`;
   try{
    return await Voucher.create({...base,voucherNo});
   }catch(error){
    // If another request used the same number concurrently, retry from the new maximum.
-   if(error?.code!==11000 || !(error?.keyPattern?.voucherNo || error?.keyValue?.voucherNo || /voucherNo_1/.test(error?.message||"")))throw error;
+   if(error?.code!==11000 || !(error?.keyPattern?.voucherNo || /voucherNo_1/.test(error?.message||"")))throw error;
   }
  }
  throw new Error(`Could not allocate a unique ${prefix} voucher number after several attempts. Please retry Save.`);
@@ -398,10 +393,11 @@ export async function createProductionEntry(req,res){
    totalValue+=qty*(num(x.rate)>0?num(x.rate):num(planned.rate));
   }
   const productionNo=await next("PRODUCTION","PROD");
-  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:dt(b.date)||new Date(),location:job.location,outputItems:outputs.map(x=>{const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));const rate=num(x.rate)>0?num(x.rate):num(planned?.rate);return {...x,itemName:clean(x.itemName),unit:clean(x.unit)||planned?.unit||"KG",qty:num(x.qty),rate,value:r2(num(x.qty)*rate),batchNo:clean(x.batchNo)||clean(planned?.batchNo),barcode:clean(x.barcode)||clean(planned?.barcode)}}),notes:clean(b.notes),createdBy:req.user._id});
+  const productionDate=dt(b.date)||new Date(), productionMfgDate=dt(b.mfgDate)||productionDate, productionExpiryDate=dt(b.expiryDate);
+  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:productionDate,mfgDate:productionMfgDate,expiryDate:productionExpiryDate,batchNo:clean(b.batchNo),location:job.location,outputItems:outputs.map(x=>{const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));const rate=num(x.rate)>0?num(x.rate):num(planned?.rate);return {...x,itemName:clean(x.itemName),unit:clean(x.unit)||planned?.unit||"KG",qty:num(x.qty),packetCount:num(x.packetCount),packetWeightKg:num(x.packetWeightKg),rate,value:r2(num(x.qty)*rate),batchNo:clean(x.batchNo)||clean(b.batchNo)||clean(planned?.batchNo),mfgDate:dt(x.mfgDate)||productionMfgDate,expiryDate:dt(x.expiryDate)||productionExpiryDate,barcode:clean(x.barcode)||clean(planned?.barcode)}}),notes:clean(b.notes),createdBy:req.user._id});
   for(const x of entry.outputItems){
    const value=r2(num(x.qty)*(num(x.rate)>0?num(x.rate):((job.outputItems||[]).find(o=>o.itemName===x.itemName)?.rate||0)));
-   await adjustStock({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:entry.date});
+   await adjustStock({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:x.mfgDate||entry.mfgDate||entry.date,expiryDate:x.expiryDate||entry.expiryDate});
    const st=await InventoryStock.findOne({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,batchNo:x.batchNo||"",barcode:x.barcode||""}).lean();
    await InventoryMovement.create({companyId:job.companyId||req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
   }
