@@ -24,6 +24,7 @@ import Inventory from "./pages/Inventory.jsx";
 import Accounting from "./pages/Accounting.jsx";
 import IntegratedOperations from "./pages/IntegratedOperations.jsx";
 import VoucherCenter from "./pages/VoucherCenter.jsx";
+import JobOrderStockReport from "./pages/JobOrderStockReport.jsx";
 
 /* ==============================
    HR MANAGEMENT
@@ -177,6 +178,11 @@ export default function App() {
             <Route
               path="/voucher"
               element={<VoucherCenter />}
+            />
+
+            <Route
+              path="/voucher/job-order-stock"
+              element={<JobOrderStockReport />}
             />
 
             {/* ================================
