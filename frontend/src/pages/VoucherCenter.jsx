@@ -4,6 +4,7 @@ import {useNavigate} from "react-router-dom";
 const items=[
   ["Purchase","Purchase Entry","/manufacturing?tab=purchase","F9","Raw material purchase → Raw Stock"],
   ["Job Order","Job Order / Production","/inventory?tab=jobs","F10","Create and track job orders"],
+  ["Job Order Stock Report","Party-wise Stock Report","/voucher/job-order-stock","Report","Party, date, product and job order-wise stock"],
   ["Production","Grading / Finished Goods","/manufacturing?tab=grading","F11","Raw → Grade → Finished Goods"],
   ["Sale","Sale Voucher","/manufacturing?tab=sales","F12","Finished/Packed stock → Sale"],
   ["PI","Proforma Invoice","/operations?tab=pi","Ctrl+1","No stock reduction"],
