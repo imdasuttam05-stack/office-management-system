@@ -421,6 +421,49 @@ export async function getJobs(req,res){
   return res.json({success:true,items:enriched});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
+export async function getJobOrderStockReport(req,res){
+ try{
+  const filter={status:{$ne:"CANCELLED"}};if(req.user?.companyId)filter.companyId=req.user.companyId;
+  const from=clean(req.query.from),to=clean(req.query.to);
+  if(from&&!/^\d{4}-\d{2}-\d{2}$/.test(from))return res.status(400).json({success:false,message:"Enter a valid start date."});
+  if(to&&!/^\d{4}-\d{2}-\d{2}$/.test(to))return res.status(400).json({success:false,message:"Enter a valid end date."});
+  const start=from?dt(`${from}T00:00:00.000Z`):null,end=to?dt(`${to}T00:00:00.000Z`):null;
+  if((from&&(!start||start.toISOString().slice(0,10)!==from))||(to&&(!end||end.toISOString().slice(0,10)!==to)))return res.status(400).json({success:false,message:"Enter valid report dates."});
+  if(start&&end&&end<start)return res.status(400).json({success:false,message:"End date must be on or after start date."});
+  if(start&&end&&end-start>370*86400000)return res.status(400).json({success:false,message:"Date range cannot exceed 370 days."});
+  if(start||end)filter.date={...(start?{$gte:start}:{}),...(end?{$lt:new Date(end.getTime()+86400000)}:{})};
+  const party=clean(req.query.party),jobNo=clean(req.query.jobNo),product=clean(req.query.product);
+  if(party)filter.partyName={$regex:party.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),$options:"i"};
+  if(jobNo)filter.jobNo={$regex:jobNo.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),$options:"i"};
+  if(req.query.status&&["POSTED","COMPLETED","CANCELLED"].includes(clean(req.query.status)))filter.status=clean(req.query.status);
+  const jobs=await ManufacturingJobOrder.find(filter).sort({partyName:1,date:-1,jobNo:1}).limit(5000).lean();
+  const jobIds=jobs.map(job=>job._id);
+  const entries=jobIds.length?await ProductionEntry.find({companyId:req.user?.companyId||null,jobId:{$in:jobIds},status:"POSTED"}).lean():[];
+  const produced=new Map();
+  for(const entry of entries)for(const line of entry.outputItems||[]){
+   const key=`${String(entry.jobId)}|${clean(line.itemName).toLowerCase()}|${clean(line.unit||"KG").toLowerCase()}`;
+   produced.set(key,(produced.get(key)||0)+num(line.qty));
+  }
+  const productMatches=product.toLowerCase();
+  const outputMap=new Map();
+  for(const job of jobs)for(const output of job.outputItems||[]){
+   if(productMatches&&!clean(output.itemName).toLowerCase().includes(productMatches))continue;
+   const itemType=job.type==="GRADING"?"GRADE":"FINISHED_GOODS";
+   const unit=output.unit||"KG",key=`${String(job._id)}|${clean(output.itemName).toLowerCase()}|${clean(unit).toLowerCase()}`;
+   const row=outputMap.get(key);
+   if(row)row.plannedQty+=num(output.qty);
+   else outputMap.set(key,{jobId:job._id,jobNo:job.jobNo||"",date:job.date,partyName:job.partyName||"",type:job.type,location:job.location,itemName:output.itemName,unit,plannedQty:num(output.qty),producedQty:produced.get(key)||0,itemType});
+  }
+  const lines=[...outputMap.values()];
+  const stockKeys=[...new Map(lines.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,{location:x.location,itemType:x.itemType,itemName:x.itemName}])).values()];
+  const stockFilter={companyId:req.user?.companyId||null,$or:stockKeys.map(x=>({location:x.location,itemType:x.itemType,itemName:x.itemName}))};
+  const stocks=stockKeys.length?await InventoryStock.find(stockFilter).select("location itemType itemName qty").lean():[];
+  const stockMap=new Map(stocks.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,0]));
+  for(const stock of stocks){const key=`${stock.location}|${stock.itemType}|${stock.itemName}`;stockMap.set(key,(stockMap.get(key)||0)+num(stock.qty));}
+  const rows=lines.map(line=>({...line,remainingQty:Math.max(0,line.plannedQty-line.producedQty),currentStockQty:stockMap.get(`${line.location}|${line.itemType}|${line.itemName}`)||0}));
+  return res.json({success:true,rows,limited:jobs.length===5000});
+ }catch(e){return res.status(500).json({success:false,message:e.message})}
+}
 export async function createSale(req,res){
   try{
     const b=req.body||{},location=clean(b.location),customerName=clean(b.customerName),lines=Array.isArray(b.lines)?b.lines:[];
