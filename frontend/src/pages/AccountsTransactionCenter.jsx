@@ -185,6 +185,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
   const packingUnconvertedLines=packingPreviewLines.filter(line=>n(line.unconvertedQty)>0.000001||n(line.unconvertedPacketCount)>0.000001);
   const packingTotal=packingUnconvertedLines.reduce((sum,line)=>sum+line.amount,0);
   const packingHistory=docs.filter(row=>row.docType==="PACKING_CONVERSION"&&row.meta?.jobId&&row.status==="POSTED");
+  const recentPackingHistory=packingHistory.slice(0,8);
   const itemOptions=(type)=>type==="RAW_MATERIAL"?rawItems:type==="GRADE"?gradeItems:type==="FINISHED_GOODS"?fgItems:allItems;
   const setLine=(setter,index,key,value)=>setter(a=>a.map((x,i)=>i===index?{...x,[key]:value}:x));
   const chooseItem=(setter,i,id)=>{const item=m.items.find(x=>x._id===id); if(!item)return; setter(a=>a.map((x,j)=>j===i?{...x,itemId:item._id,itemName:item.name,itemType:item.itemType,unit:setter===setOutputs?"KG":item.unit||"KG",packetCount:setter===setOutputs?"":x.packetCount,packetWeightKg:setter===setOutputs?packetWeightKgForItem(item.name):x.packetWeightKg,qty:setter===setOutputs?0:x.qty,rate:x.rate||0,gstRate:item.defaultGstRate||0,gstType:n(item.defaultGstRate)>0&&x.gstType==="NONE"?"CGST_SGST":x.gstType}:x))};
@@ -714,6 +715,11 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
           {!packingPreviewLines.length&&<tr><td colSpan="10" className="tx-bom-empty">Select a Job Order with posted production to preview its production-wise conversion charge.</td></tr>}
         </tbody><tfoot><tr><th colSpan="9" style={{textAlign:"right"}}>Total Unconverted Conversion Charge</th><th>₹ {money(packingTotal)}</th></tr></tfoot></table></div>
         <div className="tx-actions"><button className="tx-btn primary" disabled={busy||!packJobId||!packingUnconvertedLines.length||packingUnconvertedLines.some(line=>line.rate<=0)||packingTotal<=0} onClick={postPackingConversion}>{busy?"Posting...":"Post Conversion & Party Voucher"}</button></div>
+        <div className="tx-bom-section-heading" style={{marginTop:22}}><div><h4>Posted Conversion Status</h4><p>Posted Job Orders remain recorded here with their conversion date and completion status.</p></div><button type="button" className="tx-btn" onClick={loadDocs}>Refresh</button></div>
+        <div className="tx-table-wrap"><table className="tx-table"><thead><tr><th>Job Order</th><th>Party</th><th>Conversion Date</th><th>Conversion No.</th><th>Status</th></tr></thead><tbody>
+          {recentPackingHistory.map(row=><tr key={row._id}><td><b>{row.meta?.jobNo||row.referenceNo||"-"}</b></td><td>{row.partyName||"-"}</td><td>{dateOnly(row.date)}</td><td>{row.docNo||"-"}</td><td><span style={{display:"inline-block",padding:"5px 9px",borderRadius:12,background:"#e9f5f1",border:"1px solid #cde4dc",color:"#27786e",fontSize:10,fontWeight:800,letterSpacing:".03em"}}>ALREADY POSTED</span></td></tr>)}
+          {!recentPackingHistory.length&&<tr><td colSpan="5" className="tx-bom-empty">No production conversions have been posted yet.</td></tr>}
+        </tbody></table></div>
       </section>
     </>}
     {tab==="packing"&&packingSection==="rates"&&<>
