@@ -217,7 +217,13 @@ async function syncTransactionMaster(master, ctx, previousName = "") {
 
 export async function listMasters(masterType) {
   const filter = masterType ? { masterType, active: true } : { active: true };
-  return AccountsMaster.find(filter).sort({ name: 1 }).lean();
+  const rows = await AccountsMaster.find(filter).sort({ name: 1 }).lean();
+  if (masterType !== "ledger") return rows;
+
+  const ledgerNames = new Set(rows.map(row => clean(row.name).toLowerCase()));
+  const suppliers = await AccountsMaster.find({masterType:"supplier",active:true}).sort({name:1}).lean();
+  return [...rows,...suppliers.filter(row => !ledgerNames.has(clean(row.name).toLowerCase()))]
+    .sort((left,right) => clean(left.name).localeCompare(clean(right.name)));
 }
 
 export async function getMaster(id) {
