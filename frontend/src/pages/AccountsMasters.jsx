@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import AccountsMasterCatalog from "./AccountsMasterCatalog.jsx";
 import AccountsTransactionCenter from "./AccountsTransactionCenter.jsx";
 import Accounting from "./Accounting.jsx";
+import JobOrderStockReport from "./JobOrderStockReport.jsx";
 
 const masterTabs = [
   ["group", "Group", "F4"],
@@ -23,6 +24,7 @@ const txTabs = [
   ["damage", "Damage", "F18"],
   ["repack", "Repacking", "F19"],
   ["packing", "Packing Conversion", "F20"],
+  ["job-order-report", "Job Order Report", ""],
   ["bom", "BOM / Costing", ""],
   ["stock", "Stock / Ledger", ""],
   ["documents", "Documents", ""],
@@ -394,10 +396,9 @@ export default function AccountsMasters() {
         )}
 
         {section === "transactions" && (
-          <AccountsTransactionCenter
-            key={tx}
-            initialTab={tx}
-          />
+          tx === "job-order-report"
+            ? <JobOrderStockReport onBack={() => setTx("job")} />
+            : <AccountsTransactionCenter key={tx} initialTab={tx} />
         )}
 
         {section === "ledger" && <Accounting key={ledgerTab} initialTab={ledgerTab} />}
