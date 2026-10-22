@@ -492,6 +492,10 @@ export async function getJobOrderReportDetail(req,res){
   if(req.user?.companyId)filter.companyId=req.user.companyId;
   const job=await ManufacturingJobOrder.findOne(filter).lean();
   if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
+  const locationId=clean(job.location);
+  const location= /^[a-f\d]{24}$/i.test(locationId)
+   ? await LocationMaster.findOne({ _id: locationId, $or: [{companyId:req.user?.companyId||null},{companyId:null},{companyId:{$exists:false}}] }).select("name").lean()
+   : null;
   const entryFilter={jobId:job._id,status:"POSTED",companyId:req.user?.companyId||null};
   const entries=await ProductionEntry.find(entryFilter).sort({date:1,createdAt:1}).lean();
   const plannedProducts=new Map();
@@ -514,7 +518,7 @@ export async function getJobOrderReportDetail(req,res){
    }
    return {...output,unit,producedQty,producedPacketCount,remainingQty:Math.max(0,output.plannedQty-producedQty),remainingPacketCount:Math.max(0,output.plannedPacketCount-producedPacketCount),productions};
   });
-  return res.json({success:true,job,products});
+  return res.json({success:true,job:{...job,locationName:location?.name||job.location},products});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
 export async function createSale(req,res){
