@@ -1,5 +1,5 @@
 import express from "express";
-import {getWorkflowMasters,listBoms,listBomCostItems,saveBomCostItem,deleteBomCostItem,listPackingConversionRates,savePackingConversionRate,deletePackingConversionRate,getPurchaseRate,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,createJobPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
+import {getWorkflowMasters,listBoms,listBomCostItems,saveBomCostItem,deleteBomCostItem,listPackingConversionRates,savePackingConversionRate,deletePackingConversionRate,getPurchaseRate,createBom,costing,createPI,createReturn,createRepack,createDamage,createPackingConversion,createJobPackingConversion,updateJobPackingConversion,deleteJobPackingConversion,getWorkflowDocs,getStockLedger} from "../controllers/inventoryWorkflowController.js";
 import auth from "../middleware/auth.js";
 import requireCompanyContext from "../middleware/companyContext.js";
 import requireRole from "../middleware/role.js";
@@ -60,6 +60,8 @@ router.post("/workflow/returns",requireRole("Admin","Manager"),createReturn);
 router.post("/workflow/repack",requireRole("Admin","Manager"),createRepack);
 router.post("/workflow/damage",requireRole("Admin","Manager"),createDamage);
 router.post("/workflow/packing-conversion",requireRole("Admin","Manager"),(req,res)=>req.body?.jobId?createJobPackingConversion(req,res):createPackingConversion(req,res));
+router.put("/workflow/packing-conversion/:id",requireRole("Admin","Manager"),updateJobPackingConversion);
+router.delete("/workflow/packing-conversion/:id",requireRole("Admin","Manager"),deleteJobPackingConversion);
 router.get("/workflow/documents",getWorkflowDocs);
 router.get("/workflow/stock-ledger",getStockLedger);
 export default router;
