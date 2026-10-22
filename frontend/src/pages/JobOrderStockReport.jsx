@@ -55,20 +55,25 @@ export default function JobOrderStockReport({ onBack }) {
 
   const totals = rows.reduce((result, row) => ({
     planned: result.planned + row.plannedQty,
+    plannedPackets: result.plannedPackets + (row.plannedPacketCount || 0),
     produced: result.produced + row.producedQty,
     packets: result.packets + (row.producedPacketCount || 0),
     remaining: result.remaining + row.remainingQty,
-  }), { planned: 0, produced: 0, packets: 0, remaining: 0 });
+    remainingPackets: result.remainingPackets + (row.remainingPacketCount || 0),
+  }), { planned: 0, plannedPackets: 0, produced: 0, packets: 0, remaining: 0, remainingPackets: 0 });
   const jobOrderCount = new Set(rows.map((row) => row.jobId)).size;
   const partySummaries = useMemo(() => {
     const grouped = new Map();
     for (const row of rows) {
       const partyName = row.partyName || "-";
-      const summary = grouped.get(partyName) || { partyName, jobs: new Set(), planned: 0, produced: 0, remaining: 0 };
+      const summary = grouped.get(partyName) || { partyName, jobs: new Set(), planned: 0, plannedPackets: 0, produced: 0, packets: 0, remaining: 0, remainingPackets: 0 };
       summary.jobs.add(row.jobId);
       summary.planned += row.plannedQty;
+      summary.plannedPackets += row.plannedPacketCount || 0;
       summary.produced += row.producedQty;
+      summary.packets += row.producedPacketCount || 0;
       summary.remaining += row.remainingQty;
+      summary.remainingPackets += row.remainingPacketCount || 0;
       grouped.set(partyName, summary);
     }
     return [...grouped.values()].sort((a, b) => a.partyName.localeCompare(b.partyName));
@@ -95,9 +100,9 @@ export default function JobOrderStockReport({ onBack }) {
   function downloadCsv() {
     const columns = [
       ["Party", "partyName"], ["Date", "date"], ["Job Order", "jobNo"], ["Type", "type"],
-      ["Product", "itemName"], ["Location", "location"], ["Planned KG", "plannedQty"],
-      ["Produced Packets", "producedPacketCount"], ["Produced KG", "producedQty"], ["Balance KG", "remainingQty"],
-      ["Current Location Stock", "currentStockQty"], ["Unit", "unit"],
+      ["Product", "itemName"], ["Location", "location"], ["Planned Packets", "plannedPacketCount"], ["Planned KG", "plannedQty"],
+      ["Produced Packets", "producedPacketCount"], ["Produced KG", "producedQty"], ["Balance Packets", "remainingPacketCount"], ["Balance KG", "remainingQty"],
+      ["Current Stock Packets", "currentStockPacketCount"], ["Current Location Stock", "currentStockQty"], ["Current Stock Unit", "currentStockUnit"], ["Unit", "unit"],
     ];
     const csv = [columns.map(([label]) => label), ...rows.map((row) => columns.map(([, key]) => key === "date" ? dateLabel(row[key]) : row[key] ?? ""))]
       .map((line) => line.map((cell) => {
@@ -115,13 +120,13 @@ export default function JobOrderStockReport({ onBack }) {
   }
 
   function printReport() {
-    const table = rows.map((row) => `<tr><td>${escape(row.partyName || "-")}</td><td>${dateLabel(row.date)}</td><td>${escape(row.jobNo)}</td><td>${escape(row.itemName)}</td><td>${qty(row.plannedQty)} ${escape(row.unit)}</td><td>${qty(row.producedPacketCount)} PCS</td><td>${qty(row.producedQty)} ${escape(row.unit)}</td><td>${qty(row.remainingQty)} ${escape(row.unit)}</td></tr>`).join("");
+    const table = rows.map((row) => `<tr><td>${escape(row.partyName || "-")}</td><td>${dateLabel(row.date)}</td><td>${escape(row.jobNo)}</td><td>${escape(row.itemName)}</td><td>${qty(row.plannedPacketCount)} PCS</td><td>${qty(row.plannedQty)} ${escape(row.unit)}</td><td>${qty(row.producedPacketCount)} PCS</td><td>${qty(row.producedQty)} ${escape(row.unit)}</td><td>${qty(row.remainingPacketCount)} PCS</td><td>${qty(row.remainingQty)} ${escape(row.unit)}</td></tr>`).join("");
     const win = window.open("", "_blank", "width=1200,height=800");
     if (!win) {
       setError("Allow pop-ups to print this report.");
       return;
     }
-    win.document.write(`<!doctype html><html><head><title>Job Order Report</title><style>body{font:12px Arial;padding:20px;color:#172b4d}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #d0d5dd;padding:7px;text-align:left}th{background:#eef2f6}@page{size:landscape}</style></head><body><h1>Job Order Report</h1><p>Party-wise · ${escape(filters.from || "All dates")} to ${escape(filters.to || "All dates")}</p><table><thead><tr><th>Party</th><th>Job Date</th><th>Job Order</th><th>Product</th><th>Planned KG</th><th>Produced Packets</th><th>Produced KG</th><th>Balance KG</th></tr></thead><tbody>${table}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`);
+    win.document.write(`<!doctype html><html><head><title>Job Order Report</title><style>body{font:12px Arial;padding:20px;color:#172b4d}h1{font-size:20px}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #d0d5dd;padding:7px;text-align:left}th{background:#eef2f6}@page{size:landscape}</style></head><body><h1>Job Order Report</h1><p>Party-wise · ${escape(filters.from || "All dates")} to ${escape(filters.to || "All dates")}</p><table><thead><tr><th>Party</th><th>Job Date</th><th>Job Order</th><th>Product</th><th>Planned Packets</th><th>Planned KG</th><th>Produced Packets</th><th>Produced KG</th><th>Balance Packets</th><th>Balance KG</th></tr></thead><tbody>${table}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`);
     win.document.close();
   }
 
@@ -166,35 +171,37 @@ export default function JobOrderStockReport({ onBack }) {
       <section style={styles.summary}>
         <Summary label="Job orders" value={jobOrderCount} />
         <Summary label="Parties" value={partySummaries.length} />
+        <Summary label="Planned (packets)" value={qty(totals.plannedPackets)} />
         <Summary label="Planned (KG)" value={qty(totals.planned)} />
         <Summary label="Produced (packets)" value={qty(totals.packets)} />
         <Summary label="Produced (KG)" value={qty(totals.produced)} />
+        <Summary label="Balance (packets)" value={qty(totals.remainingPackets)} />
         <Summary label="Balance (KG)" value={qty(totals.remaining)} />
       </section>
       <section style={styles.partySummary}>
         <h2 className="jor-party-title">Party-wise Job Order Summary</h2>
         <div style={styles.tableWrap}>
           <table className="jor-report-table" style={styles.table}>
-            <thead><tr>{["Party", "Job Orders", "Planned (KG)", "Produced (KG)", "Balance (KG)"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+            <thead><tr>{["Party", "Job Orders", "Planned (Packets)", "Planned (KG)", "Produced (Packets)", "Produced (KG)", "Balance (Packets)", "Balance (KG)"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
             <tbody>{partySummaries.length ? partySummaries.map((party) => <tr key={party.partyName}>
-              <td>{party.partyName}</td><td>{party.jobs.size}</td><td>{qty(party.planned)}</td><td>{qty(party.produced)}</td><td>{qty(party.remaining)}</td>
-            </tr>) : <tr><td colSpan="5" style={styles.empty}>No party summary for these filters.</td></tr>}</tbody>
+              <td>{party.partyName}</td><td>{party.jobs.size}</td><td>{qty(party.plannedPackets)} PCS</td><td>{qty(party.planned)} KG</td><td>{qty(party.packets)} PCS</td><td>{qty(party.produced)} KG</td><td>{qty(party.remainingPackets)} PCS</td><td>{qty(party.remaining)} KG</td>
+            </tr>) : <tr><td colSpan="8" style={styles.empty}>No party summary for these filters.</td></tr>}</tbody>
           </table>
         </div>
       </section>
-      <div style={styles.note}><b>Packet count</b> shows packets actually produced. Planned quantity and remaining balance are shown in KG because job orders are recorded in KG. <b>Current Location Stock</b> is total live stock across batches, not stock assigned to a specific job order.</div>
+      <div style={styles.note}><b>Planned KG</b> is calculated from planned packets × packet weight. Produced KG and balance KG are shown alongside packet counts. <b>Current Location Stock</b> is total live stock across batches, not stock assigned to a specific job order.</div>
       <div style={styles.tableWrap}>
         <table className="jor-report-table" style={styles.table}>
-          <thead><tr>{["Party", "Job Date", "Job Order", "Product", "Planned (KG)", "Produced (Packets)", "Produced (KG)", "Balance (KG)", "Current Location Stock"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+          <thead><tr>{["Party", "Job Date", "Job Order", "Product", "Planned (Packets)", "Planned (KG)", "Produced (Packets)", "Produced (KG)", "Balance (Packets)", "Balance (KG)", "Current Location Stock"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan="9" style={styles.empty}>Loading report...</td></tr>
+            {loading ? <tr><td colSpan="11" style={styles.empty}>Loading report...</td></tr>
               : rows.length ? rows.map((row, index) => <tr key={`${row.jobId}-${row.itemName}-${index}`}>
                 <td>{row.partyName || "-"}</td><td>{dateLabel(row.date)}</td>
                 <td><button type="button" style={styles.jobLink} onClick={() => showJobDetail(row.jobId)}>{row.jobNo} · Details</button></td>
-                <td>{row.itemName}</td><td>{qty(row.plannedQty)} {row.unit}</td>
+                <td>{row.itemName}</td><td>{qty(row.plannedPacketCount)} PCS</td><td>{qty(row.plannedQty)} {row.unit}</td>
                 <td>{qty(row.producedPacketCount)} PCS</td><td>{qty(row.producedQty)} {row.unit}</td>
-                <td>{qty(row.remainingQty)} {row.unit}</td><td>{qty(row.currentStockQty)} {row.unit}</td>
-              </tr>) : <tr><td colSpan="9" style={styles.empty}>No job orders found for these filters.</td></tr>}
+                <td>{qty(row.remainingPacketCount)} PCS</td><td>{qty(row.remainingQty)} {row.unit}</td><td>{row.packetWeightKg>0?`${qty(row.currentStockPacketCount)} PCS · ${qty(row.currentStockQty)} KG`:`${qty(row.currentStockQty)} ${row.currentStockUnit||row.unit}`}</td>
+              </tr>) : <tr><td colSpan="11" style={styles.empty}>No job orders found for these filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -214,10 +221,10 @@ export default function JobOrderStockReport({ onBack }) {
             </div>
             <h3 style={styles.subTitle}>Products, Production & Balance</h3>
             <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
-              <thead><tr>{["Product", "Planned (KG)", "Produced (Packets)", "Produced (KG)", "Balance (KG)"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+              <thead><tr>{["Product", "Planned (Packets)", "Planned (KG)", "Produced (Packets)", "Produced (KG)", "Balance (Packets)", "Balance (KG)"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
               <tbody>{detail.products.map((product, index) => <tr key={`${product.itemName}-${index}`}>
-                <td>{product.itemName}</td><td>{qty(product.plannedQty)} {product.unit}</td><td>{qty(product.producedPacketCount)} PCS</td>
-                <td>{qty(product.producedQty)} {product.unit}</td><td>{qty(product.remainingQty)} {product.unit}</td>
+                <td>{product.itemName}</td><td>{qty(product.plannedPacketCount)} PCS</td><td>{qty(product.plannedQty)} {product.unit}</td><td>{qty(product.producedPacketCount)} PCS</td>
+                <td>{qty(product.producedQty)} {product.unit}</td><td>{qty(product.remainingPacketCount)} PCS</td><td>{qty(product.remainingQty)} {product.unit}</td>
               </tr>)}</tbody>
             </table></div>
             <h3 style={styles.subTitle}>Production Date-wise Details</h3>
