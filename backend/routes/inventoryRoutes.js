@@ -51,6 +51,7 @@ router.delete("/workflow/bom-cost-items/:id",requireRole("Admin","Manager"),dele
 router.get("/workflow/packing-conversion-rates",listPackingConversionRates);
 router.post("/workflow/packing-conversion-rates",requireRole("Admin","Manager"),savePackingConversionRate);
 router.put("/workflow/packing-conversion-rates/:id",requireRole("Admin","Manager"),savePackingConversionRate);
+router.delete("/workflow/packing-conversion-rates/:id/:periodId",requireRole("Admin","Manager"),deletePackingConversionRate);
 router.delete("/workflow/packing-conversion-rates/:id",requireRole("Admin","Manager"),deletePackingConversionRate);
 router.get("/workflow/purchase-rate",getPurchaseRate);
 router.post("/workflow/costing",costing);
