@@ -13,6 +13,7 @@ export default function JobOrderStockReport({ onBack }) {
   const navigate = useNavigate();
   const [filters, setFilters] = useState({ from: monthStart, to: today, party: "", product: "", jobNo: "" });
   const [rows, setRows] = useState([]);
+  const [filterOptions, setFilterOptions] = useState({ parties: [], products: [], jobOrders: [] });
   const [limited, setLimited] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -42,6 +43,11 @@ export default function JobOrderStockReport({ onBack }) {
       .then((data) => {
         if (!active) return;
         setRows(Array.isArray(data.rows) ? data.rows : []);
+        setFilterOptions({
+          parties: Array.isArray(data.filterOptions?.parties) ? data.filterOptions.parties : [],
+          products: Array.isArray(data.filterOptions?.products) ? data.filterOptions.products : [],
+          jobOrders: Array.isArray(data.filterOptions?.jobOrders) ? data.filterOptions.jobOrders : [],
+        });
         setLimited(Boolean(data.limited));
       })
       .catch((requestError) => {
@@ -257,15 +263,11 @@ export default function JobOrderStockReport({ onBack }) {
         </div>
       </div>
       <section style={styles.filters}>
-        {[
-          ["from", "From date", "date"], ["to", "To date", "date"],
-          ["party", "Party", "text"], ["product", "Product", "text"], ["jobNo", "Job order", "text"],
-        ].map(([key, label, type]) => (
-          <label key={key} style={styles.label}>
-            <span>{label}</span>
-            <input type={type} value={filters[key]} onChange={(event) => setFilters((current) => ({ ...current, [key]: event.target.value }))} placeholder={type === "text" ? `Filter by ${label.toLowerCase()}` : undefined} style={styles.input} />
-          </label>
-        ))}
+        <label style={styles.label}><span>From date</span><input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} style={styles.input} /></label>
+        <label style={styles.label}><span>To date</span><input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} style={styles.input} /></label>
+        <label style={styles.label}><span>Party</span><select value={filters.party} onChange={(event) => setFilters((current) => ({ ...current, party: event.target.value }))} style={styles.input}><option value="">All parties</option>{filterOptions.parties.map((party) => <option key={party} value={party}>{party}</option>)}</select></label>
+        <label style={styles.label}><span>Product</span><select value={filters.product} onChange={(event) => setFilters((current) => ({ ...current, product: event.target.value }))} style={styles.input}><option value="">All products</option>{filterOptions.products.map((product) => <option key={product} value={product}>{product}</option>)}</select></label>
+        <label style={styles.label}><span>Job order</span><select value={filters.jobNo} onChange={(event) => setFilters((current) => ({ ...current, jobNo: event.target.value }))} style={styles.input}><option value="">All job orders</option>{filterOptions.jobOrders.map((job) => <option key={job.jobId} value={job.jobNo}>{job.jobNo}</option>)}</select></label>
       </section>
       {error && <div role="alert" style={styles.error}>{error}</div>}
       {limited && <div style={styles.notice}>Showing the latest 5,000 job orders. Narrow the date range to see a smaller period.</div>}
