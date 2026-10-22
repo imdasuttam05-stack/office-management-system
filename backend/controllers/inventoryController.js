@@ -315,6 +315,13 @@ export async function createJobOrder(req,res){
  try{
   const b=req.body||{},type=b.type,location=clean(b.location),sources=Array.isArray(b.sourceItems)?b.sourceItems:[],outputs=Array.isArray(b.outputItems)?b.outputItems:[];
   if(!["GRADING","FINISHED_GOODS"].includes(type)||!location||!sources.length||!outputs.length)return res.status(400).json({success:false,message:"Type, location, source items and output items are required."});
+  const companyId=req.user?.companyId||null,requestedJobNo=clean(b.jobNo),jobNoMode=clean(b.jobNoMode)||(requestedJobNo?"MANUAL":"AUTO");
+  if(!["AUTO","MANUAL"].includes(jobNoMode))return res.status(400).json({success:false,message:"Select Auto Generate or Manual Entry for Job Order No."});
+  if(jobNoMode==="MANUAL"&&!requestedJobNo)return res.status(400).json({success:false,message:"Enter a Job Order No. or select Auto Generate."});
+  if(jobNoMode==="MANUAL"){
+   const duplicate=await ManufacturingJobOrder.findOne({jobNo:requestedJobNo,companyId}).select("_id").lean();
+   if(duplicate)return res.status(409).json({success:false,message:`Job Order No. ${requestedJobNo} already exists. Enter a different number.`});
+  }
   const allowedIn="RAW_MATERIAL", allowedOut=type==="GRADING"?"GRADE":"FINISHED_GOODS";
   let sourceValue=0;
   for(const x of sources){
@@ -325,8 +332,7 @@ export async function createJobOrder(req,res){
   }
   for(const x of outputs){if(num(x.qty)<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");}
   const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other);
-  const jobNo=await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");
-  const companyId=req.user?.companyId||null;
+  const jobNo=jobNoMode==="MANUAL"?requestedJobNo:await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");
   const party=b.partyId?await CustomerMaster.findOne({$and:[{_id:b.partyId},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}):null;
   if(b.partyId&&!party)throw new Error("Selected party was not found.");
   const job=await ManufacturingJobOrder.create({jobNo,companyId,date:dt(b.date)||new Date(),type,location,partyId:party?._id||null,partyName:party?.name||clean(b.partyName),
@@ -339,7 +345,7 @@ export async function createJobOrder(req,res){
    await InventoryMovement.create({companyId:req.user?.companyId||null,date:job.date,location,itemName:x.itemName,itemType:allowedIn,unit:x.unit||"KG",qtyOut:x.qty,valueOut:x.value,balanceQty:num(st?.qty),sourceType:"JOB_ORDER",sourceNo:job.jobNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Raw Material issued against Job Order ${job.jobNo}`,createdBy:req.user._id});
   }
   return res.status(201).json({success:true,message:`Job Order ${jobNo} created. Raw Material stock issued. Production entry is required to increase output stock.`,job});
- }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Job order failed."})}
+ }catch(e){console.error(e);if(e?.code===11000)return res.status(409).json({success:false,message:"This Job Order No. already exists. Enter a different number."});return res.status(400).json({success:false,message:e.message||"Job order failed."})}
 }
 
 export async function createJobOrderReturn(req,res){
