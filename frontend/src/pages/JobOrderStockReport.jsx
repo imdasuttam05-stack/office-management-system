@@ -7,7 +7,7 @@ const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0"
 const monthStart = `${today.slice(0, 7)}-01`;
 const qty = (value) => Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 3 });
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "-";
-const escape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+const escape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
 export default function JobOrderStockReport({ onBack }) {
   const navigate = useNavigate();
@@ -130,6 +130,85 @@ export default function JobOrderStockReport({ onBack }) {
     win.document.close();
   }
 
+  function printJobOrderPdf() {
+    if (!detail?.job) return;
+    const { job, products = [] } = detail;
+    const productRows = products.map((product) => `<tr>
+      <td><strong>${escape(product.itemName)}</strong><small>${qty(product.packetWeightKg)} KG / packet</small></td>
+      <td class="num">${qty(product.plannedPacketCount)} PCS<br>${qty(product.plannedQty)} KG</td>
+      <td class="num">${qty(product.producedPacketCount)} PCS<br>${qty(product.producedQty)} KG</td>
+      <td class="num">${qty(product.remainingPacketCount)} PCS<br>${qty(product.remainingQty)} KG</td>
+    </tr>`).join("");
+    const productionRows = products.flatMap((product) => (product.productions || []).map((production) => `<tr>
+      <td>${dateLabel(production.date)}</td><td>${escape(production.productionNo || "-")}</td>
+      <td>${escape(production.itemName)}</td><td class="num">${qty(production.packetCount)} PCS</td>
+      <td class="num">${qty(production.packetWeightKg)} KG</td><td class="num">${qty(production.qty)} KG</td>
+      <td>${escape(production.batchNo || "-")}</td>
+    </tr>`)).join("");
+    const materialRows = (job.sourceItems || []).map((item) => `<tr>
+      <td>${escape(item.itemName)}</td><td class="num">${qty(item.qty)}</td>
+      <td>${escape(item.unit || "KG")}</td><td>${escape(item.batchNo || "-")}</td>
+      <td class="num">${item.value == null ? "-" : `₹ ${qty(item.value)}`}</td>
+    </tr>`).join("");
+    const win = window.open("", "_blank", "width=1000,height=800");
+    if (!win) {
+      setError("Allow pop-ups to print or save the Job Order as PDF.");
+      return;
+    }
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Job Order ${escape(job.jobNo)}</title><style>
+      *{box-sizing:border-box}body{margin:0;padding:28px;background:#f2f6f8;color:#17374c;font:12px "Segoe UI",Arial,sans-serif}
+      .sheet{max-width:1000px;margin:0 auto;background:#fff;border:1px solid #d7e1e6;padding:30px}
+      .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #27786e;padding-bottom:16px}
+      .eyebrow{color:#348078;font-size:9px;font-weight:900;letter-spacing:1.4px}.title{margin:6px 0 3px;font-size:25px;color:#17374c}
+      .sub{color:#71838e}.badge{padding:7px 10px;background:#e9f5f1;border:1px solid #cde4dc;color:#27786e;font-size:10px;font-weight:900}
+      .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:18px 0;border:1px solid #d7e1e6}
+      .meta div{padding:11px 13px;border-right:1px solid #e7eef1;border-bottom:1px solid #e7eef1;min-height:54px}
+      .meta span{display:block;margin-bottom:5px;color:#71838e;font-size:9px;text-transform:uppercase;letter-spacing:.5px;font-weight:800}
+      .meta strong{font-size:12px;overflow-wrap:anywhere}
+      .costs{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:16px 0 22px}
+      .cost{padding:11px;border:1px solid #d7e1e6;border-top:2px solid #27786e;background:#fbfdfe}
+      .cost span{display:block;color:#71838e;font-size:9px;text-transform:uppercase;font-weight:800;margin-bottom:5px}.cost strong{font-size:14px}
+      h2{margin:20px 0 8px;padding-bottom:7px;border-bottom:1px solid #d7e1e6;color:#27786e;font-size:13px}
+      table{width:100%;border-collapse:collapse;font-size:10px}th{background:#eaf1f4;color:#526a77;text-transform:uppercase;font-size:8px;letter-spacing:.5px;text-align:left}
+      th,td{padding:8px;border:1px solid #dfe7eb;vertical-align:top}tbody tr:nth-child(even){background:#fbfdfe}
+      td small{display:block;color:#71838e;margin-top:4px}.num{text-align:right;font-variant-numeric:tabular-nums}
+      .empty{padding:12px;color:#71838e;text-align:center}
+      .signatures{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin:52px 0 24px}
+      .signatures div{padding-top:8px;border-top:1px solid #8da0aa;text-align:center;color:#526a77;font-size:9px}
+      .foot{border-top:1px solid #d7e1e6;padding-top:9px;color:#71838e;font-size:9px;display:flex;justify-content:space-between}
+      @page{size:A4 portrait;margin:12mm}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{padding:0;background:#fff}.sheet{max-width:none;border:0;padding:0}.head,h2,.cost,.meta,table{break-inside:avoid}h2{break-after:avoid}thead{display:table-header-group}.foot{background:white}}
+    </style></head><body><main class="sheet">
+      <header class="head"><div><div class="eyebrow">PRODUCTION WORKFLOW · JOB ORDER</div><h1 class="title">Job Order ${escape(job.jobNo || "-")}</h1><div class="sub">Production plan, raw material issue and completion record</div></div><span class="badge">${escape(job.status || "POSTED")}</span></header>
+      <section class="meta">
+        <div><span>Job Order No.</span><strong>${escape(job.jobNo || "-")}</strong></div>
+        <div><span>Job Date</span><strong>${dateLabel(job.date)}</strong></div>
+        <div><span>Party</span><strong>${escape(job.partyName || "-")}</strong></div>
+        <div><span>Job Type</span><strong>${escape(job.type === "GRADING" ? "Grading" : "Finished Goods")}</strong></div>
+        <div><span>Location</span><strong>${escape(job.locationName || job.location || "-")}</strong></div>
+        <div><span>Notes</span><strong>${escape(job.notes || "-")}</strong></div>
+      </section>
+      <h2>Production Plan & Balance</h2>
+      <table><thead><tr><th>Product</th><th class="num">Planned · PCS / KG</th><th class="num">Produced · PCS / KG</th><th class="num">Balance · PCS / KG</th></tr></thead>
+        <tbody>${productRows || '<tr><td colspan="4" class="empty">No output products recorded.</td></tr>'}</tbody></table>
+      <h2>Production Date-wise Details</h2>
+      <table><thead><tr><th>Production Date</th><th>Production No.</th><th>Product</th><th class="num">Packets</th><th class="num">Packet Weight</th><th class="num">Total KG</th><th>Batch</th></tr></thead>
+        <tbody>${productionRows || '<tr><td colspan="7" class="empty">No production has been posted.</td></tr>'}</tbody></table>
+      <h2>Raw Materials Issued</h2>
+      <table><thead><tr><th>Raw Material</th><th class="num">Quantity</th><th>Unit</th><th>Batch</th><th class="num">Value</th></tr></thead>
+        <tbody>${materialRows || '<tr><td colspan="5" class="empty">No raw materials recorded.</td></tr>'}</tbody></table>
+      <h2>Job Order Cost Summary</h2>
+      <section class="costs">
+        <div class="cost"><span>Labour Cost</span><strong>₹ ${qty(job.labourCost)}</strong></div>
+        <div class="cost"><span>Transport Cost</span><strong>₹ ${qty(job.transportCost)}</strong></div>
+        <div class="cost"><span>Other Cost</span><strong>₹ ${qty(job.otherCost)}</strong></div>
+        <div class="cost"><span>Total Cost</span><strong>₹ ${qty(job.totalCost)}</strong></div>
+      </section>
+      <section class="signatures"><div>Prepared By</div><div>Checked By</div><div>Authorized Signature</div></section>
+      <footer class="foot"><span>Job Order ${escape(job.jobNo || "-")}</span><span>Generated ${dateLabel(new Date())}</span></footer>
+    </main><script>window.onload=()=>window.print()</script></body></html>`);
+    win.document.close();
+  }
+
   return (
     <main className="jor-report-page" style={styles.page}>
       <style>{`
@@ -141,7 +220,29 @@ export default function JobOrderStockReport({ onBack }) {
         .jor-report-table tbody tr:nth-child(even){background:#fbfdfe}
         .jor-report-table tbody tr:hover{background:#f1f7f8}
         .jor-modal-table th{position:static}
+        .jor-detail-banner{display:flex;align-items:center;gap:13px;padding:16px 18px;margin-bottom:14px;background:#fff;border:1px solid #d7e1e6;border-left:3px solid #27786e}
+        .jor-detail-mark{display:grid;place-items:center;flex:0 0 44px;width:44px;height:42px;background:#e9f5f1;color:#27786e;font-size:10px;font-weight:900;letter-spacing:.05em}
+        .jor-detail-eyebrow{color:#348078;font-size:9px;font-weight:900;letter-spacing:1.2px}
+        .jor-detail-banner h2{margin:4px 0;color:#17374c;font-size:20px}
+        .jor-detail-banner p{margin:0;color:#71838e;font-size:11px}
+        .jor-detail-status{margin-left:auto;padding:6px 9px;border:1px solid #cde4dc;background:#e9f5f1;color:#27786e;font-size:9px;font-weight:900;letter-spacing:.5px}
+        .jor-detail-section{margin-top:16px;padding:15px;background:#fff;border:1px solid #d7e1e6}
+        .jor-detail-section h3{margin:0 0 12px;color:#27786e;font-size:12px;text-transform:uppercase;letter-spacing:.045em}
+        .jor-detail-costs{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin-top:14px}
+        .jor-detail-cost{display:grid;gap:7px;padding:12px;background:#fff;border:1px solid #d7e1e6;border-top:2px solid #27786e}
+        .jor-detail-cost span{color:#71838e;font-size:9px;text-transform:uppercase;letter-spacing:.04em;font-weight:800}
+        .jor-detail-cost strong{color:#17374c;font-size:16px;font-variant-numeric:tabular-nums}
+        .jor-detail-actions{display:flex;gap:8px;align-items:center}
+        .jor-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid #d7e1e6;background:#fff}
+        .jor-detail-grid>div{display:grid;gap:5px;padding:11px 12px;border-right:1px solid #e7eef1;border-bottom:1px solid #e7eef1;min-height:56px;overflow-wrap:anywhere}
+        .jor-detail-grid b{color:#71838e;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+        .jor-detail-grid span{color:#17374c;font-size:12px;font-weight:650}
+        .jor-detail-grid .jor-detail-notes{grid-column:1/-1;min-height:44px}
+        .jor-modal-table td{font-variant-numeric:tabular-nums}
+        .jor-modal-table td b{color:#17374c}
         @media(max-width:640px){.jor-report-page{padding:12px!important}.jor-report-header{padding:18px!important}.jor-report-header h1{font-size:22px!important}}
+        @media(max-width:640px){.jor-detail-banner{align-items:flex-start;padding:12px;gap:9px}.jor-detail-banner h2{font-size:16px}.jor-detail-mark{width:36px;height:36px;flex-basis:36px}.jor-detail-status{font-size:8px;padding:5px}.jor-detail-costs{grid-template-columns:repeat(2,minmax(0,1fr))}.jor-detail-section{padding:10px}}
+        @media(max-width:420px){.jor-detail-actions{gap:5px}.jor-detail-actions button{padding:7px;font-size:10px}.jor-detail-banner p{font-size:10px}}
       `}</style>
       <div className="jor-report-header" style={styles.top}>
         <div>
@@ -208,39 +309,71 @@ export default function JobOrderStockReport({ onBack }) {
       {(detailLoading || detail) && <div style={styles.overlay} role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setDetail(null); }}>
         <section style={styles.modal} role="dialog" aria-modal="true" aria-label="Job Order details">
           <div style={styles.modalHeader}>
-            <div><h2 style={styles.sectionTitle}>{detail?.job?.jobNo || "Loading Job Order..."}</h2><span style={styles.muted}>Full Job Order and production details</span></div>
-            <button type="button" style={styles.button} onClick={() => setDetail(null)}>Close</button>
+            <div><div style={styles.eyebrow}>PRODUCTION WORKFLOW · JOB ORDER</div><span style={styles.muted}>Job Order form and production details</span></div>
+            <div className="jor-detail-actions">
+              {detail && <button type="button" style={styles.pdfButton} onClick={printJobOrderPdf}>Print / Save PDF</button>}
+              <button type="button" style={styles.button} onClick={() => setDetail(null)}>Close</button>
+            </div>
           </div>
           {detailLoading ? <div style={styles.empty}>Loading Job Order details...</div> : detail && <>
-            <div style={styles.detailGrid}>
-              <div><b>Job Date</b><span>{dateLabel(detail.job.date)}</span></div><div><b>Party</b><span>{detail.job.partyName || "-"}</span></div>
-              <div><b>Type</b><span>{detail.job.type === "GRADING" ? "Grading" : "Finished Goods"}</span></div><div><b>Location</b><span>{detail.job.location || "-"}</span></div>
-              <div><b>Status</b><span>{detail.job.status || "-"}</span></div><div><b>Notes</b><span>{detail.job.notes || "-"}</span></div>
-              <div><b>Labour Cost</b><span>₹ {qty(detail.job.labourCost)}</span></div><div><b>Transport Cost</b><span>₹ {qty(detail.job.transportCost)}</span></div>
-              <div><b>Other Cost</b><span>₹ {qty(detail.job.otherCost)}</span></div><div><b>Total Cost</b><span>₹ {qty(detail.job.totalCost)}</span></div>
+            <div className="jor-detail-banner">
+              <div className="jor-detail-mark">JOB</div>
+              <div><div className="jor-detail-eyebrow">{detail.job.type === "GRADING" ? "GRADING WORK ORDER" : "FINISHED GOODS WORK ORDER"}</div>
+                <h2>{detail.job.jobNo || "Job Order"}</h2><p>{detail.job.partyName || "No party selected"} · {dateLabel(detail.job.date)}</p></div>
+              <span className="jor-detail-status">{detail.job.status || "POSTED"}</span>
             </div>
-            <h3 style={styles.subTitle}>Products, Production & Balance</h3>
-            <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
-              <thead><tr>{["Product", "Planned (Packets)", "Planned (KG)", "Produced (Packets)", "Produced (KG)", "Balance (Packets)", "Balance (KG)"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
-              <tbody>{detail.products.map((product, index) => <tr key={`${product.itemName}-${index}`}>
-                <td>{product.itemName}</td><td>{qty(product.plannedPacketCount)} PCS</td><td>{qty(product.plannedQty)} {product.unit}</td><td>{qty(product.producedPacketCount)} PCS</td>
-                <td>{qty(product.producedQty)} {product.unit}</td><td>{qty(product.remainingPacketCount)} PCS</td><td>{qty(product.remainingQty)} {product.unit}</td>
-              </tr>)}</tbody>
-            </table></div>
-            <h3 style={styles.subTitle}>Production Date-wise Details</h3>
-            <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
-              <thead><tr>{["Production Date", "Production No.", "Product", "Packets", "Packet Weight (KG)", "Total (KG)", "Batch"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
-              <tbody>{detail.products.flatMap((product) => product.productions.map((production, index) => <tr key={`${production.productionNo}-${product.itemName}-${index}`}>
-                <td>{dateLabel(production.date)}</td><td>{production.productionNo || "-"}</td><td>{production.itemName}</td>
-                <td>{qty(production.packetCount)} PCS</td><td>{qty(production.packetWeightKg)}</td><td>{qty(production.qty)} {production.unit}</td><td>{production.batchNo || "-"}</td>
-              </tr>))}{!detail.products.some((product) => product.productions.length) && <tr><td colSpan="7" style={styles.empty}>No production has been posted for this Job Order.</td></tr>}</tbody>
-            </table></div>
-            <h3 style={styles.subTitle}>Raw Materials Issued</h3>
-            <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
-              <thead><tr>{["Raw Material", "Quantity", "Unit", "Batch"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
-              <tbody>{(detail.job.sourceItems || []).map((item, index) => <tr key={`${item.itemName}-${index}`}><td>{item.itemName}</td><td>{qty(item.qty)}</td><td>{item.unit || "KG"}</td><td>{item.batchNo || "-"}</td></tr>)}
-                {!detail.job.sourceItems?.length && <tr><td colSpan="4" style={styles.empty}>No raw materials recorded.</td></tr>}</tbody>
-            </table></div>
+            <section className="jor-detail-section">
+              <h3>Job Order Information</h3>
+              <div className="jor-detail-grid">
+                <div><b>Job Order No.</b><span>{detail.job.jobNo || "-"}</span></div>
+                <div><b>Job Date</b><span>{dateLabel(detail.job.date)}</span></div>
+                <div><b>Party</b><span>{detail.job.partyName || "-"}</span></div>
+                <div><b>Type</b><span>{detail.job.type === "GRADING" ? "Grading" : "Finished Goods"}</span></div>
+                <div><b>Location</b><span>{detail.job.locationName || detail.job.location || "-"}</span></div>
+                <div><b>Status</b><span>{detail.job.status || "-"}</span></div>
+                <div className="jor-detail-notes"><b>Notes</b><span>{detail.job.notes || "-"}</span></div>
+              </div>
+            </section>
+            <section className="jor-detail-section">
+              <h3>Production Plan & Balance</h3>
+              <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
+                <thead><tr>{["Product", "Packet Weight", "Planned", "Produced", "Balance"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+                <tbody>{detail.products.map((product, index) => <tr key={`${product.itemName}-${index}`}>
+                  <td><b>{product.itemName}</b></td><td>{qty(product.packetWeightKg)} KG / packet</td>
+                  <td>{qty(product.plannedPacketCount)} PCS<br/><b>{qty(product.plannedQty)} KG</b></td>
+                  <td>{qty(product.producedPacketCount)} PCS<br/><b>{qty(product.producedQty)} KG</b></td>
+                  <td>{qty(product.remainingPacketCount)} PCS<br/><b>{qty(product.remainingQty)} KG</b></td>
+                </tr>)}</tbody>
+              </table></div>
+            </section>
+            <section className="jor-detail-section">
+              <h3>Production Date-wise Details</h3>
+              <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
+                <thead><tr>{["Production Date", "Production No.", "Product", "Packets", "Packet Weight", "Total KG", "Batch"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+                <tbody>{detail.products.flatMap((product) => product.productions.map((production, index) => <tr key={`${production.productionNo}-${product.itemName}-${index}`}>
+                  <td>{dateLabel(production.date)}</td><td>{production.productionNo || "-"}</td><td>{production.itemName}</td>
+                  <td>{qty(production.packetCount)} PCS</td><td>{qty(production.packetWeightKg)} KG</td><td><b>{qty(production.qty)} KG</b></td><td>{production.batchNo || "-"}</td>
+                </tr>))}{!detail.products.some((product) => product.productions.length) && <tr><td colSpan="7" style={styles.empty}>No production has been posted for this Job Order.</td></tr>}</tbody>
+              </table></div>
+            </section>
+            <section className="jor-detail-section">
+              <h3>Raw Materials Issued</h3>
+              <div style={styles.tableWrap}><table className="jor-report-table jor-modal-table" style={styles.table}>
+                <thead><tr>{["Raw Material", "Quantity", "Unit", "Batch", "Value"].map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+                <tbody>{(detail.job.sourceItems || []).map((item, index) => <tr key={`${item.itemName}-${index}`}>
+                  <td>{item.itemName}</td><td>{qty(item.qty)}</td><td>{item.unit || "KG"}</td><td>{item.batchNo || "-"}</td><td>₹ {qty(item.value)}</td>
+                </tr>)}{!detail.job.sourceItems?.length && <tr><td colSpan="5" style={styles.empty}>No raw materials recorded.</td></tr>}</tbody>
+              </table></div>
+            </section>
+            <section className="jor-detail-section">
+              <h3>Job Order Cost Summary</h3>
+              <div className="jor-detail-costs">
+                <div className="jor-detail-cost"><span>Labour Cost</span><strong>₹ {qty(detail.job.labourCost)}</strong></div>
+                <div className="jor-detail-cost"><span>Transport Cost</span><strong>₹ {qty(detail.job.transportCost)}</strong></div>
+                <div className="jor-detail-cost"><span>Other Cost</span><strong>₹ {qty(detail.job.otherCost)}</strong></div>
+                <div className="jor-detail-cost"><span>Total Cost</span><strong>₹ {qty(detail.job.totalCost)}</strong></div>
+              </div>
+            </section>
           </>}
         </section>
       </div>}
@@ -262,6 +395,7 @@ const styles = {
   headerButton: { border: "1px solid #668194", borderRadius: 2, background: "transparent", color: "#fff", padding: "10px 13px", cursor: "pointer", fontWeight: 700, fontSize: 12 },
   headerButtonPrimary: { border: "1px solid #e3b53d", borderRadius: 2, background: "#f4c648", color: "#183348", padding: "10px 14px", cursor: "pointer", fontWeight: 800, fontSize: 12 },
   button: { border: "1px solid #cbd8df", borderRadius: 2, background: "#fff", color: "#31586b", padding: "9px 13px", cursor: "pointer", fontWeight: 700 },
+  pdfButton: { border: "1px solid #27786e", borderRadius: 2, background: "#27786e", color: "#fff", padding: "9px 13px", cursor: "pointer", fontWeight: 800 },
   jobLink: { border: 0, padding: 0, background: "transparent", color: "#27786e", cursor: "pointer", font: "inherit", fontWeight: 750, textDecoration: "underline", textUnderlineOffset: 3 },
   filters: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 13, background: "#fff", border: "1px solid #d7e1e6", borderRadius: 3, padding: 18, boxShadow: "0 2px 8px rgba(18,60,85,.035)" },
   label: { display: "grid", gap: 7, fontSize: 11, fontWeight: 750, color: "#526a77" },
