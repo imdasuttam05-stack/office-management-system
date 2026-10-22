@@ -442,7 +442,10 @@ export async function getJobOrderStockReport(req,res){
   const produced=new Map();
   for(const entry of entries)for(const line of entry.outputItems||[]){
    const key=`${String(entry.jobId)}|${clean(line.itemName).toLowerCase()}|${clean(line.unit||"KG").toLowerCase()}`;
-   produced.set(key,(produced.get(key)||0)+num(line.qty));
+   const current=produced.get(key)||{qty:0,packetCount:0};
+   current.qty+=num(line.qty);
+   current.packetCount+=num(line.packetCount);
+   produced.set(key,current);
   }
   const productMatches=product.toLowerCase();
   const outputMap=new Map();
@@ -452,7 +455,10 @@ export async function getJobOrderStockReport(req,res){
    const unit=output.unit||"KG",key=`${String(job._id)}|${clean(output.itemName).toLowerCase()}|${clean(unit).toLowerCase()}`;
    const row=outputMap.get(key);
    if(row)row.plannedQty+=num(output.qty);
-   else outputMap.set(key,{jobId:job._id,jobNo:job.jobNo||"",date:job.date,partyName:job.partyName||"",type:job.type,location:job.location,itemName:output.itemName,unit,plannedQty:num(output.qty),producedQty:produced.get(key)||0,itemType});
+   else{
+    const production=produced.get(key)||{qty:0,packetCount:0};
+    outputMap.set(key,{jobId:job._id,jobNo:job.jobNo||"",date:job.date,partyName:job.partyName||"",type:job.type,location:job.location,itemName:output.itemName,unit,plannedQty:num(output.qty),producedQty:production.qty,producedPacketCount:production.packetCount,itemType});
+   }
   }
   const lines=[...outputMap.values()];
   const stockKeys=[...new Map(lines.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,{location:x.location,itemType:x.itemType,itemName:x.itemName}])).values()];
@@ -462,6 +468,38 @@ export async function getJobOrderStockReport(req,res){
   for(const stock of stocks){const key=`${stock.location}|${stock.itemType}|${stock.itemName}`;stockMap.set(key,(stockMap.get(key)||0)+num(stock.qty));}
   const rows=lines.map(line=>({...line,remainingQty:Math.max(0,line.plannedQty-line.producedQty),currentStockQty:stockMap.get(`${line.location}|${line.itemType}|${line.itemName}`)||0}));
   return res.json({success:true,rows,limited:jobs.length===5000});
+ }catch(e){return res.status(500).json({success:false,message:e.message})}
+}
+export async function getJobOrderReportDetail(req,res){
+ try{
+  const id=clean(req.params.id);
+  if(!/^[a-f\d]{24}$/i.test(id))return res.status(400).json({success:false,message:"Invalid Job Order ID."});
+  const filter={_id:id,status:{$ne:"CANCELLED"}};
+  if(req.user?.companyId)filter.companyId=req.user.companyId;
+  const job=await ManufacturingJobOrder.findOne(filter).lean();
+  if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
+  const entryFilter={jobId:job._id,status:"POSTED",companyId:req.user?.companyId||null};
+  const entries=await ProductionEntry.find(entryFilter).sort({date:1,createdAt:1}).lean();
+  const plannedProducts=new Map();
+  for(const output of job.outputItems||[]){
+   const unit=clean(output.unit)||"KG",key=`${clean(output.itemName).toLowerCase()}|${unit.toLowerCase()}`;
+   const product=plannedProducts.get(key);
+   if(product)product.plannedQty+=num(output.qty);
+   else plannedProducts.set(key,{itemName:output.itemName,unit,plannedQty:num(output.qty)});
+  }
+  const products=[...plannedProducts.values()].map(output=>{
+   const unit=output.unit;
+   const productions=[];
+   let producedQty=0,producedPacketCount=0;
+   for(const entry of entries)for(const line of entry.outputItems||[]){
+    if(clean(line.itemName).toLowerCase()!==clean(output.itemName).toLowerCase()||clean(line.unit||"KG").toLowerCase()!==unit.toLowerCase())continue;
+    producedQty+=num(line.qty);
+    producedPacketCount+=num(line.packetCount);
+    productions.push({productionNo:entry.productionNo||"",date:entry.date,itemName:line.itemName,unit:line.unit||"KG",qty:num(line.qty),packetCount:num(line.packetCount),packetWeightKg:num(line.packetWeightKg),batchNo:line.batchNo||entry.batchNo||"",mfgDate:line.mfgDate||entry.mfgDate||entry.date,expiryDate:line.expiryDate||entry.expiryDate||null});
+   }
+   return {...output,unit,producedQty,producedPacketCount,remainingQty:Math.max(0,output.plannedQty-producedQty),productions};
+  });
+  return res.json({success:true,job,products});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
 export async function createSale(req,res){
