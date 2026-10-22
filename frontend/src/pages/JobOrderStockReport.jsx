@@ -35,6 +35,12 @@ function ReportSearchSelect({ value, options, onChange, placeholder }) {
     setActiveIndex(0);
   }
 
+  function focusNextField(target) {
+    const fields = [...(rootRef.current?.closest(".jor-report-filters")?.querySelectorAll("input:not([disabled])") || [])];
+    const next = fields[fields.indexOf(target) + 1];
+    if (next) requestAnimationFrame(() => next.focus());
+  }
+
   function handleKeyDown(event) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -48,8 +54,13 @@ function ReportSearchSelect({ value, options, onChange, placeholder }) {
       setActiveIndex(index => Math.max(index - 1, 0));
     } else if (event.key === "Enter" && open) {
       event.preventDefault();
-      if (search.trim() && filtered.length) choose(filtered[activeIndex] || filtered[0]);
-      else choose("");
+      if (search.trim()) {
+        if (!filtered.length) return;
+        choose(filtered[activeIndex] || filtered[0]);
+      } else {
+        choose("");
+      }
+      focusNextField(event.currentTarget);
     }
   }
 
@@ -336,9 +347,9 @@ export default function JobOrderStockReport({ onBack }) {
           <button type="button" style={styles.headerButtonPrimary} onClick={printReport} disabled={!rows.length}>Print Report</button>
         </div>
       </div>
-      <section style={styles.filters}>
-        <label style={styles.label}><span>From date</span><input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} style={styles.input} /></label>
-        <label style={styles.label}><span>To date</span><input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} style={styles.input} /></label>
+      <section className="jor-report-filters" style={styles.filters}>
+        <label style={styles.label}><span>From date</span><input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} onKeyDown={(event) => { if(event.key==="Enter"){event.preventDefault();event.currentTarget.closest(".jor-report-filters")?.querySelectorAll("input")[1]?.focus()} }} style={styles.input} /></label>
+        <label style={styles.label}><span>To date</span><input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} onKeyDown={(event) => { if(event.key==="Enter"){event.preventDefault();event.currentTarget.closest(".jor-report-filters")?.querySelectorAll("input")[2]?.focus()} }} style={styles.input} /></label>
         <label style={styles.label}><span>Party</span><ReportSearchSelect value={filters.party} options={filterOptions.parties} placeholder="Party" onChange={(party) => setFilters((current) => ({ ...current, party }))} /></label>
         <label style={styles.label}><span>Product</span><ReportSearchSelect value={filters.product} options={filterOptions.products} placeholder="Product" onChange={(product) => setFilters((current) => ({ ...current, product }))} /></label>
         <label style={styles.label}><span>Job order</span><ReportSearchSelect value={filters.jobNo} options={filterOptions.jobOrders.map(job => job.jobNo)} placeholder="Job order" onChange={(jobNo) => setFilters((current) => ({ ...current, jobNo }))} /></label>
