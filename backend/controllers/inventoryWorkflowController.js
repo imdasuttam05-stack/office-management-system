@@ -109,6 +109,80 @@ export async function createJobPackingConversion(req,res){
   return res.status(400).json({success:false,message:error.message||"Packing conversion could not be posted."});
  }
 }
+export async function updateJobPackingConversion(req,res){
+ try{
+  const companyId=req.user?.companyId||null,document=await InventoryWorkflow.findOne({_id:req.params.id,companyId,docType:"PACKING_CONVERSION",status:"POSTED"});
+  if(!document||!document.meta?.jobId)return res.status(404).json({success:false,message:"Job Order packing conversion not found."});
+  const body=req.body||{},date=parseDateOnly(body.date);
+  if(!date)return res.status(400).json({success:false,message:"Enter a valid conversion date."});
+  const lines=Array.isArray(document.meta.conversionLines)?document.meta.conversionLines:[];
+  if(!lines.length)return res.status(400).json({success:false,message:"This conversion has no production detail lines to edit."});
+  const rateScope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};
+  const rates=await PackingConversionRate.find({$and:[rateScope,{active:true}]}).lean();
+  const updatedLines=[];
+  for(const line of lines){
+   const master=rates.find(item=>(line.itemId&&String(item.itemId)===String(line.itemId)||clean(item.itemName).toLowerCase()===clean(line.itemName).toLowerCase())&&(item.periods||[]).some(period=>new Date(period.effectiveFrom)<=date&&new Date(period.effectiveTo)>=date));
+   const rate=master?.periods.find(period=>new Date(period.effectiveFrom)<=date&&new Date(period.effectiveTo)>=date);
+   if(!rate)return res.status(400).json({success:false,message:`No conversion rate for ${line.itemName} is valid on ${date.toISOString().slice(0,10)}.`});
+   const basisQty=rate.rateBasis==="PCS"?num(line.packetCount):num(line.qtyKg);
+   updatedLines.push({...line,rateBasis:rate.rateBasis,basisQty:q6(basisQty),rate:num(rate.rate),effectiveFrom:rate.effectiveFrom,effectiveTo:rate.effectiveTo,amount:r2(basisQty*num(rate.rate))});
+  }
+  const total=r2(updatedLines.reduce((sum,line)=>sum+line.amount,0));
+  if(total<=0)return res.status(400).json({success:false,message:"Conversion charge must remain greater than zero."});
+  const accountingVoucher=await Voucher.findOne({sourceId:document._id,sourceType:"INVENTORY_WORKFLOW"});
+  if(!accountingVoucher||accountingVoucher.lines.length<2)return res.status(409).json({success:false,message:"The linked accounting voucher was not found; conversion was not updated."});
+  const [partyLine,incomeLine]=accountingVoucher.lines;
+  const originalVoucher=accountingVoucher.toObject();
+  const originalDocument=document.toObject();
+  accountingVoucher.date=date;
+  accountingVoucher.lines=[{...partyLine.toObject(),debit:total,credit:0},{...incomeLine.toObject(),debit:0,credit:total},...accountingVoucher.lines.slice(2)];
+  accountingVoucher.totalDebit=total;
+  accountingVoucher.totalCredit=total;
+  accountingVoucher.narration=`Packing conversion for Job Order ${document.meta.jobNo||document.referenceNo} · ${document.partyName}`;
+  document.date=date;
+  document.notes=clean(body.notes);
+  document.totalValue=total;
+  document.meta={...document.meta,conversionCharge:total,conversionLines:updatedLines,voucherNo:accountingVoucher.voucherNo};
+  try{
+   await accountingVoucher.save();
+   await document.save();
+  }catch(saveError){
+   try{
+    await Voucher.replaceOne({_id:accountingVoucher._id},originalVoucher);
+    await InventoryWorkflow.replaceOne({_id:document._id},originalDocument);
+   }catch(rollbackError){
+    throw new Error(`Packing conversion update failed: ${saveError.message}. Restoring the previous records also failed: ${rollbackError.message}`);
+   }
+   throw saveError;
+  }
+  return res.json({success:true,message:`Packing conversion ${document.docNo} updated. The linked party voucher was recalculated.`,item:document});
+ }catch(error){return res.status(400).json({success:false,message:error.message||"Packing conversion could not be updated."})}
+}
+export async function deleteJobPackingConversion(req,res){
+ try{
+  const companyId=req.user?.companyId||null,document=await InventoryWorkflow.findOne({_id:req.params.id,companyId,docType:"PACKING_CONVERSION",status:"POSTED"});
+  if(!document||!document.meta?.jobId)return res.status(404).json({success:false,message:"Job Order packing conversion not found."});
+  const accountingVoucher=await Voucher.findOne({sourceId:document._id,sourceType:"INVENTORY_WORKFLOW"});
+  if(!accountingVoucher)return res.status(409).json({success:false,message:"The linked accounting voucher was not found; conversion was not deleted."});
+  const originalVoucher=accountingVoucher.toObject();
+  const originalDocument=document.toObject();
+  await Voucher.deleteOne({_id:accountingVoucher._id});
+  document.status="CANCELLED";
+  document.notes=[clean(document.notes),`Cancelled by ${req.user?.name||"user"} on ${new Date().toISOString()}`].filter(Boolean).join(" · ");
+  try{
+   await document.save();
+  }catch(saveError){
+   try{
+    await Voucher.create(originalVoucher);
+    await InventoryWorkflow.replaceOne({_id:document._id},originalDocument);
+   }catch(rollbackError){
+    throw new Error(`Packing conversion cancellation failed: ${saveError.message}. Restoring the previous records also failed: ${rollbackError.message}`);
+   }
+   throw saveError;
+  }
+  return res.json({success:true,message:`Packing conversion ${document.docNo} cancelled and its party voucher removed. Finished-goods stock was not changed.`});
+ }catch(error){return res.status(400).json({success:false,message:error.message||"Packing conversion could not be cancelled."})}
+}
 function productionQuantities(line){const weight=num(line.packetWeightKg)||packageWeightKg(line.itemName),packets=num(line.packetCount);if(packets>0)return {packetCount:packets,qtyKg:weight>0?packets*weight:num(line.qty),packetWeightKg:weight};if(weight>0&&packetUnit(line.unit))return {packetCount:num(line.qty),qtyKg:num(line.qty)*weight,packetWeightKg:weight};if(weight>0)return {packetCount:num(line.qty)/weight,qtyKg:num(line.qty),packetWeightKg:weight};return {packetCount:0,qtyKg:num(line.qty),packetWeightKg:0}}
 const bomCostAmount=(qty,unit,rate)=>{const normalized=clean(unit).toLowerCase();const divisor=["g","gm","gram","grams","ml","milliliter","milliliters","millilitre","millilitres"].includes(normalized)?1000:normalized==="mg"?1000000:1;return r2(num(qty)*num(rate)/divisor)};
 const bomMaterialRatePerKg=materials=>{const factors={kg:1,kgs:1,kilogram:1,kilograms:1,g:.001,gm:.001,gram:.001,grams:.001,mg:.000001};let totalKg=0,totalValue=0;for(const line of materials){const factor=factors[clean(line.unit).toLowerCase()];if(!factor)continue;const qty=num(line.qtyPerUnit);totalKg+=qty*factor;totalValue+=qty*num(line.rate)}return totalKg?r2(totalValue/totalKg):null};
