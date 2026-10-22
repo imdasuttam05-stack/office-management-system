@@ -16,6 +16,7 @@ import Group from "../models/Group.js";
 import Voucher from "../models/Voucher.js";
 import InventoryCounter from "../models/InventoryCounter.js";
 const clean=v=>String(v??"").trim(); const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0}; const r2=v=>Math.round((num(v)+Number.EPSILON)*100)/100; const q6=v=>Math.round((num(v)+Number.EPSILON)*1000000)/1000000;
+const parseDateOnly=value=>{const text=clean(value);if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return null;const date=new Date(`${text}T00:00:00.000Z`);return Number.isNaN(date.getTime())||date.toISOString().slice(0,10)!==text?null:date};
 const packageWeightKg=name=>{const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);if(!match)return 0;const amount=Number(match[1]);return /^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000};
 const packetUnit=unit=>["PC","PCS","PACKET","PACKETS","PIECE","PIECES"].includes(clean(unit).toUpperCase());
 export async function createJobPackingConversion(req,res){
@@ -44,6 +45,8 @@ export async function createJobPackingConversion(req,res){
   }
   if(!producedByProduct.size)return res.status(400).json({success:false,message:`No production has been posted against Job Order ${job.jobNo}.`});
 
+  const date=body.date?parseDateOnly(body.date):parseDateOnly(new Date().toISOString().slice(0,10));
+  if(!date)return res.status(400).json({success:false,message:"Enter a valid conversion date."});
   const previous=await InventoryWorkflow.find({companyId,docType:"PACKING_CONVERSION","meta.jobId":String(job._id),status:"POSTED"}).select("meta").lean();
   const convertedByProduct=new Map();
   for(const document of previous)for(const line of document.meta?.conversionLines||[]){
@@ -60,18 +63,19 @@ export async function createJobPackingConversion(req,res){
    const previousQty=convertedByProduct.get(produced.itemName.toLowerCase())||{qtyKg:0,packetCount:0};
    const qtyKg=Math.max(0,produced.qtyKg-previousQty.qtyKg),packetCount=Math.max(0,produced.packetCount-previousQty.packetCount);
    if(qtyKg<=0.000001&&packetCount<=0.000001)continue;
-   const rate=(produced.itemId&&rates.find(item=>String(item.itemId)===produced.itemId))||rates.find(item=>clean(item.itemName).toLowerCase()===produced.itemName.toLowerCase());
-   if(!rate)return res.status(400).json({success:false,message:`Add a Packing Conversion Rate for ${produced.itemName} before posting.`});
+   const matchingRates=rates.filter(item=>(produced.itemId&&String(item.itemId)===produced.itemId)||clean(item.itemName).toLowerCase()===produced.itemName.toLowerCase());
+   const master=matchingRates.find(item=>(item.periods||[]).some(period=>new Date(period.effectiveFrom)<=date&&new Date(period.effectiveTo)>=date));
+   const rate=master?.periods.find(period=>new Date(period.effectiveFrom)<=date&&new Date(period.effectiveTo)>=date);
+   if(!rate)return res.status(400).json({success:false,message:`No Packing Conversion Rate for ${produced.itemName} is valid on ${date.toISOString().slice(0,10)}. Add or update its date range.`});
    const basisQty=rate.rateBasis==="PCS"?packetCount:qtyKg;
    if(basisQty<=0)return res.status(400).json({success:false,message:`${produced.itemName} has no ${rate.rateBasis} production quantity to convert.`});
    if(num(rate.rate)<=0)return res.status(400).json({success:false,message:`Enter a conversion rate greater than zero for ${produced.itemName}.`});
-   conversionLines.push({itemId:produced.itemId||String(rate.itemId),itemName:produced.itemName,rateBasis:rate.rateBasis,basisQty:q6(basisQty),rate:num(rate.rate),amount:r2(basisQty*num(rate.rate)),qtyKg:q6(qtyKg),packetCount:q6(packetCount),packetWeightKg:q6(produced.packetWeightKg)});
+   conversionLines.push({itemId:produced.itemId||String(master.itemId),itemName:produced.itemName,rateBasis:rate.rateBasis,basisQty:q6(basisQty),rate:num(rate.rate),effectiveFrom:rate.effectiveFrom,effectiveTo:rate.effectiveTo,amount:r2(basisQty*num(rate.rate)),qtyKg:q6(qtyKg),packetCount:q6(packetCount),packetWeightKg:q6(produced.packetWeightKg)});
   }
   if(!conversionLines.length)return res.status(400).json({success:false,message:`All production for Job Order ${job.jobNo} has already been converted.`});
 
-  const charge=r2(conversionLines.reduce((sum,line)=>sum+line.amount,0)),date=body.date?new Date(body.date):new Date();
+  const charge=r2(conversionLines.reduce((sum,line)=>sum+line.amount,0));
   if(charge<=0)return res.status(400).json({success:false,message:"The total conversion charge must be greater than zero after rounding to currency precision."});
-  if(Number.isNaN(date.getTime()))return res.status(400).json({success:false,message:"Enter a valid conversion date."});
   const partyScope={$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]};
   const customer=(job.partyId?await CustomerMaster.findOne({_id:job.partyId,active:true,...partyScope}):null)||await CustomerMaster.findOne({name:clean(job.partyName),active:true,...partyScope});
   let partyLedger=customer?.ledgerId?await Ledger.findOne({_id:customer.ledgerId,isActive:true}):null;
@@ -113,9 +117,75 @@ async function ledger(name,groupName,nature,req){let l=await Ledger.findOne({nam
 async function voucher(req,date,type,partyLedger,referenceNo,lines,narration,sourceId){const cleanLines=lines.map(x=>({ledger:x.ledger,debit:r2(x.debit),credit:r2(x.credit),narration:x.narration||narration}));const d=r2(cleanLines.reduce((s,x)=>s+x.debit,0)),c=r2(cleanLines.reduce((s,x)=>s+x.credit,0));if(d<=0||Math.abs(d-c)>0.005)throw Error("Accounting voucher is not balanced.");const no=await next("WF_VOUCHER",type.slice(0,3).toUpperCase());return Voucher.create({voucherNo:no,date,type,partyLedger,referenceNo,narration,lines:cleanLines,totalDebit:d,totalCredit:c,sourceType:"INVENTORY_WORKFLOW",sourceId,createdBy:req.user._id})}
 export async function getWorkflowMasters(req,res){try{const companyId=req.user?.companyId||null;const scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};const active={$or:[{active:true},{active:{$exists:false}},{active:null}]};const master={$and:[scope,active]};const [items,locations,suppliers,customers]=await Promise.all([InventoryItemMaster.find({$and:[scope,active]}).sort({itemType:1,name:1}).lean(),LocationMaster.find(master).sort({name:1}).lean(),SupplierMaster.find(master).sort({name:1}).lean(),CustomerMaster.find(master).sort({name:1}).lean()]);res.json({success:true,items,locations,suppliers,customers})}catch(e){res.status(500).json({success:false,message:e.message})}}
 
-export async function listPackingConversionRates(req,res){try{const companyId=req.user?.companyId||null;const scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};const items=await PackingConversionRate.find({$and:[scope,{active:true}]}).sort({itemName:1}).lean();return res.json({success:true,items})}catch(e){return res.status(500).json({success:false,message:e.message})}}
-export async function savePackingConversionRate(req,res){try{const body=req.body||{},companyId=req.user?.companyId||null,itemId=clean(body.itemId),rateBasis=clean(body.rateBasis).toUpperCase(),rate=num(body.rate);if(!/^[a-f\d]{24}$/i.test(itemId)||!["PCS","KG"].includes(rateBasis)||!Number.isFinite(Number(body.rate))||rate<0)return res.status(400).json({success:false,message:"Select a product, choose PCS or KG, and enter a valid non-negative rate."});const item=await InventoryItemMaster.findOne({_id:itemId,active:true,$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]});if(!item||!["GRADE","FINISHED_GOODS","PACKED_GOODS"].includes(item.itemType))return res.status(400).json({success:false,message:"Choose an active production output product."});const values={itemName:item.name,rateBasis,rate,active:true};let master;if(req.params.id){master=await PackingConversionRate.findOneAndUpdate({_id:req.params.id,companyId},{$set:values},{new:true,runValidators:true});if(!master)return res.status(404).json({success:false,message:"Packing conversion rate not found."})}else{master=await PackingConversionRate.findOneAndUpdate({companyId,itemId:item._id},{$set:values,$setOnInsert:{companyId,itemId:item._id,createdBy:req.user._id}},{upsert:true,new:true,runValidators:true,setDefaultsOnInsert:true})}return res.status(req.params.id?200:201).json({success:true,message:req.params.id?"Packing conversion rate updated.":"Packing conversion rate saved.",item:master})}catch(e){return res.status(e?.code===11000?409:400).json({success:false,message:e?.code===11000?"A conversion rate for this product already exists.":e.message})}}
-export async function deletePackingConversionRate(req,res){try{const item=await PackingConversionRate.findOneAndUpdate({_id:req.params.id,companyId:req.user?.companyId||null},{$set:{active:false}},{new:true});if(!item)return res.status(404).json({success:false,message:"Packing conversion rate not found."});return res.json({success:true,message:"Packing conversion rate deactivated."})}catch(e){return res.status(400).json({success:false,message:e.message})}}
+export async function listPackingConversionRates(req,res){
+ try{
+  const companyId=req.user?.companyId||null,scope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};
+  const masters=await PackingConversionRate.find({$and:[scope,{active:true}]}).sort({itemName:1}).lean();
+  const items=masters.flatMap(master=>{
+   if(master.periods?.length)return master.periods.map(period=>({...period,_id:String(period._id),periodId:String(period._id),masterId:String(master._id),itemId:String(master.itemId),itemName:master.itemName}));
+   return [{_id:String(master._id),masterId:String(master._id),periodId:"",itemId:String(master.itemId),itemName:master.itemName,rateBasis:master.rateBasis,rate:master.rate,effectiveFrom:null,effectiveTo:null,legacy:true}];
+  });
+  return res.json({success:true,items});
+ }catch(e){return res.status(500).json({success:false,message:e.message})}
+}
+export async function savePackingConversionRate(req,res){
+ try{
+  const body=req.body||{},companyId=req.user?.companyId||null,itemId=clean(body.itemId),rateBasis=clean(body.rateBasis).toUpperCase(),rate=Number(body.rate),effectiveFrom=parseDateOnly(body.effectiveFrom),effectiveTo=parseDateOnly(body.effectiveTo);
+  if(!/^[a-f\d]{24}$/i.test(itemId)||!["PCS","KG"].includes(rateBasis)||!Number.isFinite(rate)||rate<0)return res.status(400).json({success:false,message:"Select a product, choose PCS or KG, and enter a valid non-negative rate."});
+  if(!effectiveFrom||!effectiveTo||effectiveFrom>effectiveTo)return res.status(400).json({success:false,message:"Enter a valid From date and To date; the From date must not be after the To date."});
+  const item=await InventoryItemMaster.findOne({_id:itemId,active:true,$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]});
+  if(!item||!["GRADE","FINISHED_GOODS","PACKED_GOODS"].includes(item.itemType))return res.status(400).json({success:false,message:"Choose an active production output product."});
+  let master=await PackingConversionRate.findOne({companyId,itemId:item._id});
+  if(req.params.id){
+   master=await PackingConversionRate.findOne({_id:req.params.id,companyId});
+   if(!master)return res.status(404).json({success:false,message:"Packing conversion rate not found."});
+   if(String(master.itemId)!==itemId)return res.status(400).json({success:false,message:"The selected product does not match this rate master."});
+   if(!body.periodId){
+    if(master.periods.length)return res.status(400).json({success:false,message:"Select a rate period to edit."});
+    master.periods.push({effectiveFrom,effectiveTo,rateBasis,rate});
+   }else{
+    const period=master.periods.id(body.periodId);
+    if(!period)return res.status(404).json({success:false,message:"Packing conversion rate period not found."});
+    period.effectiveFrom=effectiveFrom;
+    period.effectiveTo=effectiveTo;
+    period.rateBasis=rateBasis;
+    period.rate=rate;
+   }
+  }else{
+   if(master?.active&&!master.periods.length)return res.status(409).json({success:false,message:"This product has an older rate without dates. Edit that rate and set its date range before adding another period."});
+   if(!master)master=new PackingConversionRate({companyId,itemId:item._id,itemName:item.name,rateBasis,rate,createdBy:req.user._id});
+   master.periods.push({effectiveFrom,effectiveTo,rateBasis,rate});
+  }
+  const currentPeriodId=body.periodId||String(master.periods[master.periods.length-1]._id);
+  const overlaps=master.periods.some(period=>String(period._id)!==String(currentPeriodId)&&effectiveFrom<=period.effectiveTo&&effectiveTo>=period.effectiveFrom);
+  if(overlaps)return res.status(409).json({success:false,message:"This date range overlaps another rate period for the selected product."});
+  master.itemName=item.name;
+  master.rateBasis=rateBasis;
+  master.rate=rate;
+  master.active=true;
+  await master.save();
+  return res.status(req.params.id?200:201).json({success:true,message:req.params.id?"Packing conversion rate period saved.":"Packing conversion rate period added.",item:master});
+ }catch(e){return res.status(e?.code===11000?409:400).json({success:false,message:e?.code===11000?"A conversion rate for this product already exists.":e.message})}
+}
+export async function deletePackingConversionRate(req,res){
+ try{
+  const companyId=req.user?.companyId||null,master=await PackingConversionRate.findOne({_id:req.params.id,companyId});
+  if(!master)return res.status(404).json({success:false,message:"Packing conversion rate not found."});
+  const periodId=clean(req.params.periodId);
+  if(periodId){
+   const period=master.periods.id(periodId);
+   if(!period)return res.status(404).json({success:false,message:"Packing conversion rate period not found."});
+   period.deleteOne();
+   if(!master.periods.length)master.active=false;
+   await master.save();
+  }else{
+   if(master.periods.length)return res.status(400).json({success:false,message:"Choose a specific rate period to deactivate."});
+   master.active=false;
+   await master.save();
+  }
+  return res.json({success:true,message:"Packing conversion rate period deactivated."});
+ }catch(e){return res.status(400).json({success:false,message:e.message})}
+}
 export async function getPurchaseRate(req,res){try{const itemId=clean(req.query.itemId),itemName=clean(req.query.itemName);const filter={status:"POSTED"};if(req.user?.companyId)filter.companyId=req.user.companyId;const rows=await RawMaterialPurchase.find(filter).sort({date:-1,createdAt:-1}).lean();for(const p of rows){for(const l of p.lines||[]){if((itemId&&String(l.itemId)===String(itemId))||(!itemId&&itemName&&clean(l.itemName).toLowerCase()===itemName.toLowerCase()))return res.json({success:true,rate:num(l.purchaseRate),purchaseNo:p.purchaseNo,date:p.date,supplierName:p.supplierName});}}return res.json({success:true,rate:0});}catch(e){res.status(500).json({success:false,message:e.message})}}
 export async function listBoms(req,res){const filter={active:true,companyId:req.user?.companyId||null};res.json({success:true,items:await BOM.find(filter).sort({name:1}).lean()})}
 export async function listBomCostItems(req,res){try{const items=await BOMCostItemMaster.find({companyId:req.user?.companyId||null,active:true}).sort({name:1}).lean();return res.json({success:true,items})}catch(e){return res.status(500).json({success:false,message:e.message})}}
