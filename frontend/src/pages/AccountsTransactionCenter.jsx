@@ -691,7 +691,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
 
     {tab==="packing"&&<>
       <div className="tx-bom-intro"><div className="tx-bom-intro-mark">PACK</div><div><div className="tx-bom-eyebrow">PRODUCTION · CONVERSION CHARGE</div><h3>Packing Conversion</h3><p>Keep production entry, conversion history and date-based product rates in separate sections.</p></div><div className="tx-bom-intro-count"><strong>{packingPreviewLines.length}</strong><span>Production Entries</span></div></div>
-      <div className="tx-subnav" role="tablist" aria-label="Packing Conversion sections" style={{marginBottom:14}}>
+      <div className="tx-subnav tx-bom-section-nav" role="tablist" aria-label="Packing Conversion sections">
         {[["entry","Packing Conversion entry"],["history","Packing Conversion History"],["rates","Conversion Rate Master"]].map(([section,label])=><button key={section} type="button" role="tab" aria-selected={packingSection===section} className={`tx-btn ${packingSection===section?"primary":""}`} onClick={()=>setPackingSection(section)}>{label}</button>)}
       </div>
     </>}
