@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const API = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
@@ -8,6 +8,80 @@ const monthStart = `${today.slice(0, 7)}-01`;
 const qty = (value) => Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 3 });
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "-";
 const escape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+
+function ReportSearchSelect({ value, options, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const rootRef = useRef(null);
+  const filtered = options.filter(option => option.toLowerCase().includes(search.trim().toLowerCase()));
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsideClick = event => {
+      if (!rootRef.current?.contains(event.target)) {
+        setOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  function choose(option) {
+    onChange(option);
+    setSearch("");
+    setOpen(false);
+    setActiveIndex(0);
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+      setSearch("");
+    } else if (event.key === "ArrowDown" && open && filtered.length) {
+      event.preventDefault();
+      setActiveIndex(index => Math.min(index + 1, filtered.length - 1));
+    } else if (event.key === "ArrowUp" && open && filtered.length) {
+      event.preventDefault();
+      setActiveIndex(index => Math.max(index - 1, 0));
+    } else if (event.key === "Enter" && open) {
+      event.preventDefault();
+      if (search.trim() && filtered.length) choose(filtered[activeIndex] || filtered[0]);
+      else choose("");
+    }
+  }
+
+  return <div ref={rootRef} style={{position:"relative"}}>
+    <input
+      role="combobox"
+      aria-expanded={open}
+      aria-autocomplete="list"
+      value={open ? search : value}
+      onFocus={() => { setSearch(""); setActiveIndex(0); setOpen(true); }}
+      onChange={event => { setSearch(event.target.value); setActiveIndex(0); setOpen(true); }}
+      onKeyDown={handleKeyDown}
+      placeholder={placeholder}
+      autoComplete="off"
+      style={styles.input}
+    />
+    {open && <div role="listbox" style={{position:"absolute",top:"calc(100% + 3px)",left:0,right:0,zIndex:20,maxHeight:230,overflowY:"auto",background:"#fff",border:"1px solid #cbd5e1",borderRadius:6,boxShadow:"0 8px 20px rgba(18,60,85,.16)"}}>
+      <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => choose("")} style={{display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf1f3",background:"#f8fafc",textAlign:"left",font:"inherit",cursor:"pointer"}}>All {placeholder}</button>
+      {filtered.map((option,index) => <button
+        type="button"
+        role="option"
+        aria-selected={index===activeIndex}
+        key={option}
+        onMouseEnter={() => setActiveIndex(index)}
+        onMouseDown={event => event.preventDefault()}
+        onClick={() => choose(option)}
+        style={{display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf1f3",background:index===activeIndex?"#e5eff4":"#fff",color:"#17364a",textAlign:"left",font:"inherit",cursor:"pointer"}}
+      >{option}</button>)}
+      {!filtered.length&&<div style={{padding:10,color:"#71838e",fontSize:12}}>No matching {placeholder.toLowerCase()} found</div>}
+    </div>}
+  </div>;
+}
 
 export default function JobOrderStockReport({ onBack }) {
   const navigate = useNavigate();
@@ -265,9 +339,9 @@ export default function JobOrderStockReport({ onBack }) {
       <section style={styles.filters}>
         <label style={styles.label}><span>From date</span><input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} style={styles.input} /></label>
         <label style={styles.label}><span>To date</span><input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} style={styles.input} /></label>
-        <label style={styles.label}><span>Party</span><select value={filters.party} onChange={(event) => setFilters((current) => ({ ...current, party: event.target.value }))} style={styles.input}><option value="">All parties</option>{filterOptions.parties.map((party) => <option key={party} value={party}>{party}</option>)}</select></label>
-        <label style={styles.label}><span>Product</span><select value={filters.product} onChange={(event) => setFilters((current) => ({ ...current, product: event.target.value }))} style={styles.input}><option value="">All products</option>{filterOptions.products.map((product) => <option key={product} value={product}>{product}</option>)}</select></label>
-        <label style={styles.label}><span>Job order</span><select value={filters.jobNo} onChange={(event) => setFilters((current) => ({ ...current, jobNo: event.target.value }))} style={styles.input}><option value="">All job orders</option>{filterOptions.jobOrders.map((job) => <option key={job.jobId} value={job.jobNo}>{job.jobNo}</option>)}</select></label>
+        <label style={styles.label}><span>Party</span><ReportSearchSelect value={filters.party} options={filterOptions.parties} placeholder="Party" onChange={(party) => setFilters((current) => ({ ...current, party }))} /></label>
+        <label style={styles.label}><span>Product</span><ReportSearchSelect value={filters.product} options={filterOptions.products} placeholder="Product" onChange={(product) => setFilters((current) => ({ ...current, product }))} /></label>
+        <label style={styles.label}><span>Job order</span><ReportSearchSelect value={filters.jobNo} options={filterOptions.jobOrders.map(job => job.jobNo)} placeholder="Job order" onChange={(jobNo) => setFilters((current) => ({ ...current, jobNo }))} /></label>
       </section>
       {error && <div role="alert" style={styles.error}>{error}</div>}
       {limited && <div style={styles.notice}>Showing the latest 5,000 job orders. Narrow the date range to see a smaller period.</div>}
