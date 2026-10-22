@@ -462,10 +462,15 @@ export async function getJobOrderStockReport(req,res){
   if(start&&end&&end-start>370*86400000)return res.status(400).json({success:false,message:"Date range cannot exceed 370 days."});
   if(start||end)filter.date={...(start?{$gte:start}:{}),...(end?{$lt:new Date(end.getTime()+86400000)}:{})};
   const party=clean(req.query.party),jobNo=clean(req.query.jobNo),product=clean(req.query.product);
-  if(party)filter.partyName={$regex:party.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),$options:"i"};
-  if(jobNo)filter.jobNo={$regex:jobNo.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),$options:"i"};
   if(req.query.status&&["POSTED","COMPLETED","CANCELLED"].includes(clean(req.query.status)))filter.status=clean(req.query.status);
-  const jobs=await ManufacturingJobOrder.find(filter).sort({partyName:1,date:-1,jobNo:1}).limit(5000).lean();
+  const availableJobs=await ManufacturingJobOrder.find(filter).sort({partyName:1,date:-1,jobNo:1}).limit(5000).lean();
+  const filterOptions={
+   parties:[...new Set(availableJobs.map(job=>clean(job.partyName)).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),
+   products:[...new Set(availableJobs.flatMap(job=>(job.outputItems||[]).map(output=>clean(output.itemName))).filter(Boolean))].sort((a,b)=>a.localeCompare(b)),
+   jobOrders:[...new Map(availableJobs.filter(job=>clean(job.jobNo)).map(job=>[clean(job.jobNo),{jobNo:clean(job.jobNo),jobId:String(job._id)}])).values()].sort((a,b)=>a.jobNo.localeCompare(b.jobNo)),
+  };
+  const contains=(value,search)=>!search||clean(value).toLowerCase().includes(search.toLowerCase());
+  const jobs=availableJobs.filter(job=>contains(job.partyName,party)&&contains(job.jobNo,jobNo)&&(!product||(job.outputItems||[]).some(output=>contains(output.itemName,product))));
   const jobIds=jobs.map(job=>job._id);
   const entries=jobIds.length?await ProductionEntry.find({companyId:req.user?.companyId||null,jobId:{$in:jobIds},status:"POSTED"}).lean():[];
   const produced=new Map();
@@ -498,7 +503,7 @@ export async function getJobOrderStockReport(req,res){
   const stockMap=new Map(stockKeys.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,{qty:0,packetCount:0,unit:num(x.packetWeightKg)>0?"KG":""}]));
   for(const stock of stocks){const key=`${stock.location}|${stock.itemType}|${stock.itemName}`,weight=stockWeightByKey.get(key)||0,current=stockMap.get(key)||{qty:0,packetCount:0,unit:""};if(weight>0){if(packetUnit(stock.unit)){current.packetCount+=num(stock.qty);current.qty+=num(stock.qty)*weight;}else{current.qty+=num(stock.qty);current.packetCount+=num(stock.qty)/weight;}}else current.qty+=num(stock.qty);current.unit=weight>0?"KG":current.unit||stock.unit;stockMap.set(key,current);}
   const rows=lines.map(line=>{const currentStock=stockMap.get(`${line.location}|${line.itemType}|${line.itemName}`)||{qty:0,packetCount:0,unit:""};return {...line,remainingQty:Math.max(0,line.plannedQty-line.producedQty),remainingPacketCount:Math.max(0,line.plannedPacketCount-line.producedPacketCount),currentStockQty:currentStock.qty,currentStockPacketCount:currentStock.packetCount,currentStockUnit:currentStock.unit||line.unit}});
-  return res.json({success:true,rows,limited:jobs.length===5000});
+  return res.json({success:true,rows,filterOptions,limited:availableJobs.length===5000});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
 export async function getJobOrderReportDetail(req,res){
