@@ -9,7 +9,7 @@ const qty = (value) => Number(value || 0).toLocaleString("en-IN", { maximumFract
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "-";
 const escape = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
-export default function JobOrderStockReport() {
+export default function JobOrderStockReport({ onBack }) {
   const navigate = useNavigate();
   const [filters, setFilters] = useState({ from: monthStart, to: today, party: "", product: "", jobNo: "" });
   const [rows, setRows] = useState([]);
@@ -129,7 +129,7 @@ export default function JobOrderStockReport() {
     <main style={styles.page}>
       <div style={styles.top}>
         <div>
-          <button type="button" style={styles.back} onClick={() => navigate("/voucher")}>← Voucher Center</button>
+          <button type="button" style={styles.back} onClick={onBack || (() => navigate("/voucher"))}>← {onBack ? "Job Order" : "Voucher Center"}</button>
           <h1 style={{ margin: "12px 0 4px" }}>Job Order Stock Report</h1>
           <p style={styles.muted}>Party-wise job orders, products, production progress and stock.</p>
         </div>
