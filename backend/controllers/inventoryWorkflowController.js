@@ -30,38 +30,40 @@ export async function createJobPackingConversion(req,res){
   if(!clean(job.partyName))return res.status(400).json({success:false,message:"This Job Order has no party. Add a party to the Job Order before posting conversion."});
 
   const entries=await ProductionEntry.find({companyId,jobId:job._id,status:"POSTED"}).sort({date:1,createdAt:1}).lean();
-  const producedByProduct=new Map();
-  for(const entry of entries)for(const line of entry.outputItems||[]){
-   const key=clean(line.itemName).toLowerCase();
+  const productionRows=[];
+  for(const entry of entries)for(const [productionLineIndex,line] of (entry.outputItems||[]).entries()){
+   const itemName=clean(line.itemName),key=itemName.toLowerCase();
    if(!key)continue;
    const planned=(job.outputItems||[]).find(output=>clean(output.itemName).toLowerCase()===key);
-   const actual=productionQuantities(line),itemId=String(line.itemId||planned?.itemId||"");
-   const current=producedByProduct.get(key)||{itemId,itemName:clean(line.itemName),qtyKg:0,packetCount:0,packetWeightKg:actual.packetWeightKg};
-   current.qtyKg+=actual.qtyKg;
-   current.packetCount+=actual.packetCount;
-   if(!current.itemId)current.itemId=itemId;
-   if(!current.packetWeightKg)current.packetWeightKg=actual.packetWeightKg;
-   producedByProduct.set(key,current);
+   productionRows.push({productionEntryId:String(entry._id),productionLineIndex,productionNo:entry.productionNo||"",productionDate:entry.date,itemId:String(line.itemId||planned?.itemId||""),itemName,...productionQuantities(line)});
   }
-  if(!producedByProduct.size)return res.status(400).json({success:false,message:`No production has been posted against Job Order ${job.jobNo}.`});
+  if(!productionRows.length)return res.status(400).json({success:false,message:`No production has been posted against Job Order ${job.jobNo}.`});
 
   const date=body.date?parseDateOnly(body.date):parseDateOnly(new Date().toISOString().slice(0,10));
   if(!date)return res.status(400).json({success:false,message:"Enter a valid conversion date."});
   const previous=await InventoryWorkflow.find({companyId,docType:"PACKING_CONVERSION","meta.jobId":String(job._id),status:"POSTED"}).select("meta").lean();
-  const convertedByProduct=new Map();
+  const convertedByProduction=new Map(),legacyByProduct=new Map();
   for(const document of previous)for(const line of document.meta?.conversionLines||[]){
-   const key=clean(line.itemName).toLowerCase(),current=convertedByProduct.get(key)||{qtyKg:0,packetCount:0};
-   current.qtyKg+=num(line.qtyKg);
-   current.packetCount+=num(line.packetCount);
-   convertedByProduct.set(key,current);
+   const entryId=String(line.productionEntryId||line.entryId||""),productKey=clean(line.itemName).toLowerCase(),converted={qtyKg:num(line.qtyKg),packetCount:num(line.packetCount)};
+   if(entryId){
+    const key=`${entryId}:${line.productionLineIndex??0}`,current=convertedByProduction.get(key)||{qtyKg:0,packetCount:0};
+    current.qtyKg+=converted.qtyKg;current.packetCount+=converted.packetCount;convertedByProduction.set(key,current);
+   }else{
+    const current=legacyByProduct.get(productKey)||{qtyKg:0,packetCount:0};
+    current.qtyKg+=converted.qtyKg;current.packetCount+=converted.packetCount;legacyByProduct.set(productKey,current);
+   }
   }
 
   const rateScope=companyId?{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]}:{$or:[{companyId:null},{companyId:{$exists:false}}]};
   const rates=await PackingConversionRate.find({$and:[rateScope,{active:true}]}).lean();
   const conversionLines=[];
-  for(const produced of producedByProduct.values()){
-   const previousQty=convertedByProduct.get(produced.itemName.toLowerCase())||{qtyKg:0,packetCount:0};
-   const qtyKg=Math.max(0,produced.qtyKg-previousQty.qtyKg),packetCount=Math.max(0,produced.packetCount-previousQty.packetCount);
+  for(const produced of productionRows){
+   const previousQty=convertedByProduction.get(`${produced.productionEntryId}:${produced.productionLineIndex}`)||{qtyKg:0,packetCount:0};
+   const legacy=legacyByProduct.get(produced.itemName.toLowerCase())||{qtyKg:0,packetCount:0};
+   const legacyQty=Math.min(Math.max(0,produced.qtyKg-previousQty.qtyKg),legacy.qty),legacyPackets=Math.min(Math.max(0,produced.packetCount-previousQty.packetCount),legacy.packetCount);
+   legacy.qty=Math.max(0,legacy.qty-legacyQty);legacy.packetCount=Math.max(0,legacy.packetCount-legacyPackets);
+   legacyByProduct.set(produced.itemName.toLowerCase(),legacy);
+   const qtyKg=Math.max(0,produced.qtyKg-previousQty.qtyKg-legacyQty),packetCount=Math.max(0,produced.packetCount-previousQty.packetCount-legacyPackets);
    if(qtyKg<=0.000001&&packetCount<=0.000001)continue;
    const matchingRates=rates.filter(item=>(produced.itemId&&String(item.itemId)===produced.itemId)||clean(item.itemName).toLowerCase()===produced.itemName.toLowerCase());
    const master=matchingRates.find(item=>(item.periods||[]).some(period=>new Date(period.effectiveFrom)<=date&&new Date(period.effectiveTo)>=date));
@@ -70,7 +72,7 @@ export async function createJobPackingConversion(req,res){
    const basisQty=rate.rateBasis==="PCS"?packetCount:qtyKg;
    if(basisQty<=0)return res.status(400).json({success:false,message:`${produced.itemName} has no ${rate.rateBasis} production quantity to convert.`});
    if(num(rate.rate)<=0)return res.status(400).json({success:false,message:`Enter a conversion rate greater than zero for ${produced.itemName}.`});
-   conversionLines.push({itemId:produced.itemId||String(master.itemId),itemName:produced.itemName,rateBasis:rate.rateBasis,basisQty:q6(basisQty),rate:num(rate.rate),effectiveFrom:rate.effectiveFrom,effectiveTo:rate.effectiveTo,amount:r2(basisQty*num(rate.rate)),qtyKg:q6(qtyKg),packetCount:q6(packetCount),packetWeightKg:q6(produced.packetWeightKg)});
+   conversionLines.push({productionEntryId:produced.productionEntryId,productionLineIndex:produced.productionLineIndex,productionNo:produced.productionNo,productionDate:produced.productionDate,itemId:produced.itemId||String(master.itemId),itemName:produced.itemName,rateBasis:rate.rateBasis,basisQty:q6(basisQty),rate:num(rate.rate),effectiveFrom:rate.effectiveFrom,effectiveTo:rate.effectiveTo,amount:r2(basisQty*num(rate.rate)),qtyKg:q6(qtyKg),packetCount:q6(packetCount),packetWeightKg:q6(produced.packetWeightKg)});
   }
   if(!conversionLines.length)return res.status(400).json({success:false,message:`All production for Job Order ${job.jobNo} has already been converted.`});
 
