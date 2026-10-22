@@ -333,9 +333,11 @@ export async function createJobOrder(req,res){
   for(const x of outputs){if(num(x.qty)<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");}
   const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other);
   const jobNo=jobNoMode==="MANUAL"?requestedJobNo:await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");
-  const party=b.partyId?await CustomerMaster.findOne({$and:[{_id:b.partyId},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}):null;
-  if(b.partyId&&!party)throw new Error("Selected party was not found.");
-  const job=await ManufacturingJobOrder.create({jobNo,companyId,date:dt(b.date)||new Date(),type,location,partyId:party?._id||null,partyName:party?.name||clean(b.partyName),
+  let party=b.partyId&&/^[a-f\d]{24}$/i.test(clean(b.partyId))?await CustomerMaster.findOne({$and:[{_id:b.partyId},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}):null;
+  const partyName=clean(party?.name||b.partyName);
+  if(b.partyId&&!party&&!partyName)throw new Error("Selected party was not found. Please select the party again.");
+  if(!party&&partyName)party=await CustomerMaster.findOne({$and:[{name:partyName},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]});
+  const job=await ManufacturingJobOrder.create({jobNo,companyId,date:dt(b.date)||new Date(),type,location,partyId:party?._id||null,partyName:party?.name||partyName,
    sourceItems:sources.map(x=>({...x,itemId:clean(x.itemId)||null,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode),purchaseAllocations:Array.isArray(x.purchaseAllocations)?x.purchaseAllocations.map(a=>({...a,qty:num(a.qty),rate:num(a.rate),pendingAfter:num(a.pendingAfter)})):[]})),
    outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
    labourCost:labour,transportCost:transport,otherCost:other,totalCost,notes:clean(b.notes),createdBy:req.user._id});
