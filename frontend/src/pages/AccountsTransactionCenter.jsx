@@ -702,7 +702,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase" }) {
       <section className="tx-card">
         <div className="tx-title"><div><h3>Post Production Conversion</h3><p>Only new, unconverted production is included. Production stock is not moved a second time.</p></div><span className="tx-bom-status">PARTY · JOB LINKED</span></div>
         <div className="tx-grid">
-          <div className="tx-field"><label>Job Order · Party</label><SearchableSelect value={packJobId} placeholder="Select a Job Order with production" options={packingJobs.map(row=>({value:row._id,label:`${row.jobNo} · ${row.partyName||"No party"} · ${locationLabel(row.location)}`}))} onChange={e=>setPackJobId(e.target.value)}/></div>
+          <div className="tx-field" style={{gridColumn:"1/-1"}}><label>Job Order · Party</label><SearchableSelect value={packJobId} placeholder="Select a Job Order with production" options={packingJobs.map(row=>({value:row._id,label:`${row.jobNo} · ${row.partyName||"No party"} · ${locationLabel(row.location)}`}))} onChange={e=>setPackJobId(e.target.value)}/></div>
           <div className="tx-field"><label>Conversion Date</label><input type="date" value={pack.date} onChange={e=>setPack(current=>({...current,date:e.target.value}))}/></div>
           <div className="tx-field"><label>Location</label><input readOnly value={selectedPackingJob?locationLabel(selectedPackingJob.location):""} placeholder="Selected from Job Order"/></div>
           <div className="tx-field"><label>Party</label><input readOnly value={selectedPackingJob?.partyName||""} placeholder="Selected from Job Order"/></div>
