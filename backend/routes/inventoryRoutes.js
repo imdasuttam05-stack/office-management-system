@@ -3,7 +3,7 @@ import {getWorkflowMasters,listBoms,listBomCostItems,saveBomCostItem,deleteBomCo
 import auth from "../middleware/auth.js";
 import requireCompanyContext from "../middleware/companyContext.js";
 import requireRole from "../middleware/role.js";
-import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,updateLocationMaster,deleteLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,createJobOrderReturn,getJobs,getJobOrderStockReport,createProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
+import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,updateLocationMaster,deleteLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,createJobOrderReturn,getJobs,getJobOrderStockReport,getJobOrderReportDetail,createProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,getSales,getGstReport} from "../controllers/inventoryController.js";
 const router=express.Router();
 router.use(auth, requireCompanyContext);
 router.get("/raw-material-masters",getPurchaseMasters);
@@ -34,6 +34,7 @@ router.post("/job-orders",requireRole("Admin","Manager"),createJobOrder);
 router.post("/job-orders/:id/returns",requireRole("Admin","Manager"),createJobOrderReturn);
 router.get("/job-orders",getJobs);
 router.get("/job-orders/report",getJobOrderStockReport);
+router.get("/job-orders/report/:id",getJobOrderReportDetail);
 router.post("/production",requireRole("Admin","Manager"),createProductionEntry);
 router.get("/production-requirements",getBomProductionRequirements);
 router.get("/production",getProductionEntries);
