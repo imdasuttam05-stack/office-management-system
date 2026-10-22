@@ -17,6 +17,10 @@ import ProductionEntry from "../models/ProductionEntry.js";
 import BOM from "../models/BOM.js";
 import InventoryWorkflow from "../models/InventoryWorkflow.js";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function q6(v){return Math.round((num(v)+Number.EPSILON)*1000000)/1000000} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
+function packetWeightKg(name){const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);if(!match)return 0;const amount=Number(match[1]);return q6(/^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000)}
+function packetUnit(unit){return ["PC","PCS","PACKET","PACKETS","PIECE","PIECES"].includes(clean(unit).toUpperCase())}
+function plannedOutput(line){const weight=num(line.packetWeightKg)||packetWeightKg(line.itemName),hasPacketPlan=num(line.packetCount)>0;const packetCount=hasPacketPlan?num(line.packetCount):weight>0?(packetUnit(line.unit)?num(line.qty):num(line.qty)/weight):0;const qty=hasPacketPlan&&weight>0?packetCount*weight:weight>0&&!packetUnit(line.unit)?num(line.qty):weight>0?num(line.qty)*weight:num(line.qty);return {packetCount:q6(packetCount),packetWeightKg:weight,qty:q6(qty)}}
+function productionOutput(line){const weight=num(line.packetWeightKg)||packetWeightKg(line.itemName),packets=num(line.packetCount);if(packets>0)return {packetCount:q6(packets),packetWeightKg:weight,qty:q6(weight>0?packets*weight:num(line.qty))};if(weight>0&&packetUnit(line.unit))return {packetCount:q6(num(line.qty)),packetWeightKg:weight,qty:q6(num(line.qty)*weight)};if(weight>0)return {packetCount:q6(num(line.qty)/weight),packetWeightKg:weight,qty:q6(num(line.qty))};return {packetCount:0,packetWeightKg:0,qty:q6(num(line.qty))}}
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
 "01":"Jammu and Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh","05":"Uttarakhand","06":"Haryana","07":"Delhi","08":"Rajasthan","09":"Uttar Pradesh","10":"Bihar","11":"Sikkim","12":"Arunachal Pradesh","13":"Nagaland","14":"Manipur","15":"Mizoram","16":"Tripura","17":"Meghalaya","18":"Assam","19":"West Bengal","20":"Jharkhand","21":"Odisha","22":"Chhattisgarh","23":"Madhya Pradesh","24":"Gujarat","26":"Dadra and Nagar Haveli and Daman and Diu","27":"Maharashtra","28":"Andhra Pradesh","29":"Karnataka","30":"Goa","31":"Lakshadweep","32":"Kerala","33":"Tamil Nadu","34":"Puducherry","35":"Andaman and Nicobar Islands","36":"Telangana","37":"Andhra Pradesh","38":"Ladakh"
@@ -330,7 +334,7 @@ export async function createJobOrder(req,res){
    if(!st||num(st.qty)<q)throw new Error(`Insufficient Raw Material stock for ${x.itemName}. Available ${num(st?.qty)}.`);
    sourceValue+=q*(rate>0?rate:num(st.averageRate));
   }
-  for(const x of outputs){if(num(x.qty)<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");}
+  for(const x of outputs){const plan=plannedOutput(x);if(plan.qty<=0||!clean(x.itemName))throw new Error("Every output needs item and quantity.");}
   const labour=Math.max(0,num(b.labourCost)),transport=Math.max(0,num(b.transportCost)),other=Math.max(0,num(b.otherCost)),totalCost=r2(sourceValue+labour+transport+other);
   const jobNo=jobNoMode==="MANUAL"?requestedJobNo:await next(type==="GRADING"?"GRADING_JOB":"FG_JOB",type==="GRADING"?"GRD":"FGJ");
   let party=b.partyId&&/^[a-f\d]{24}$/i.test(clean(b.partyId))?await CustomerMaster.findOne({$and:[{_id:b.partyId},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}):null;
@@ -339,7 +343,7 @@ export async function createJobOrder(req,res){
   if(!party&&partyName)party=await CustomerMaster.findOne({$and:[{name:partyName},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]});
   const job=await ManufacturingJobOrder.create({jobNo,companyId,date:dt(b.date)||new Date(),type,location,partyId:party?._id||null,partyName:party?.name||partyName,
    sourceItems:sources.map(x=>({...x,itemId:clean(x.itemId)||null,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode),purchaseAllocations:Array.isArray(x.purchaseAllocations)?x.purchaseAllocations.map(a=>({...a,qty:num(a.qty),rate:num(a.rate),pendingAfter:num(a.pendingAfter)})):[]})),
-   outputItems:outputs.map(x=>({...x,itemName:clean(x.itemName),unit:clean(x.unit)||"KG",qty:num(x.qty),rate:num(x.rate),value:r2(num(x.qty)*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)})),
+   outputItems:outputs.map(x=>{const itemName=clean(x.itemName),packetCount=x.packetCount===undefined?undefined:num(x.packetCount),packetWeightKg=num(x.packetWeightKg)||packetWeightKg(itemName),qty=packetCount>0&&packetWeightKg>0?q6(packetCount*packetWeightKg):num(x.qty);return {...x,itemName,unit:packetWeightKg>0?"KG":clean(x.unit)||"KG",qty,packetCount,packetWeightKg,rate:num(x.rate),value:r2(qty*num(x.rate)),batchNo:clean(x.batchNo),barcode:clean(x.barcode)}}),
    labourCost:labour,transportCost:transport,otherCost:other,totalCost,notes:clean(b.notes),createdBy:req.user._id});
   for(const x of job.sourceItems){
    await adjustStock({companyId:req.user?.companyId,location,itemType:allowedIn,itemName:x.itemName,unit:x.unit,qty:x.qty,value:x.value,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});
@@ -391,18 +395,18 @@ export async function createProductionEntry(req,res){
   const filter={_id:jobId,status:{$in:["POSTED","COMPLETED"]}}; if(req.user?.companyId)filter.companyId=req.user.companyId;
   const job=await ManufacturingJobOrder.findOne(filter); if(!job)return res.status(404).json({success:false,message:"Job Order not found."});
   const prior=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
-  const used={}; for(const e of prior)for(const x of e.outputItems||[])used[x.itemName]=(used[x.itemName]||0)+num(x.qty);
+  const used={}; for(const e of prior)for(const x of e.outputItems||[])used[x.itemName]=(used[x.itemName]||0)+productionOutput(x).qty;
   let totalValue=0;
   for(const x of outputs){
    const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));
    if(!planned)throw new Error(`${x.itemName} is not an output of Job Order ${job.jobNo}.`);
-   const qty=num(x.qty),remain=Math.max(0,num(planned.qty)-(used[x.itemName]||0));
+   const qty=num(x.qty),remain=Math.max(0,plannedOutput(planned).qty-(used[x.itemName]||0));
    if(qty<=0||qty>remain+0.000001)throw new Error(`${x.itemName}: production quantity ${qty} exceeds remaining ${remain}.`);
    totalValue+=qty*(num(x.rate)>0?num(x.rate):num(planned.rate));
   }
   const productionNo=await next("PRODUCTION","PROD");
   const productionDate=dt(b.date)||new Date(), productionMfgDate=dt(b.mfgDate)||productionDate, productionExpiryDate=dt(b.expiryDate);
-  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:productionDate,mfgDate:productionMfgDate,expiryDate:productionExpiryDate,batchNo:clean(b.batchNo),location:job.location,outputItems:outputs.map(x=>{const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));const rate=num(x.rate)>0?num(x.rate):num(planned?.rate);return {...x,itemName:clean(x.itemName),unit:clean(x.unit)||planned?.unit||"KG",qty:num(x.qty),packetCount:num(x.packetCount),packetWeightKg:num(x.packetWeightKg),rate,value:r2(num(x.qty)*rate),batchNo:clean(x.batchNo)||clean(b.batchNo)||clean(planned?.batchNo),mfgDate:dt(x.mfgDate)||productionMfgDate,expiryDate:dt(x.expiryDate)||productionExpiryDate,barcode:clean(x.barcode)||clean(planned?.barcode)}}),notes:clean(b.notes),createdBy:req.user._id});
+  const entry=await ProductionEntry.create({productionNo,jobId:job._id,jobNo:job.jobNo,companyId:job.companyId,date:productionDate,mfgDate:productionMfgDate,expiryDate:productionExpiryDate,batchNo:clean(b.batchNo),location:job.location,outputItems:outputs.map(x=>{const planned=(job.outputItems||[]).find(o=>o.itemName===clean(x.itemName));const rate=num(x.rate)>0?num(x.rate):num(planned?.rate),packetWeight=num(x.packetWeightKg)||packetWeightKg(x.itemName);return {...x,itemName:clean(x.itemName),unit:packetWeight>0?"KG":clean(x.unit)||planned?.unit||"KG",qty:num(x.qty),packetCount:num(x.packetCount),packetWeightKg:packetWeight,rate,value:r2(num(x.qty)*rate),batchNo:clean(x.batchNo)||clean(b.batchNo)||clean(planned?.batchNo),mfgDate:dt(x.mfgDate)||productionMfgDate,expiryDate:dt(x.expiryDate)||productionExpiryDate,barcode:clean(x.barcode)||clean(planned?.barcode)}}),notes:clean(b.notes),createdBy:req.user._id});
   for(const x of entry.outputItems){
    const value=r2(num(x.qty)*(num(x.rate)>0?num(x.rate):((job.outputItems||[]).find(o=>o.itemName===x.itemName)?.rate||0)));
    await adjustStock({companyId:job.companyId||req.user?.companyId||null,location:job.location,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value,batchNo:x.batchNo,barcode:x.barcode,mfgDate:x.mfgDate||entry.mfgDate||entry.date,expiryDate:x.expiryDate||entry.expiryDate});
@@ -410,8 +414,8 @@ export async function createProductionEntry(req,res){
    await InventoryMovement.create({companyId:job.companyId||req.user?.companyId||null,date:entry.date,location:job.location,itemName:x.itemName,itemType:job.type==="GRADING"?"GRADE":"FINISHED_GOODS",unit:x.unit||"KG",qtyIn:x.qty,valueIn:value,balanceQty:num(st?.qty),sourceType:"PRODUCTION",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:x.batchNo||"",barcode:x.barcode||"",narration:`Production ${entry.productionNo} against Job Order ${job.jobNo}`,createdBy:req.user._id});
   }
   const all=await ProductionEntry.find({jobId:job._id,status:"POSTED"}).lean();
-  const done={}; for(const e of all)for(const x of e.outputItems||[])done[x.itemName]=(done[x.itemName]||0)+num(x.qty);
-  const complete=(job.outputItems||[]).every(x=>(done[x.itemName]||0)>=num(x.qty)-0.000001);
+  const done={}; for(const e of all)for(const x of e.outputItems||[])done[x.itemName]=(done[x.itemName]||0)+productionOutput(x).qty;
+  const complete=(job.outputItems||[]).every(x=>(done[x.itemName]||0)>=plannedOutput(x).qty-0.000001);
   if(complete){job.status="COMPLETED";await job.save();}
   return res.status(201).json({success:true,message:`Production ${productionNo} posted against Job Order ${job.jobNo}. Finished Goods stock increased.`,production:entry,jobStatus:job.status});
  }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Production entry failed."})}
@@ -424,8 +428,8 @@ export async function getJobs(req,res){
   const filter={};if(req.user?.companyId)filter.companyId=req.user.companyId;if(req.query.type)filter.type=req.query.type;
   const items=await ManufacturingJobOrder.find(filter).sort({date:-1,createdAt:-1}).limit(300).lean();
   const ids=items.map(x=>x._id); const entries=ids.length?await ProductionEntry.find({jobId:{$in:ids},status:"POSTED"}).lean():[];
-  const byJob={}; for(const e of entries){const k=String(e.jobId);byJob[k]??={};for(const x of e.outputItems||[])byJob[k][x.itemName]=(byJob[k][x.itemName]||0)+num(x.qty);}
-  const enriched=items.map(j=>({...j,producedItems:Object.entries(byJob[String(j._id)]||{}).map(([itemName,qty])=>({itemName,qty})),remainingOutputItems:(j.outputItems||[]).map(x=>({...x,producedQty:byJob[String(j._id)]?.[x.itemName]||0,remainingQty:Math.max(0,num(x.qty)-(byJob[String(j._id)]?.[x.itemName]||0))}))}));
+  const byJob={}; for(const e of entries){const k=String(e.jobId);byJob[k]??={};for(const x of e.outputItems||[])byJob[k][x.itemName]=(byJob[k][x.itemName]||0)+productionOutput(x).qty;}
+  const enriched=items.map(j=>({...j,producedItems:Object.entries(byJob[String(j._id)]||{}).map(([itemName,qty])=>({itemName,qty})),remainingOutputItems:(j.outputItems||[]).map(x=>{const plan=plannedOutput(x),producedQty=byJob[String(j._id)]?.[x.itemName]||0;return {...x,unit:plan.packetWeightKg>0?"KG":x.unit,qty:plan.qty,plannedQty:plan.qty,plannedPacketCount:plan.packetCount,packetWeightKg:plan.packetWeightKg,producedQty,remainingQty:Math.max(0,plan.qty-producedQty)}})}));
   return res.json({success:true,items:enriched});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
@@ -449,10 +453,11 @@ export async function getJobOrderStockReport(req,res){
   const entries=jobIds.length?await ProductionEntry.find({companyId:req.user?.companyId||null,jobId:{$in:jobIds},status:"POSTED"}).lean():[];
   const produced=new Map();
   for(const entry of entries)for(const line of entry.outputItems||[]){
-   const key=`${String(entry.jobId)}|${clean(line.itemName).toLowerCase()}|${clean(line.unit||"KG").toLowerCase()}`;
+   const actual=productionOutput(line),unit=actual.packetWeightKg>0?"KG":line.unit||"KG";
+   const key=`${String(entry.jobId)}|${clean(line.itemName).toLowerCase()}|${clean(unit).toLowerCase()}`;
    const current=produced.get(key)||{qty:0,packetCount:0};
-   current.qty+=num(line.qty);
-   current.packetCount+=num(line.packetCount);
+   current.qty+=actual.qty;
+   current.packetCount+=actual.packetCount;
    produced.set(key,current);
   }
   const productMatches=product.toLowerCase();
@@ -460,21 +465,22 @@ export async function getJobOrderStockReport(req,res){
   for(const job of jobs)for(const output of job.outputItems||[]){
    if(productMatches&&!clean(output.itemName).toLowerCase().includes(productMatches))continue;
    const itemType=job.type==="GRADING"?"GRADE":"FINISHED_GOODS";
-   const unit=output.unit||"KG",key=`${String(job._id)}|${clean(output.itemName).toLowerCase()}|${clean(unit).toLowerCase()}`;
+   const plan=plannedOutput(output),unit=plan.packetWeightKg>0?"KG":output.unit||"KG",key=`${String(job._id)}|${clean(output.itemName).toLowerCase()}|${clean(unit).toLowerCase()}`;
    const row=outputMap.get(key);
-   if(row)row.plannedQty+=num(output.qty);
+   if(row){row.plannedQty+=plan.qty;row.plannedPacketCount+=plan.packetCount;if(!row.packetWeightKg)row.packetWeightKg=plan.packetWeightKg;}
    else{
     const production=produced.get(key)||{qty:0,packetCount:0};
-    outputMap.set(key,{jobId:job._id,jobNo:job.jobNo||"",date:job.date,partyName:job.partyName||"",type:job.type,location:job.location,itemName:output.itemName,unit,plannedQty:num(output.qty),producedQty:production.qty,producedPacketCount:production.packetCount,itemType});
+    outputMap.set(key,{jobId:job._id,jobNo:job.jobNo||"",date:job.date,partyName:job.partyName||"",type:job.type,location:job.location,itemName:output.itemName,unit,plannedQty:plan.qty,plannedPacketCount:plan.packetCount,packetWeightKg:plan.packetWeightKg,producedQty:production.qty,producedPacketCount:production.packetCount,itemType});
    }
   }
   const lines=[...outputMap.values()];
-  const stockKeys=[...new Map(lines.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,{location:x.location,itemType:x.itemType,itemName:x.itemName}])).values()];
+  const stockKeys=[...new Map(lines.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,{location:x.location,itemType:x.itemType,itemName:x.itemName,packetWeightKg:x.packetWeightKg}])).values()];
   const stockFilter={companyId:req.user?.companyId||null,$or:stockKeys.map(x=>({location:x.location,itemType:x.itemType,itemName:x.itemName}))};
-  const stocks=stockKeys.length?await InventoryStock.find(stockFilter).select("location itemType itemName qty").lean():[];
-  const stockMap=new Map(stocks.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,0]));
-  for(const stock of stocks){const key=`${stock.location}|${stock.itemType}|${stock.itemName}`;stockMap.set(key,(stockMap.get(key)||0)+num(stock.qty));}
-  const rows=lines.map(line=>({...line,remainingQty:Math.max(0,line.plannedQty-line.producedQty),currentStockQty:stockMap.get(`${line.location}|${line.itemType}|${line.itemName}`)||0}));
+  const stocks=stockKeys.length?await InventoryStock.find(stockFilter).select("location itemType itemName unit qty").lean():[];
+  const stockWeightByKey=new Map(stockKeys.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,num(x.packetWeightKg)]));
+  const stockMap=new Map(stockKeys.map(x=>[`${x.location}|${x.itemType}|${x.itemName}`,{qty:0,packetCount:0,unit:num(x.packetWeightKg)>0?"KG":""}]));
+  for(const stock of stocks){const key=`${stock.location}|${stock.itemType}|${stock.itemName}`,weight=stockWeightByKey.get(key)||0,current=stockMap.get(key)||{qty:0,packetCount:0,unit:""};if(weight>0){if(packetUnit(stock.unit)){current.packetCount+=num(stock.qty);current.qty+=num(stock.qty)*weight;}else{current.qty+=num(stock.qty);current.packetCount+=num(stock.qty)/weight;}}else current.qty+=num(stock.qty);current.unit=weight>0?"KG":current.unit||stock.unit;stockMap.set(key,current);}
+  const rows=lines.map(line=>{const currentStock=stockMap.get(`${line.location}|${line.itemType}|${line.itemName}`)||{qty:0,packetCount:0,unit:""};return {...line,remainingQty:Math.max(0,line.plannedQty-line.producedQty),remainingPacketCount:Math.max(0,line.plannedPacketCount-line.producedPacketCount),currentStockQty:currentStock.qty,currentStockPacketCount:currentStock.packetCount,currentStockUnit:currentStock.unit||line.unit}});
   return res.json({success:true,rows,limited:jobs.length===5000});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
 }
@@ -490,22 +496,23 @@ export async function getJobOrderReportDetail(req,res){
   const entries=await ProductionEntry.find(entryFilter).sort({date:1,createdAt:1}).lean();
   const plannedProducts=new Map();
   for(const output of job.outputItems||[]){
-   const unit=clean(output.unit)||"KG",key=`${clean(output.itemName).toLowerCase()}|${unit.toLowerCase()}`;
+   const plan=plannedOutput(output),unit=plan.packetWeightKg>0?"KG":clean(output.unit)||"KG",key=`${clean(output.itemName).toLowerCase()}|${unit.toLowerCase()}`;
    const product=plannedProducts.get(key);
-   if(product)product.plannedQty+=num(output.qty);
-   else plannedProducts.set(key,{itemName:output.itemName,unit,plannedQty:num(output.qty)});
+   if(product){product.plannedQty+=plan.qty;product.plannedPacketCount+=plan.packetCount;if(!product.packetWeightKg)product.packetWeightKg=plan.packetWeightKg;}
+   else plannedProducts.set(key,{itemName:output.itemName,unit,plannedQty:plan.qty,plannedPacketCount:plan.packetCount,packetWeightKg:plan.packetWeightKg});
   }
   const products=[...plannedProducts.values()].map(output=>{
    const unit=output.unit;
    const productions=[];
    let producedQty=0,producedPacketCount=0;
    for(const entry of entries)for(const line of entry.outputItems||[]){
-    if(clean(line.itemName).toLowerCase()!==clean(output.itemName).toLowerCase()||clean(line.unit||"KG").toLowerCase()!==unit.toLowerCase())continue;
-    producedQty+=num(line.qty);
-    producedPacketCount+=num(line.packetCount);
-    productions.push({productionNo:entry.productionNo||"",date:entry.date,itemName:line.itemName,unit:line.unit||"KG",qty:num(line.qty),packetCount:num(line.packetCount),packetWeightKg:num(line.packetWeightKg),batchNo:line.batchNo||entry.batchNo||"",mfgDate:line.mfgDate||entry.mfgDate||entry.date,expiryDate:line.expiryDate||entry.expiryDate||null});
+    const actual=productionOutput(line),productionUnit=actual.packetWeightKg>0?"KG":line.unit||"KG";
+    if(clean(line.itemName).toLowerCase()!==clean(output.itemName).toLowerCase()||clean(productionUnit).toLowerCase()!==unit.toLowerCase())continue;
+    producedQty+=actual.qty;
+    producedPacketCount+=actual.packetCount;
+    productions.push({productionNo:entry.productionNo||"",date:entry.date,itemName:line.itemName,unit:actual.packetWeightKg>0?"KG":line.unit||"KG",qty:actual.qty,packetCount:actual.packetCount,packetWeightKg:actual.packetWeightKg,batchNo:line.batchNo||entry.batchNo||"",mfgDate:line.mfgDate||entry.mfgDate||entry.date,expiryDate:line.expiryDate||entry.expiryDate||null});
    }
-   return {...output,unit,producedQty,producedPacketCount,remainingQty:Math.max(0,output.plannedQty-producedQty),productions};
+   return {...output,unit,producedQty,producedPacketCount,remainingQty:Math.max(0,output.plannedQty-producedQty),remainingPacketCount:Math.max(0,output.plannedPacketCount-producedPacketCount),productions};
   });
   return res.json({success:true,job,products});
  }catch(e){return res.status(500).json({success:false,message:e.message})}
