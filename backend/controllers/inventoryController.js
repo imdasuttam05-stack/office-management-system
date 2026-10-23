@@ -357,6 +357,84 @@ export async function createJobOrder(req,res){
  }catch(e){console.error(e);if(e?.code===11000)return res.status(409).json({success:false,message:"This Job Order No. already exists. Enter a different number."});return res.status(400).json({success:false,message:e.message||"Job order failed."})}
 }
 
+export async function updateJobOrder(req,res){
+ let session;
+ try{
+  session=await mongoose.startSession();
+  let updated;
+  await session.withTransaction(async()=>{
+   const companyId=req.user?.companyId||null,filter={_id:req.params.id,companyId};
+   const job=await ManufacturingJobOrder.findOne(filter).session(session);
+   if(!job)throw Object.assign(new Error("Job Order not found."),{status:404});
+   if(job.status==="CANCELLED"||job.status==="COMPLETED")throw Object.assign(new Error("Completed or cancelled Job Orders cannot be edited."),{status:409});
+   const production=await ProductionEntry.findOne({jobId:job._id,companyId}).session(session).select("_id").lean();
+   if(production)throw Object.assign(new Error("This Job Order already has production. Edit is allowed only before production is posted."),{status:409});
+   const linkedReturn=await InventoryWorkflow.findOne({companyId,docType:"JOB_ORDER_RETURN","meta.jobId":job._id,status:"POSTED"}).session(session).select("_id").lean();
+   if(linkedReturn)throw Object.assign(new Error("This Job Order has a posted raw-material return and cannot be edited."),{status:409});
+   const linkedConversion=await InventoryWorkflow.findOne({companyId,docType:"PACKING_CONVERSION","meta.jobId":String(job._id),status:"POSTED"}).session(session).select("_id").lean();
+   if(linkedConversion)throw Object.assign(new Error("This Job Order has a posted Packing Conversion and cannot be edited."),{status:409});
+
+   const body=req.body||{},type=clean(body.type),location=clean(body.location);
+   const sources=Array.isArray(body.sourceItems)?body.sourceItems:[],outputs=Array.isArray(body.outputItems)?body.outputItems:[];
+   if(!["GRADING","FINISHED_GOODS"].includes(type)||!location||!sources.length||!outputs.length)throw new Error("Type, location, source items and output items are required.");
+   const allowedIn="RAW_MATERIAL",allowedOut=type==="GRADING"?"GRADE":"FINISHED_GOODS";
+   const normalizedSources=sources.map(line=>{
+    const itemName=clean(line.itemName),qty=num(line.qty),rate=num(line.rate);
+    if(!itemName||qty<=0)throw new Error(`Invalid source quantity for ${itemName||"raw material"}.`);
+    return {...line,itemId:clean(line.itemId)||null,itemName,unit:clean(line.unit)||"KG",qty,rate,value:r2(qty*rate),batchNo:clean(line.batchNo),barcode:clean(line.barcode),purchaseAllocations:Array.isArray(line.purchaseAllocations)?line.purchaseAllocations.map(a=>({...a,qty:num(a.qty),rate:num(a.rate),pendingAfter:num(a.pendingAfter)})):[]};
+   });
+   const normalizedOutputs=outputs.map(line=>{
+    const itemName=clean(line.itemName),packetCount=line.packetCount===undefined?undefined:num(line.packetCount),weight=num(line.packetWeightKg)||packetWeightKg(itemName),qty=packetCount>0&&weight>0?q6(packetCount*weight):num(line.qty);
+    if(!itemName||qty<=0)throw new Error("Every output needs item and quantity.");
+    return {...line,itemId:clean(line.itemId)||null,itemName,unit:weight>0?"KG":clean(line.unit)||"KG",qty,packetCount,packetWeightKg:weight,rate:num(line.rate),value:r2(qty*num(line.rate)),batchNo:clean(line.batchNo),barcode:clean(line.barcode)};
+   });
+   const oldItems=job.sourceItems||[];
+   const stockKey=line=>[clean(line.itemName),clean(line.batchNo),clean(line.barcode)].join("|");
+   const restored=new Map();
+   for(const line of oldItems)restored.set(stockKey(line),(restored.get(stockKey(line))||0)+num(line.qty));
+   const required=new Map();
+   for(const line of normalizedSources)required.set(stockKey(line),(required.get(stockKey(line))||0)+num(line.qty));
+   const stockRates=new Map();
+   for(const [key,quantity] of required){
+    const [itemName,batchNo,barcode]=key.split("|");
+    const stock=await InventoryStock.findOne({companyId,location,itemType:allowedIn,itemName,batchNo,barcode}).session(session).select("qty averageRate").lean();
+    const available=num(stock?.qty)+(location===job.location?(restored.get(key)||0):0);
+    if(quantity>available+0.000001)throw new Error(`Insufficient Raw Material stock for ${itemName}. Available after reversing this Job Order: ${available}.`);
+    stockRates.set(key,num(stock?.averageRate));
+   }
+   for(const line of normalizedSources)if(line.rate<=0){line.rate=stockRates.get(stockKey(line))||0;line.value=r2(line.qty*line.rate)}
+   for(const line of oldItems){
+    await adjustStock({companyId:job.companyId,location:job.location,itemType:allowedIn,itemName:line.itemName,unit:line.unit||"KG",qty:num(line.qty),value:num(line.value)||num(line.qty)*num(line.rate),mode:"ADD",batchNo:line.batchNo,barcode:line.barcode,session});
+    const stock=await InventoryStock.findOne({companyId:job.companyId||null,location:job.location,itemType:allowedIn,itemName:line.itemName,batchNo:line.batchNo||"",barcode:line.barcode||""}).session(session).lean();
+    const value=num(line.value)||num(line.qty)*num(line.rate);
+    await InventoryMovement.create([{companyId:job.companyId||null,date:new Date(),location:job.location,itemName:line.itemName,itemType:allowedIn,unit:line.unit||"KG",qtyIn:num(line.qty),valueIn:value,balanceQty:num(stock?.qty),sourceType:"JOB_ORDER_EDIT",sourceNo:job.jobNo,referenceNo:job.jobNo,batchNo:line.batchNo||"",barcode:line.barcode||"",narration:`Raw Material issue reversed while editing Job Order ${job.jobNo}`,createdBy:req.user._id}],{session});
+   }
+   for(const line of normalizedSources){
+    await adjustStock({companyId,location,itemType:allowedIn,itemName:line.itemName,unit:line.unit,qty:line.qty,value:line.value,mode:"SUBTRACT",batchNo:line.batchNo,barcode:line.barcode,session});
+   }
+   job.date=dt(body.date)||job.date;job.type=type;job.location=location;
+   const partyId=clean(body.partyId);
+   let party=partyId&&/^[a-f\d]{24}$/i.test(partyId)?await CustomerMaster.findOne({$and:[{_id:partyId},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).session(session):null;
+   const partyName=clean(party?.name||body.partyName);
+   if(partyId&&!party&&!partyName)throw new Error("Selected party was not found. Please select the party again.");
+   if(!party&&partyName)party=await CustomerMaster.findOne({$and:[{name:partyName},{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).session(session);
+   job.partyId=party?._id||null;job.partyName=party?.name||partyName;
+   job.sourceItems=normalizedSources;job.outputItems=normalizedOutputs;
+   job.labourCost=Math.max(0,num(body.labourCost));job.transportCost=Math.max(0,num(body.transportCost));job.otherCost=Math.max(0,num(body.otherCost));
+   job.totalCost=r2(normalizedSources.reduce((sum,line)=>sum+line.value,0)+job.labourCost+job.transportCost+job.otherCost);
+   job.notes=clean(body.notes);
+   await job.save({session});
+   for(const line of normalizedSources){
+    const stock=await InventoryStock.findOne({companyId,location,itemType:allowedIn,itemName:line.itemName,batchNo:line.batchNo||"",barcode:line.barcode||""}).session(session).lean();
+    await InventoryMovement.create([{companyId,date:job.date,location,itemName:line.itemName,itemType:allowedIn,unit:line.unit,qtyOut:line.qty,valueOut:line.value,balanceQty:num(stock?.qty),sourceType:"JOB_ORDER",sourceNo:job.jobNo,referenceNo:job.jobNo,batchNo:line.batchNo||"",barcode:line.barcode||"",narration:`Raw Material issued against Job Order ${job.jobNo}`,createdBy:req.user._id}],{session});
+   }
+   updated=job;
+  });
+  return res.json({success:true,message:`Job Order ${updated.jobNo} updated. Raw Material stock was synchronized.`,job:updated});
+ }catch(error){return res.status(error.status||400).json({success:false,message:error.message||"Job Order could not be updated."})}
+ finally{if(session)await session.endSession()}
+}
+
 export async function createJobOrderReturn(req,res){
  try{
   const body=req.body||{},jobId=clean(req.params.id||body.jobId),lines=Array.isArray(body.lines)?body.lines:[];
