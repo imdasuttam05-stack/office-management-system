@@ -33,74 +33,65 @@ async function resolveProductStockLocation(master, companyId) {
 
 export async function ensureProductOpeningStock(master, ctx={}, {requireLocation=false}={}) {
   const openingQty=num(master.openingQty);
-  if (openingQty<=0) return;
+  if(openingQty<0)throw new Error("Opening quantity cannot be negative.");
   const {user}=requireContext(ctx);
   const companyId=user.companyId||null;
-  const financialYear=clean(ctx.financialYear||user.financialYear);
-  const financialYearMatch=/^(\d{4})-(\d{2})$/.exec(financialYear);
-  if(!financialYearMatch||Number(financialYearMatch[2])!==(Number(financialYearMatch[1])+1)%100){
-    throw new Error("A valid financial year is required to date product opening stock.");
-  }
-  const openingDate=new Date(Date.UTC(Number(financialYearMatch[1]),3,1));
   const sourceNo=`PRODUCT-${master._id}`;
   const existing=await InventoryMovement.findOne({companyId,sourceType:"OPENING_STOCK",sourceNo}).lean();
-  if(existing){
-    if(new Date(existing.date).getTime()!==openingDate.getTime()){
-      await InventoryMovement.findByIdAndUpdate(existing._id,{$set:{date:openingDate}});
-    }
-    return;
-  }
-
-  const location=await resolveProductStockLocation(master,companyId);
-  if(!location){
+  if(openingQty===0&&!existing)return;
+  const location=openingQty>0?await resolveProductStockLocation(master,companyId):null;
+  if(openingQty>0&&!location){
     if(requireLocation)throw new Error("Select a valid Location for the product opening stock.");
     return;
   }
-
-  const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)
-    ? master.itemType
-    : "RAW_MATERIAL";
-  const itemName=clean(master.name);
-  const unit=clean(master.unit)||"KG";
-  const hsn=clean(master.hsn);
-  const openingValue=num(master.openingValue);
-  const stockFilter={companyId,location:String(location._id),itemType,itemName,batchNo:"",barcode:""};
-  let movement;
-  try {
-    movement=await InventoryMovement.create({
-      companyId,
-      date:openingDate,
-      location:String(location._id),
-      itemName,
-      itemType,
-      unit,
-      qtyIn:openingQty,
-      valueIn:openingValue,
-      balanceQty:0,
-      sourceType:"OPENING_STOCK",
-      sourceNo,
-      referenceNo:clean(master.code)||itemName,
-      narration:`Opening stock for ${itemName}`,
-      createdBy:user._id,
-    });
-  } catch(error) {
-    if(error?.code===11000)return;
-    throw error;
+  let openingDate=null;
+  if(openingQty>0){
+    const financialYear=clean(ctx.financialYear||user.financialYear);
+    const financialYearMatch=/^(\d{4})-(\d{2})$/.exec(financialYear);
+    if(!financialYearMatch||Number(financialYearMatch[2])!==(Number(financialYearMatch[1])+1)%100){
+      throw new Error("A valid financial year is required to date product opening stock.");
+    }
+    openingDate=new Date(Date.UTC(Number(financialYearMatch[1]),3,1));
   }
-
-  try {
-    const stock=await InventoryStock.findOneAndUpdate(
-      stockFilter,
-      {$inc:{qty:openingQty,stockValue:openingValue},$setOnInsert:{companyId,location:String(location._id),itemType,itemName,batchNo:"",barcode:""},$set:{hsn,unit}},
-      {upsert:true,new:true,setDefaultsOnInsert:true}
-    );
-    stock.averageRate=stock.qty?stock.stockValue/stock.qty:0;
-    await stock.save();
-    movement.balanceQty=stock.qty;
-    await movement.save();
-  } catch(error) {
-    await InventoryMovement.deleteOne({_id:movement._id});
-    throw error;
+  const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)?master.itemType:"RAW_MATERIAL";
+  const itemName=clean(master.name),unit=clean(master.unit)||"KG",hsn=clean(master.hsn);
+  const openingValue=num(master.openingValue),target=openingQty>0?{companyId,location:String(location._id),itemType,itemName,unit,hsn,qty:openingQty,value:openingValue}:null;
+  const previous=existing?{companyId:existing.companyId||null,location:existing.location,itemType:existing.itemType,itemName:existing.itemName,unit:existing.unit||"KG",hsn:"",qty:num(existing.qtyIn)-num(existing.qtyOut),value:num(existing.valueIn)-num(existing.valueOut)}:null;
+  const stockKey=row=>[String(row.companyId||""),row.location,row.itemType,row.itemName,"",""].join("|");
+  const stockUpdates=new Map();
+  for(const row of [previous,target].filter(Boolean)){
+    const key=stockKey(row),update=stockUpdates.get(key)||{row,qtyDelta:0,valueDelta:0};
+    const sign=row===target?1:-1;
+    update.qtyDelta+=sign*row.qty;update.valueDelta+=sign*row.value;
+    if(row===target)update.row=row;
+    stockUpdates.set(key,update);
+  }
+  const stockPlans=[];
+  for(const [key,update] of stockUpdates){
+    const {row,qtyDelta,valueDelta}=update;
+    const filter={companyId:row.companyId||null,location:row.location,itemType:row.itemType,itemName:row.itemName,batchNo:"",barcode:""};
+    const stock=await InventoryStock.findOne(filter).select("qty stockValue").lean();
+    const nextQty=num(stock?.qty)+qtyDelta,nextValue=num(stock?.stockValue)+valueDelta;
+    if(nextQty< -0.000001)throw new Error(`Opening quantity cannot be reduced because ${row.itemName} stock has already been consumed.`);
+    if(nextValue< -0.01)throw new Error(`Opening value cannot be reduced below the remaining stock value for ${row.itemName}.`);
+    const safeQty=Math.max(0,nextQty),safeValue=Math.max(0,nextValue);
+    stockPlans.push({key,row,filter,safeQty,safeValue});
+  }
+  const nextStockByKey=new Map();
+  for(const {key,row,filter,safeQty,safeValue} of stockPlans){
+    await InventoryStock.findOneAndUpdate(filter,{$set:{qty:safeQty,stockValue:safeValue,averageRate:safeQty?safeValue/safeQty:0,...(row===target?{unit,hsn}:{})},$setOnInsert:{companyId:row.companyId||null,location:row.location,itemType:row.itemType,itemName:row.itemName,batchNo:"",barcode:""}},{upsert:true,new:true,setDefaultsOnInsert:true});
+    nextStockByKey.set(key,safeQty);
+  }
+  if(!target){
+    if(existing)await InventoryMovement.deleteOne({_id:existing._id});
+    return;
+  }
+  const targetBalance=nextStockByKey.get(stockKey(target))||0;
+  const movementData={companyId,date:openingDate,location:target.location,itemName,itemType,unit,qtyIn:openingQty,qtyOut:0,valueIn:openingValue,valueOut:0,balanceQty:targetBalance,sourceType:"OPENING_STOCK",sourceNo,referenceNo:clean(master.code)||itemName,narration:`Opening stock for ${itemName}`,createdBy:existing?.createdBy||user._id};
+  if(existing)await InventoryMovement.findByIdAndUpdate(existing._id,{$set:movementData});
+  else{
+    try{await InventoryMovement.create(movementData)}
+    catch(error){if(error?.code!==11000)throw error}
   }
 }
 
@@ -396,13 +387,17 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
   }
   if(existing.masterType==="product"&&payload.openingRate!==undefined){
     existing.openingRate=num(payload.openingRate);
-    existing.openingValue=num(existing.openingQty)*existing.openingRate;
+  }
+  if(existing.masterType==="product"&&(payload.openingQty!==undefined||payload.openingRate!==undefined||payload.openingValue!==undefined)){
+    if(payload.openingValue!==undefined&&payload.openingRate===undefined&&num(existing.openingQty)>0)existing.openingRate=num(payload.openingValue)/num(existing.openingQty);
+    existing.openingValue=num(existing.openingQty)*num(existing.openingRate);
   }
   existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
   if (existing.masterType==="location") {
     existing.code=clean(existing.code).toUpperCase()||existing.name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
     if (clean(existing.pin) && !/^\d{6}$/.test(clean(existing.pin))) throw new Error("PIN must be exactly 6 digits.");
   }
+  if(existing.masterType==="product")await ensureProductOpeningStock(existing.toObject(),ctx,{requireLocation:true});
   await existing.save();
   await syncTransactionMaster(existing.toObject(), ctx, previousName);
   return existing.toObject();
