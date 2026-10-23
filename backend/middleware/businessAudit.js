@@ -64,7 +64,11 @@ async function readAuditSnapshot(modelName, id, entity) {
   try {
     const snapshot = await model.findById(id).lean();
     if (!snapshot) return null;
-    if (modelName === "Voucher") {
+    if (modelName === "ProductionEntry" && snapshot.jobId) {
+      const Job = mongoose.models.ManufacturingJobOrder;
+      const job = Job ? await Job.findById(snapshot.jobId).select("type").lean() : null;
+      snapshot.jobType = job?.type || "";
+    } else if (modelName === "Voucher") {
       const ledgerIds = [...new Set([
         snapshot.partyLedger,
         ...(snapshot.lines || []).map(line => line.ledger),
