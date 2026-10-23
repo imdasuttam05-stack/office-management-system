@@ -19,6 +19,8 @@ const fieldLabel = value => ({
   packetWeightKg:"Packet Weight (KG)", productionDate:"Production Date", mfgDate:"MFG Date",
   expiryDate:"Expiry Date", value:"Value", rate:"Rate", amount:"Amount",
   narration:"Narration", date:"Date", type:"Type", groupName:"Group",
+  _id:"Record ID", companyId:"Company ID", jobId:"Job Order ID", itemId:"Product ID",
+  createdBy:"Created By", financialYear:"Financial Year", status:"Status",
 }[value] || value.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, letter => letter.toUpperCase()));
 
 function isPlainObject(value) {
@@ -69,6 +71,31 @@ function displayValue(value, key) {
   }
   if (isPlainObject(value) || Array.isArray(value)) return JSON.stringify(value, null, 2);
   return String(value);
+}
+
+function SnapshotValue({value, fieldKey = ""}) {
+  if (Array.isArray(value)) {
+    if (!value.length) return <span className="gst-audit-snapshot-empty">No entries</span>;
+    return <div className="gst-audit-snapshot-list">
+      {value.map((entry,index)=><article className="gst-audit-snapshot-item" key={`${fieldKey}-${index}`}>
+        <h4>{arrayEntryLabel(entry,index)}</h4>
+        <SnapshotValue value={entry} fieldKey={fieldKey}/>
+      </article>)}
+    </div>;
+  }
+  if (isPlainObject(value)) {
+    const entries=Object.entries(value);
+    if (!entries.length) return <span className="gst-audit-snapshot-empty">No details</span>;
+    return <div className="gst-audit-snapshot-fields">
+      {entries.map(([key,child])=><div className="gst-audit-snapshot-field" key={key}>
+        <span>{fieldLabel(key)}</span>
+        <div><SnapshotValue value={child} fieldKey={key}/></div>
+      </div>)}
+    </div>;
+  }
+  return <span className={fieldKey.toLowerCase().endsWith("id")||fieldKey==="_id"?"gst-audit-snapshot-id":""}>
+    {displayValue(value,fieldKey)}
+  </span>;
 }
 
 function recordNumber(row) {
@@ -199,10 +226,19 @@ export default function BusinessAuditReport() {
                 {changes.map((change,index)=><tr key={`${change.field}-${index}`}><td><b>{change.field}</b></td><td className="gst-audit-before">{displayValue(change.before,change.key)}</td><td className="gst-audit-after">{displayValue(change.after,change.key)}</td></tr>)}
                 {!changes.length&&<tr><td colSpan="3" className="gst-empty">Field-level snapshots were not captured for this record.</td></tr>}
               </tbody></table></div>
-              <details style={{marginTop:10}}><summary style={{cursor:"pointer",fontWeight:700}}>Full record snapshots</summary><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginTop:8}}>
-                <div><b>Before</b><pre style={{maxHeight:340,overflow:"auto",padding:12,background:"#f3f7f9",border:"1px solid #d7e1e6",fontSize:10}}>{jsonText(row.metadata?.before)}</pre></div>
-                <div><b>After</b><pre style={{maxHeight:340,overflow:"auto",padding:12,background:"#f3f7f9",border:"1px solid #d7e1e6",fontSize:10}}>{jsonText(row.metadata?.after)}</pre></div>
-              </div></details>
+              <details className="gst-audit-snapshots">
+                <summary>Full record snapshots <span>View every saved field</span></summary>
+                <div className="gst-audit-snapshot-grid">
+                  <section className="gst-audit-snapshot-panel gst-audit-before">
+                    <header><span>BEFORE</span><strong>Previous record values</strong></header>
+                    <SnapshotValue value={row.metadata?.before}/>
+                  </section>
+                  <section className="gst-audit-snapshot-panel gst-audit-after">
+                    <header><span>AFTER</span><strong>Saved record values</strong></header>
+                    <SnapshotValue value={row.metadata?.after}/>
+                  </section>
+                </div>
+              </details>
               <div style={{marginTop:10,color:"#71838e",fontSize:10}}>Route: {row.metadata?.path||"-"} · {row.metadata?.message||""}</div>
             </div></td></tr>}
             </React.Fragment>})}
