@@ -57,7 +57,7 @@ const blank = {
   },
   product: {
     name:"", code:"", itemType:"FINISHED_GOODS", hsn:"", unit:"KG",
-    gstRate:"", purchaseRate:"", salesRate:"", openingQty:"", openingValue:"",
+    gstRate:"", purchaseRate:"", salesRate:"", openingQty:"", openingRate:"", openingValue:"",
     stockLedgerId:"", under:"Stock-in-Hand", locationId:"", masterType:"PRODUCT"
   },
   location: {
@@ -260,7 +260,11 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
   function edit(row) {
     setMode("form");
     setEditing(row);
-    setForm({...blank[type], ...row});
+    const form={...blank[type],...row};
+    if(type==="product"&&!row.openingRate&&Number(row.openingQty)>0){
+      form.openingRate=Number(row.openingValue||0)/Number(row.openingQty);
+    }
+    setForm(form);
     setMessage("");
     setError("");
   }
@@ -306,6 +310,9 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
   function update(key, value) {
     setForm(f => {
       const next = {...f, [key]:value};
+      if(type==="product"&&(key==="openingQty"||key==="openingRate")){
+        next.openingValue=(Number(next.openingQty)||0)*(Number(next.openingRate)||0);
+      }
       if (type === "location" && key === "state") next.gstStateCode = GST_STATE_CODES[value] || "";
       return next;
     });
@@ -602,8 +609,9 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
                 <div className="field"><label>Under / Stock Ledger</label><SearchableSelect value={form.under||"Stock-in-Hand"} options={asOptions(["Stock-in-Hand",...groups.map(group=>typeof group==="string"?group:group.name).filter(Boolean)])} onChange={value=>update("under",value)} placeholder="Search stock groups..." /></div>
                 <div className="field"><label>Purchase Rate</label><input type="number" value={form.purchaseRate||""} onChange={e=>update("purchaseRate",e.target.value)}/></div>
                 <div className="field"><label>Sales Rate</label><input type="number" value={form.salesRate||""} onChange={e=>update("salesRate",e.target.value)}/></div>
-                <div className="field"><label>Opening Qty</label><input type="number" value={form.openingQty||""} onChange={e=>update("openingQty",e.target.value)}/></div>
-                <div className="field"><label>Opening Value</label><input type="number" value={form.openingValue||""} onChange={e=>update("openingValue",e.target.value)}/></div>
+                <div className="field"><label>Opening Qty</label><input type="number" min="0" step="0.000001" value={form.openingQty||""} onChange={e=>update("openingQty",e.target.value)}/></div>
+                <div className="field"><label>Opening Rate (₹ / Unit)</label><input type="number" min="0" step="0.0001" value={form.openingRate||""} onChange={e=>update("openingRate",e.target.value)}/></div>
+                <div className="field"><label>Opening Value (₹)</label><input type="number" value={form.openingValue||0} readOnly/><div className="hint">Opening Qty × Opening Rate</div></div>
                 <div className="field"><label>Location</label><SearchableSelect value={form.locationId||""} options={asOptions([{value:"",label:"Select Location"},...locations.map(x=>({value:x._id,label:x.name}))])} onChange={value=>update("locationId",value)} placeholder="Search locations..." /></div>
               </>}
 
