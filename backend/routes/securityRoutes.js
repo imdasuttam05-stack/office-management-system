@@ -234,7 +234,8 @@ router.get(
       if(fromDate&&toDate&&toDate<fromDate)return res.status(400).json({success:false,message:"End date must be on or after start date."});
       if (month) {
         const monthStart = new Date(`${month}-01T00:00:00+05:30`);
-        const nextMonth = new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,1));
+        const [monthYear, monthNumber] = month.split("-").map(Number);
+        const nextMonth = new Date(Date.UTC(monthYear,monthNumber,1));
         const monthEnd = new Date(`${nextMonth.toISOString().slice(0,7)}-01T00:00:00+05:30`);
         filter.createdAt = {$gte:monthStart,$lt:monthEnd};
       }
