@@ -1,6 +1,7 @@
 import RawMaterialPurchase from "../models/RawMaterialPurchase.js";
 import InventoryStock from "../models/InventoryStock.js";
 import InventoryCounter from "../models/InventoryCounter.js";
+import Company from "../models/Company.js";
 import ManufacturingJobOrder from "../models/ManufacturingJobOrder.js";
 import SalesInvoice from "../models/SalesInvoice.js";
 import GstLedger from "../models/GstLedger.js";
@@ -28,6 +29,12 @@ const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
 "01":"Jammu and Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh","05":"Uttarakhand","06":"Haryana","07":"Delhi","08":"Rajasthan","09":"Uttar Pradesh","10":"Bihar","11":"Sikkim","12":"Arunachal Pradesh","13":"Nagaland","14":"Manipur","15":"Mizoram","16":"Tripura","17":"Meghalaya","18":"Assam","19":"West Bengal","20":"Jharkhand","21":"Odisha","22":"Chhattisgarh","23":"Madhya Pradesh","24":"Gujarat","26":"Dadra and Nagar Haveli and Daman and Diu","27":"Maharashtra","28":"Andhra Pradesh","29":"Karnataka","30":"Goa","31":"Lakshadweep","32":"Kerala","33":"Tamil Nadu","34":"Puducherry","35":"Andaman and Nicobar Islands","36":"Telangana","37":"Andhra Pradesh","38":"Ladakh"
 };
+function gstStateCode(state,gstin=""){
+ const code=clean(gstin).slice(0,2);
+ if(GST_STATE[code])return code;
+ const normalized=clean(state).toLowerCase().replace(/[^a-z]/g,"");
+ return Object.entries(GST_STATE).find(([,name])=>name.toLowerCase().replace(/[^a-z]/g,"")===normalized)?.[0]||"";
+}
 async function next(key,prefix){
  const y=new Date().getFullYear();
  const counterKey=`${key}_${y}`;
@@ -711,16 +718,41 @@ export async function createSale(req,res){
     const b=req.body||{},location=clean(b.location),customerName=clean(b.customerName),lines=Array.isArray(b.lines)?b.lines:[];
     if(!location||!customerName||!lines.length)return res.status(400).json({success:false,message:"Location, customer and at least one line are required."});
     const companyId=req.user?.companyId||null;
-    const customer=await CustomerMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:customerName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]});
+    const locationScope={$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]};
+    const locationMaster=await LocationMaster.findOne({$and:[/^[a-f\d]{24}$/i.test(location)?{_id:location}:{name:location},locationScope,{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).lean();
+    if(!locationMaster)return res.status(400).json({success:false,message:"Select a valid Location."});
+    const company=companyId?await Company.findById(companyId).select("state gstin").lean():null;
+    const sourceState=clean(locationMaster.state)||clean(company?.state)||GST_STATE[gstStateCode("",company?.gstin)]||"";
+    const customerFilter={$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]};
+    if(/^[a-f\d]{24}$/i.test(clean(b.partyId)))customerFilter.$and.push({_id:clean(b.partyId)});
+    else customerFilter.$and.push({name:customerName});
+    const customer=await CustomerMaster.findOne(customerFilter);
     if(!customer)return res.status(400).json({success:false,message:"Customer / Party master not found. Create the customer first."});
+    const customerGSTIN=clean(b.customerGSTIN||customer.gstin).toUpperCase();
+    const customerState=GST_STATE[gstStateCode("",customerGSTIN)]||clean(customer.state)||clean(b.customerState);
+    const sourceStateCode=gstStateCode(sourceState,sourceState?"":company?.gstin),customerStateCode=gstStateCode(customerState,customerGSTIN);
     const customerLedger=customer.ledgerId?await Ledger.findById(customer.ledgerId):await ensureLedger({name:customer.name,groupName:"Sundry Debtors",nature:"Asset",req,gstin:customer.gstin,address:customer.address,phone:customer.phone});
     if(!customer.ledgerId){customer.ledgerId=customerLedger._id;await customer.save();}
     const salesLedger=await ensureLedger({name:"Sales",groupName:"Sales",nature:"Income",req});
     const outputCgst=await ensureGstLedger("Output CGST",req),outputSgst=await ensureGstLedger("Output SGST",req),outputIgst=await ensureGstLedger("Output IGST",req);
     const built=[];let subtotal=0,cg=0,sg=0,ig=0;
-    for(const x of lines){const qty=num(x.qty),rate=num(x.rate),discount=Math.min(Math.max(num(x.discount),0),qty*rate),taxable=r2(qty*rate-discount),gstRate=Math.max(0,num(x.gstRate)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),c=gstType==="CGST_SGST"?r2(gst/2):0,s=gstType==="CGST_SGST"?r2(gst-c):0,i=gstType==="IGST"?gst:0;const requestedItemType=["FINISHED_GOODS","PACKED_GOODS"].includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";let st=await InventoryStock.findOne({companyId,location,itemType:requestedItemType,itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});if(!st && requestedItemType==="PACKED_GOODS") st=await InventoryStock.findOne({companyId,location,itemType:"FINISHED_GOODS",itemName:clean(x.itemName),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});if(!st||num(st.qty)<qty)throw new Error(`Insufficient ${requestedItemType===`PACKED_GOODS`?"packing":"finished goods"} stock for ${x.itemName}.`);built.push({...x,itemName:clean(x.itemName),itemType:st.itemType,stockId:st._id,unit:clean(x.unit)||st.unit,qty,rate,discount,taxableAmount:taxable,hsn:clean(x.hsn)||st.hsn,gstRate,gstType,cgst:c,sgst:s,igst:i,lineTotal:r2(taxable+c+s+i),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});subtotal+=taxable;cg+=c;sg+=s;ig+=i;}
+    for(const x of lines){
+      const itemName=clean(x.itemName),requestedItemType=["FINISHED_GOODS","PACKED_GOODS"].includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";
+      const itemTypes=requestedItemType==="PACKED_GOODS"?["PACKED_GOODS","FINISHED_GOODS"]:["FINISHED_GOODS","PACKED_GOODS"];
+      const itemMaster=await InventoryItemMaster.findOne({companyId,name:itemName,itemType:{$in:itemTypes}}).select("defaultGstRate hsn").lean();
+      const qty=num(x.qty),rate=num(x.rate),discount=Math.min(Math.max(num(x.discount),0),qty*rate),taxable=r2(qty*rate-discount);
+      const gstRate=Math.max(0,num(x.gstRate)||num(itemMaster?.defaultGstRate));
+      if(gstRate>0&&(!sourceStateCode||!customerStateCode))throw new Error("GST cannot be calculated automatically. Add the state to the selected location and customer / party.");
+      const gstType=gstRate<=0?"NONE":sourceStateCode===customerStateCode?"CGST_SGST":"IGST";
+      const gst=gstType==="NONE"?0:r2(taxable*gstRate/100),c=gstType==="CGST_SGST"?r2(gst/2):0,s=gstType==="CGST_SGST"?r2(gst-c):0,i=gstType==="IGST"?gst:0;
+      let st=await InventoryStock.findOne({companyId,location,itemType:requestedItemType,itemName,batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
+      if(!st&&requestedItemType==="PACKED_GOODS")st=await InventoryStock.findOne({companyId,location,itemType:"FINISHED_GOODS",itemName,batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
+      if(!st||num(st.qty)<qty)throw new Error(`Insufficient ${requestedItemType==="PACKED_GOODS"?"packing":"finished goods"} stock for ${itemName}.`);
+      built.push({...x,itemName,itemType:st.itemType,stockId:st._id,unit:clean(x.unit)||st.unit,qty,rate,discount,taxableAmount:taxable,hsn:clean(x.hsn)||st.hsn||itemMaster?.hsn||"",gstRate,gstType,cgst:c,sgst:s,igst:i,lineTotal:r2(taxable+c+s+i),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
+      subtotal+=taxable;cg+=c;sg+=s;ig+=i;
+    }
     const invoiceNo=await next("SALE","SAL");
-    const inv=await SalesInvoice.create({invoiceNo,companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName,customerGSTIN:clean(b.customerGSTIN||customer.gstin).toUpperCase(),customerState:clean(b.customerState||customer.state),supplierState:clean(b.supplierState),supplyType:clean(b.customerGSTIN||customer.gstin)?"B2B":"B2C",placeOfSupply:clean(b.placeOfSupply),lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig),remarks:clean(b.remarks),createdBy:req.user._id});
+    const inv=await SalesInvoice.create({invoiceNo,companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig),remarks:clean(b.remarks),createdBy:req.user._id});
     for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
     const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal,narration:`Sales ${invoiceNo}`}];
     if(cg)voucherLines.push({ledger:outputCgst._id,debit:0,credit:cg,narration:`Output CGST ${invoiceNo}`});
