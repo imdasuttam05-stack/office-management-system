@@ -9,6 +9,25 @@ const monthStart = `${today.slice(0, 7)}-01`;
 const dateTime = value => value ? new Date(value).toLocaleString("en-IN") : "-";
 const csvValue = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
 const jsonText = value => value == null ? "-" : JSON.stringify(value, null, 2);
+const valueText = value => value == null ? "-" : typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+const ignoredAuditFields = new Set(["_id", "__v", "createdAt", "updatedAt", "companyId", "financialYear", "createdBy", "updatedBy"]);
+const fieldLabel = value => ({
+  voucherNo:"Voucher No.", productionNo:"Production No.", jobNo:"Job Order No.", docNo:"Document No.",
+  partyLedgerName:"Party Ledger", partyLedger:"Party Ledger ID", ledgerName:"Ledger",
+  lines:"Ledger Entries", totalDebit:"Total Debit", totalCredit:"Total Credit",
+  openingBalance:"Opening Balance", openingType:"Balance Type", referenceNo:"Reference No.",
+}[value] || value.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, letter => letter.toUpperCase()));
+function changedFields(row) {
+  const before = row.metadata?.before || {};
+  const after = row.metadata?.after || {};
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys]
+    .filter(key => !ignoredAuditFields.has(key) && JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null))
+    .map(key => ({field:key,before:before[key],after:after[key]}));
+}
+const recordLabel = row => row.metadata?.recordLabel || row.metadata?.after?.voucherNo ||
+  row.metadata?.before?.voucherNo || row.metadata?.after?.name || row.metadata?.before?.name ||
+  row.metadata?.after?.productionNo || row.metadata?.before?.productionNo || "-";
 
 export default function BusinessAuditReport() {
   const navigate = useNavigate();
@@ -65,10 +84,10 @@ export default function BusinessAuditReport() {
       return;
     }
     const rows = [
-      ["Date / Time","User","Email","Role","Action","Entity","Record ID","Path","Before","After"],
+      ["Date / Time","User","Email","Role","Action","Entity","Entry / Record","Record ID","Path","Before","After"],
       ...allLogs.map(row=>[
         dateTime(row.createdAt),row.actorUser?.name||row.actorName||"-",row.actorUser?.email||row.actorEmail||"-",row.actorUser?.role||row.actorRole||"-",
-        row.action,row.entity,row.entityId,row.metadata?.path,jsonText(row.metadata?.before),jsonText(row.metadata?.after),
+        row.action,row.entity,recordLabel(row),row.entityId,row.metadata?.path,jsonText(row.metadata?.before),jsonText(row.metadata?.after),
       ]),
     ];
     const contents=rows.map(row=>row.map(csvValue).join(",")).join("\r\n");
@@ -110,19 +129,26 @@ export default function BusinessAuditReport() {
         </div>
         <div className="gst-report-panel">
           <div className="gst-table-heading"><div><h2>Business Change Register</h2><p>{logs.length} entries · Page {page} of {pagination.totalPages||0}</p></div><span className="gst-source-label">AUDIT TRAIL</span></div>
-          <div className="gst-table-scroll"><table className="gst-table"><thead><tr><th>Date / Time</th><th>User</th><th>Action</th><th>Entity</th><th>Record ID</th><th>Details</th></tr></thead><tbody>
+          <div className="gst-table-scroll"><table className="gst-table"><thead><tr><th>Date / Time</th><th>User</th><th>Action</th><th>Entry / Record</th><th>Entity</th><th>Record ID</th><th>Details</th></tr></thead><tbody>
             {logs.map(row=><React.Fragment key={row._id}><tr>
               <td>{dateTime(row.createdAt)}</td><td><b>{row.actorUser?.name||row.actorName||"Unknown user"}</b><small style={{display:"block",color:"#71838e"}}>{row.actorUser?.email||row.actorEmail||""} · {row.actorUser?.role||row.actorRole||""}</small></td>
-              <td><span className="gst-source-label">{row.action}</span></td><td>{row.entity||"-"}</td><td>{row.entityId||"-"}</td>
+              <td><span className="gst-source-label">{row.action}</span></td><td><b>{recordLabel(row)}</b></td><td>{row.entity||"-"}</td><td>{row.entityId||"-"}</td>
               <td><button type="button" className="gst-menu-item" style={{display:"inline-block"}} onClick={()=>setExpanded(current=>current===row._id?"":row._id)}>{expanded===row._id?"Hide":"Before / After"}</button></td>
             </tr>
-            {expanded===row._id&&<tr><td colSpan="6"><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,whiteSpace:"normal"}}>
-              <div><b>Before</b><pre style={{maxHeight:340,overflow:"auto",padding:12,background:"#f3f7f9",border:"1px solid #d7e1e6",fontSize:10}}>{jsonText(row.metadata?.before)}</pre></div>
-              <div><b>After</b><pre style={{maxHeight:340,overflow:"auto",padding:12,background:"#f3f7f9",border:"1px solid #d7e1e6",fontSize:10}}>{jsonText(row.metadata?.after)}</pre></div>
-              <div style={{gridColumn:"1/-1",color:"#71838e",fontSize:10}}>Route: {row.metadata?.path||"-"} · {row.metadata?.message||""}</div>
+            {expanded===row._id&&<tr><td colSpan="7"><div style={{whiteSpace:"normal"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}><b>{recordLabel(row)}</b><span style={{color:"#71838e",fontSize:11}}>{row.actorUser?.name||row.actorName||"Unknown user"} · {row.actorUser?.role||row.actorRole||""}</span></div>
+              <div style={{overflowX:"auto"}}><table className="gst-table"><thead><tr><th>Field / Particular</th><th>Before</th><th>After</th></tr></thead><tbody>
+                {changedFields(row).map(change=><tr key={change.field}><td><b>{fieldLabel(change.field)}</b></td><td><pre style={{whiteSpace:"pre-wrap",margin:0,fontSize:10}}>{valueText(change.before)}</pre></td><td><pre style={{whiteSpace:"pre-wrap",margin:0,fontSize:10}}>{valueText(change.after)}</pre></td></tr>)}
+                {!changedFields(row).length&&<tr><td colSpan="3" className="gst-empty">Field-level snapshots were not captured for this record.</td></tr>}
+              </tbody></table></div>
+              <details style={{marginTop:10}}><summary style={{cursor:"pointer",fontWeight:700}}>Full record snapshots</summary><div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginTop:8}}>
+                <div><b>Before</b><pre style={{maxHeight:340,overflow:"auto",padding:12,background:"#f3f7f9",border:"1px solid #d7e1e6",fontSize:10}}>{jsonText(row.metadata?.before)}</pre></div>
+                <div><b>After</b><pre style={{maxHeight:340,overflow:"auto",padding:12,background:"#f3f7f9",border:"1px solid #d7e1e6",fontSize:10}}>{jsonText(row.metadata?.after)}</pre></div>
+              </div></details>
+              <div style={{marginTop:10,color:"#71838e",fontSize:10}}>Route: {row.metadata?.path||"-"} · {row.metadata?.message||""}</div>
             </div></td></tr>}
             </React.Fragment>)}
-            {!logs.length&&<tr><td colSpan="6" className="gst-empty">{loading?"Loading audit records...":"No audit records found for the selected filters."}</td></tr>}
+            {!logs.length&&<tr><td colSpan="7" className="gst-empty">{loading?"Loading audit records...":"No audit records found for the selected filters."}</td></tr>}
           </tbody></table></div>
           <footer className="gst-table-footer">Shows successful changes only. Before/after values are sanitized to exclude credentials. 100 records per page.</footer>
         </div>
