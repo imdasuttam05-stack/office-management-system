@@ -295,7 +295,7 @@ export async function createBom(req,res){
   const costItemsTotal=r2(costItems.reduce((sum,item)=>sum+item.cost,0));
   const labour=Math.max(0,num(b.labourCost)),packing=Math.max(0,num(b.packingCost)),other=Math.max(0,num(b.otherCost));
   const total=r2(materialCost+costItemsTotal+labour+packing+other),outputQty=num(b.outputQty)||1,per=r2(total/outputQty);
-  const values={name:clean(b.name),outputItemId:out._id,outputItemName:out.name,outputUnit:out.unit,outputQty,materials:lines,costItems,labourCost:labour,packingCost:packing,otherCost:other,totalCost:total,costPerUnit:per,active:true,createdBy:req.user._id};
+  const values={name:clean(b.name),outputItemId:out._id,outputItemName:out.name,outputUnit:packageWeightKg(out.name)>0?"PCS":out.unit,outputQty,materials:lines,costItems,labourCost:labour,packingCost:packing,otherCost:other,totalCost:total,costPerUnit:per,active:true,createdBy:req.user._id};
   let row;
   if(b._id){
    row=await BOM.findOneAndUpdate({_id:b._id,companyId},{$set:values},{new:true,runValidators:true});
