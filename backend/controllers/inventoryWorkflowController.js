@@ -354,6 +354,9 @@ export async function getStockLedger(req,res){
    movement.balanceQty=r2(balance);
   }
   items.reverse();
+  for(const movement of items){
+   if(movement.sourceType==="OPENING_STOCK")movement.sourceNo=movement.itemName;
+  }
   const currentStock=filter.itemName&&filter.itemType&&filter.location?await InventoryStock.findOne(filter).lean():null;
   res.json({success:true,items,stock:currentStock});
  }catch(e){
