@@ -76,6 +76,12 @@
 .gst-empty { height: 112px; text-align: center; color: #82919a !important; }
 .gst-table-footer { padding: 10px 12px; border-top: 1px solid #e7edef; color: #85939a; font-size: 10px; }
 .gst-disclaimer { margin: 13px 0 0; color: #788891; font-size: 11px; line-height: 1.5; }
+.gst-audit-diff { overflow-x: auto; border: 1px solid #d7e1e6; }
+.gst-audit-diff .gst-table { min-width: 620px; table-layout: fixed; white-space: normal; }
+.gst-audit-diff .gst-table th:first-child, .gst-audit-diff .gst-table td:first-child { width: 34%; }
+.gst-audit-diff .gst-table td { overflow-wrap: anywhere; vertical-align: top; line-height: 1.55; }
+.gst-audit-diff .gst-audit-before { color: #8a4b42; background: #fff8f6; }
+.gst-audit-diff .gst-audit-after { color: #24685f; background: #f2faf7; }
 
 @media (max-width: 920px) {
   .gst-workspace { grid-template-columns: 220px minmax(0, 1fr); }
