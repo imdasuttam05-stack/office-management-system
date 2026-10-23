@@ -11,6 +11,12 @@ import InventoryMovement from "../models/InventoryMovement.js";
 
 const clean = (v) => String(v ?? "").trim();
 const num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+const packageWeightKg = name => {
+  const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);
+  if(!match)return 0;
+  const amount=Number(match[1]);
+  return /^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000;
+};
 const objectIdOrNull = (v) => {
   const value = clean(v);
   return /^[a-fA-F0-9]{24}$/.test(value) ? value : null;
@@ -54,8 +60,9 @@ export async function ensureProductOpeningStock(master, ctx={}, {requireLocation
     openingDate=new Date(Date.UTC(Number(financialYearMatch[1]),3,1));
   }
   const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)?master.itemType:"RAW_MATERIAL";
-  const itemName=clean(master.name),unit=clean(master.unit)||"KG",hsn=clean(master.hsn);
-  const openingValue=num(master.openingValue),target=openingQty>0?{companyId,location:String(location._id),itemType,itemName,unit,hsn,qty:openingQty,value:openingValue}:null;
+  const itemName=clean(master.name),unit=clean(master.unit)||"KG",hsn=clean(master.hsn),packetWeight=packageWeightKg(itemName);
+  const stockQty=packetWeight>0?openingQty*packetWeight:openingQty,stockUnit=packetWeight>0?"KG":unit;
+  const openingValue=num(master.openingValue),target=openingQty>0?{companyId,location:String(location._id),itemType,itemName,unit:stockUnit,hsn,qty:stockQty,value:openingValue}:null;
   const previous=existing?{companyId:existing.companyId||null,location:existing.location,itemType:existing.itemType,itemName:existing.itemName,unit:existing.unit||"KG",hsn:"",qty:num(existing.qtyIn)-num(existing.qtyOut),value:num(existing.valueIn)-num(existing.valueOut)}:null;
   const stockKey=row=>[String(row.companyId||""),row.location,row.itemType,row.itemName,"",""].join("|");
   const stockUpdates=new Map();
@@ -79,7 +86,7 @@ export async function ensureProductOpeningStock(master, ctx={}, {requireLocation
   }
   const nextStockByKey=new Map();
   for(const {key,row,filter,safeQty,safeValue} of stockPlans){
-    await InventoryStock.findOneAndUpdate(filter,{$set:{qty:safeQty,stockValue:safeValue,averageRate:safeQty?safeValue/safeQty:0,...(row===target?{unit,hsn}:{})},$setOnInsert:{companyId:row.companyId||null,location:row.location,itemType:row.itemType,itemName:row.itemName,batchNo:"",barcode:""}},{upsert:true,new:true,setDefaultsOnInsert:true});
+    await InventoryStock.findOneAndUpdate(filter,{$set:{qty:safeQty,stockValue:safeValue,averageRate:safeQty?safeValue/safeQty:0,...(row===target?{unit:stockUnit,hsn}:{})},$setOnInsert:{companyId:row.companyId||null,location:row.location,itemType:row.itemType,itemName:row.itemName,batchNo:"",barcode:""}},{upsert:true,new:true,setDefaultsOnInsert:true});
     nextStockByKey.set(key,safeQty);
   }
   if(!target){
@@ -87,7 +94,7 @@ export async function ensureProductOpeningStock(master, ctx={}, {requireLocation
     return;
   }
   const targetBalance=nextStockByKey.get(stockKey(target))||0;
-  const movementData={companyId,date:openingDate,location:target.location,itemName,itemType,unit,qtyIn:openingQty,qtyOut:0,valueIn:openingValue,valueOut:0,balanceQty:targetBalance,sourceType:"OPENING_STOCK",sourceNo,referenceNo:clean(master.code)||itemName,narration:`Opening stock for ${itemName}`,createdBy:existing?.createdBy||user._id};
+  const movementData={companyId,date:openingDate,location:target.location,itemName,itemType,unit:stockUnit,qtyIn:stockQty,qtyOut:0,valueIn:openingValue,valueOut:0,balanceQty:targetBalance,sourceType:"OPENING_STOCK",sourceNo,referenceNo:clean(master.code)||itemName,narration:`Opening stock for ${itemName}`,createdBy:existing?.createdBy||user._id};
   if(existing)await InventoryMovement.findByIdAndUpdate(existing._id,{$set:movementData});
   else{
     try{await InventoryMovement.create(movementData)}
