@@ -4,6 +4,7 @@ import AccountsMasterCatalog from "./AccountsMasterCatalog.jsx";
 import AccountsTransactionCenter from "./AccountsTransactionCenter.jsx";
 import Accounting from "./Accounting.jsx";
 import JobOrderStockReport from "./JobOrderStockReport.jsx";
+import BusinessAuditReport from "./BusinessAuditReport.jsx";
 
 const masterTabs = [
   ["group", "Group", "F4"],
@@ -329,6 +330,7 @@ export default function AccountsMasters() {
             <button className={`am-section-btn ${section === "master" ? "active" : ""}`} onClick={() => setSection("master")}>Masters</button>
             <button className={`am-section-btn ${section === "transactions" ? "active" : ""}`} onClick={() => setSection("transactions")}>Voucher / Operations</button>
             <button className={`am-section-btn ${section === "ledger" ? "active" : ""}`} onClick={() => setSection("ledger")}>Accounts Ledger</button>
+            <button className={`am-section-btn ${section === "audit" ? "active" : ""}`} onClick={() => setSection("audit")}>Activity Log</button>
             <button className="am-section-btn" onClick={() => navigate("/dashboard")}>Dashboard</button>
           </div>
           {section === "master" && (
@@ -402,6 +404,7 @@ export default function AccountsMasters() {
         )}
 
         {section === "ledger" && <Accounting key={ledgerTab} initialTab={ledgerTab} />}
+        {section === "audit" && <BusinessAuditReport />}
       </main>
       </div>
     </div>
