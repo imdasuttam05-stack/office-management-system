@@ -112,15 +112,38 @@ router.get(
       const rawPage = Number(req.query.page || 1);
       const page = Math.max(1, Number.isFinite(rawPage) ? rawPage : 1);
       const skip = (page - 1) * limit;
+      const filter = {};
+      const companyId = String(req.get("X-Company-Id") || req.user?.companyId || "").trim();
+      if (companyId) filter.companyId = companyId;
+      for (const field of ["action", "entity"]) {
+        const value = String(req.query[field] || "").trim();
+        if (value) filter[field] = {$regex:value.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),$options:"i"};
+      }
+      if (req.query.actorUser) filter.actorUser = req.query.actorUser;
+      const from = String(req.query.from || "").trim(), to = String(req.query.to || "").trim();
+      if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) {
+        return res.status(400).json({success:false,message:"Enter valid audit report dates."});
+      }
+      const fromDate=from?new Date(`${from}T00:00:00.000Z`):null,toDate=to?new Date(`${to}T00:00:00.000Z`):null;
+      if ((fromDate&&(!Number.isFinite(fromDate.getTime())||fromDate.toISOString().slice(0,10)!==from)) || (toDate&&(!Number.isFinite(toDate.getTime())||toDate.toISOString().slice(0,10)!==to))) {
+        return res.status(400).json({success:false,message:"Enter valid audit report dates."});
+      }
+      if(fromDate&&toDate&&toDate<fromDate)return res.status(400).json({success:false,message:"End date must be on or after start date."});
+      if (fromDate || toDate) filter.createdAt = {...(fromDate?{$gte:fromDate}:{}),...(toDate?{$lt:new Date(toDate.getTime()+86400000)}:{})};
+      const search = String(req.query.search || "").trim();
+      if (search) {
+        const expression = {$regex:search.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),$options:"i"};
+        filter.$and = [...(filter.$and||[]),{$or:[{action:expression},{entity:expression},{actorName:expression},{actorEmail:expression},{"metadata.path":expression},{"metadata.message":expression},{"metadata.recordLabel":expression},{"metadata.before.voucherNo":expression},{"metadata.after.voucherNo":expression},{"metadata.before.name":expression},{"metadata.after.name":expression}]}];
+      }
 
       const [logs, total] = await Promise.all([
-        AuditLog.find({})
+        AuditLog.find(filter)
           .populate("actorUser", "name email role isMainAdmin")
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limit)
           .lean(),
-        AuditLog.countDocuments({}),
+        AuditLog.countDocuments(filter),
       ]);
 
       return res.json({
