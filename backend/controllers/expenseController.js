@@ -1,7 +1,5 @@
 import mongoose from "mongoose";
 import Expense from "../models/Expense.js";
-import AuditLog from "../models/AuditLog.js";
-import { getClientIp } from "../utils/security.js";
 
 /* =========================================================
    HELPERS
@@ -88,41 +86,6 @@ function safeExpense(expense) {
   delete data.__v;
 
   return data;
-}
-
-/* =========================================================
-   AUDIT LOG
-========================================================= */
-
-async function audit(
-  req,
-  action,
-  entityId = null,
-  metadata = {}
-) {
-  try {
-    await AuditLog.create({
-      actorUser: req.user?._id || null,
-
-      action,
-
-      entity: "Expense",
-
-      entityId,
-
-      metadata,
-
-      ip: getClientIp(req),
-
-      userAgent:
-        req.headers["user-agent"] || "",
-    });
-  } catch (error) {
-    console.error(
-      "AUDIT LOG ERROR:",
-      error.message
-    );
-  }
 }
 
 /* =========================================================
@@ -368,19 +331,6 @@ export const createExpense = async (
             ? new Date()
             : null,
       });
-
-    await audit(
-      req,
-      "EXPENSE_CREATED",
-      expense._id,
-      {
-        amount:
-          expenseAmount,
-
-        duplicateOverride:
-          isOverride,
-      }
-    );
 
     return res.status(201).json({
       success: true,
@@ -799,12 +749,6 @@ export const updateExpense = async (
 
     await expense.save();
 
-    await audit(
-      req,
-      "EXPENSE_UPDATED",
-      expense._id
-    );
-
     return res.status(200).json({
       success: true,
 
@@ -894,12 +838,6 @@ export const deleteExpense = async (
       req.user._id;
 
     await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_DELETED",
-      expense._id
-    );
 
     return res.status(200).json({
       success: true,
@@ -1003,12 +941,6 @@ export const approveExpense = async (
       req.user._id;
 
     await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_APPROVED",
-      expense._id
-    );
 
     return res.status(200).json({
       success: true,
@@ -1123,15 +1055,6 @@ export const rejectExpense = async (
       req.user._id;
 
     await expense.save();
-
-    await audit(
-      req,
-      "EXPENSE_REJECTED",
-      expense._id,
-      {
-        reason,
-      }
-    );
 
     return res.status(200).json({
       success: true,

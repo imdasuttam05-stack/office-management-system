@@ -2,7 +2,6 @@ import bcrypt from "bcrypt";
 import mongoose from "mongoose";
 import User from "../models/User.js";
 import { getDefaultPermissionsForUser } from "../config/permissions.js";
-import { writeAuditLog } from "../services/auditService.js";
 
 const BCRYPT_ROUNDS = Math.max(
   10,
@@ -243,19 +242,6 @@ export const createUser = async (req, res) => {
       isVerified: true,
       isActive: true,
       passwordChangedAt: new Date(),
-    });
-
-    await writeAuditLog({
-      req,
-      actorUser: actor,
-      action: "USER_CREATED",
-      entity: "User",
-      entityId: user._id,
-      metadata: {
-        role: user.role,
-        isMainAdmin: user.isMainAdmin,
-        permissions: user.isMainAdmin ? ["*"] : permissions,
-      },
     });
 
     return res.status(201).json({
@@ -506,20 +492,6 @@ export const updateUser = async (req, res) => {
     }
 
     await user.save();
-
-    await writeAuditLog({
-      req,
-      actorUser: req.user,
-      action: "USER_UPDATED",
-      entity: "User",
-      entityId: user._id,
-      metadata: {
-        role: user.role,
-        isMainAdmin: user.isMainAdmin,
-        isActive: user.isActive,
-        passwordChanged: Boolean(password),
-      },
-    });
 
     return res.json({
       success: true,

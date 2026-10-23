@@ -16,6 +16,7 @@ import InventoryMovement from "../models/InventoryMovement.js";
 import ProductionEntry from "../models/ProductionEntry.js";
 import BOM from "../models/BOM.js";
 import InventoryWorkflow from "../models/InventoryWorkflow.js";
+import mongoose from "mongoose";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function q6(v){return Math.round((num(v)+Number.EPSILON)*1000000)/1000000} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
 function packetWeightKg(name){const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);if(!match)return 0;const amount=Number(match[1]);return q6(/^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000)}
 function packetUnit(unit){return ["PC","PCS","PACKET","PACKETS","PIECE","PIECES"].includes(clean(unit).toUpperCase())}
@@ -41,12 +42,12 @@ async function next(key,prefix){
  if(!c)throw new Error(`Unable to create or update inventory counter ${counterKey}.`);
  return `${prefix}-${y}-${String(c.seq).padStart(5,"0")}`;
 }
-async function adjustStock({companyId,location,itemType,itemName,unit,qty,value,mode="ADD",hsn="",batchNo="",barcode="",mfgDate=null,expiryDate=null}){
+async function adjustStock({companyId,location,itemType,itemName,unit,qty,value,mode="ADD",hsn="",batchNo="",barcode="",mfgDate=null,expiryDate=null,session=null}){
  const filter={companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""};
- const old=await InventoryStock.findOne(filter).select("qty stockValue").lean(); const oq=num(old?.qty), ov=num(old?.stockValue); const q=mode==="ADD"?qty:-qty; const v=mode==="ADD"?value:-value;
+ const oldQuery=InventoryStock.findOne(filter).select("qty stockValue");if(session)oldQuery.session(session);const old=await oldQuery.lean(); const oq=num(old?.qty), ov=num(old?.stockValue); const q=mode==="ADD"?qty:-qty; const v=mode==="ADD"?value:-value;
  if(mode!=="ADD" && oq+q < -0.000001) throw new Error(`Insufficient ${itemType} stock for ${itemName}. Available ${oq}, required ${qty}.`);
  const nq=q6(oq+q), nv=r2(Math.max(0,ov+v));
- await InventoryStock.findOneAndUpdate(filter,{$set:{hsn,unit,mfgDate,expiryDate,averageRate:nq?r2(nv/nq):0,lastPurchaseRate:mode==="ADD"?r2(value/(qty||1)):undefined,lastPurchaseDate:mode==="ADD"?new Date():undefined},$inc:{qty:q,stockValue:v},$setOnInsert:{companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""}},{upsert:true,new:true});
+ const update=InventoryStock.findOneAndUpdate(filter,{$set:{hsn,unit,mfgDate,expiryDate,averageRate:nq?r2(nv/nq):0,lastPurchaseRate:mode==="ADD"?r2(value/(qty||1)):undefined,lastPurchaseDate:mode==="ADD"?new Date():undefined},$inc:{qty:q,stockValue:v},$setOnInsert:{companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""}},{upsert:true,new:true});if(session)update.session(session);await update;
 }
 function buildLine(x){const qty=num(x.qty),rate=num(x.purchaseRate),gross=qty*rate,discount=Math.min(Math.max(num(x.discount),0),gross),taxable=r2(gross-discount),gstRate=Math.max(0,Math.min(num(x.gstRate),100)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),cgst=gstType==="CGST_SGST"?r2(gst/2):0,sgst=gstType==="CGST_SGST"?r2(gst-cgst):0,igst=gstType==="IGST"?gst:0;return {itemId:clean(x.itemId)||null,itemName:clean(x.itemName),hsn:clean(x.hsn),unit:clean(x.unit)||"KG",batchNo:clean(x.batchNo),barcode:clean(x.barcode),mfgDate:dt(x.mfgDate),expiryDate:dt(x.expiryDate),qty,purchaseRate:rate,discount:r2(discount),taxableAmount:taxable,gstRate,gstType,cgst,sgst,igst,lineTotal:r2(taxable+cgst+sgst+igst),landedCost:0}}
 export async function lookupPincode(req,res){
@@ -419,6 +420,88 @@ export async function createProductionEntry(req,res){
   if(complete){job.status="COMPLETED";await job.save();}
   return res.status(201).json({success:true,message:`Production ${productionNo} posted against Job Order ${job.jobNo}. Finished Goods stock increased.`,production:entry,jobStatus:job.status});
  }catch(e){console.error(e);return res.status(400).json({success:false,message:e.message||"Production entry failed."})}
+}
+
+export async function updateProductionEntry(req,res){
+ let session;
+ try{
+  session=await mongoose.startSession();
+  let result;
+  await session.withTransaction(async()=>{
+   const companyId=req.user?.companyId||null;
+   const entry=await ProductionEntry.findOne({_id:req.params.id,companyId,status:"POSTED"}).session(session);
+   if(!entry)throw Object.assign(new Error("Posted Production entry not found."),{status:404});
+   const job=await ManufacturingJobOrder.findOne({_id:entry.jobId,companyId}).session(session);
+   if(!job)throw Object.assign(new Error("Linked Job Order not found."),{status:404});
+   const body=req.body||{},oldLines=entry.outputItems||[];
+   if(!Array.isArray(body.outputItems)||!body.outputItems.length)throw new Error("At least one production output line is required.");
+   const newLines=body.outputItems.map((line,index)=>{
+    const name=clean(line.itemName),planned=(job.outputItems||[]).find(output=>(line.itemId&&String(output.itemId)===String(line.itemId))||clean(output.itemName).toLowerCase()===name.toLowerCase());
+    if(!planned)throw new Error(`${name||`Output ${index+1}`} is not an output of Job Order ${job.jobNo}.`);
+    const packetWeight=num(line.packetWeightKg)||packetWeightKg(name),packetCount=num(line.packetCount),quantity=packetWeight>0&&packetCount>0?q6(packetCount*packetWeight):num(line.qty);
+    if(!name||quantity<=0)throw new Error(`Enter a valid product and quantity for output ${index+1}.`);
+    const oldLine=oldLines[index],sameProduct=oldLine&&((line.itemId&&String(line.itemId)===String(oldLine.itemId))||clean(oldLine.itemName).toLowerCase()===name.toLowerCase()),rate=sameProduct?num(oldLine.rate)||num(planned.rate):num(planned.rate);
+    return {...line,itemName:name,itemId:line.itemId||planned.itemId||null,unit:packetWeight>0?"KG":clean(line.unit)||planned.unit||"KG",qty:quantity,packetCount,packetWeightKg:packetWeight,rate,value:r2(quantity*rate),batchNo:clean(line.batchNo),barcode:clean(line.barcode||oldLine?.barcode),mfgDate:dt(line.mfgDate),expiryDate:dt(line.expiryDate)};
+   });
+   const otherEntries=await ProductionEntry.find({jobId:job._id,companyId,status:"POSTED",_id:{$ne:entry._id}}).session(session).lean();
+   const plannedByName=new Map((job.outputItems||[]).map(line=>[clean(line.itemName).toLowerCase(),plannedOutput(line).qty]));
+   const producedByName=new Map();
+   for(const production of otherEntries)for(const line of production.outputItems||[])producedByName.set(clean(line.itemName).toLowerCase(),(producedByName.get(clean(line.itemName).toLowerCase())||0)+productionOutput(line).qty);
+   for(const line of newLines){const key=clean(line.itemName).toLowerCase(),planned=plannedByName.get(key)||0,total=(producedByName.get(key)||0)+productionOutput(line).qty;if(total>planned+0.000001)throw new Error(`${line.itemName}: updated production ${total} KG exceeds Job Order plan ${planned} KG.`);producedByName.set(key,total);}
+   const conversions=await InventoryWorkflow.find({companyId,docType:"PACKING_CONVERSION",status:"POSTED","meta.conversionLines.productionEntryId":String(entry._id)}).session(session);
+   const conversionUpdates=[];
+   for(const conversion of conversions){
+    const lines=Array.isArray(conversion.meta?.conversionLines)?conversion.meta.conversionLines:[];
+    let changed=false;
+    const updated=lines.map(converted=>{
+     if(String(converted.productionEntryId||"")!==String(entry._id))return converted;
+     const index=Number(converted.productionLineIndex??0),replacement=newLines[index];
+     if(!replacement)throw new Error(`Cannot remove production output ${converted.itemName}; it is already included in ${conversion.docNo}.`);
+     const oldWeight=num(converted.packetWeightKg),convertedKg=num(converted.qtyKg),convertedPackets=num(converted.packetCount)||(oldWeight>0?convertedKg/oldWeight:0);
+     const available=productionOutput(replacement);
+     if(available.packetWeightKg>0?convertedPackets>available.packetCount+0.000001:convertedKg>available.qty+0.000001)throw new Error(`${conversion.docNo} has already converted more ${replacement.itemName} than the edited production quantity.`);
+     const qtyKg=available.packetWeightKg>0?convertedPackets*available.packetWeightKg:convertedKg;
+     const basisQty=converted.rateBasis==="PCS"?convertedPackets:qtyKg;
+     changed=true;
+     return {...converted,itemId:replacement.itemId,itemName:replacement.itemName,packetWeightKg:available.packetWeightKg,qtyKg:q6(qtyKg),productionDate:dt(body.date)||entry.date,basisQty:q6(basisQty),amount:r2(basisQty*num(converted.rate))};
+    });
+    if(changed){
+     const total=r2(updated.reduce((sum,line)=>sum+num(line.amount),0)),voucher=await Voucher.findOne({sourceId:conversion._id,sourceType:"INVENTORY_WORKFLOW"}).session(session);
+     if(!voucher||voucher.lines.length<2)throw Object.assign(new Error(`Linked voucher for ${conversion.docNo} was not found; production was not updated.`),{status:409});
+     const [partyLine,incomeLine]=voucher.lines;
+     voucher.lines=[{...partyLine.toObject(),debit:total,credit:0},{...incomeLine.toObject(),debit:0,credit:total},...voucher.lines.slice(2)];
+     voucher.totalDebit=total;voucher.totalCredit=total;
+     conversion.totalValue=total;conversion.meta={...conversion.meta,conversionCharge:total,conversionLines:updated};
+     conversionUpdates.push({conversion,voucher});
+    }
+   }
+   const itemType=job.type==="GRADING"?"GRADE":"FINISHED_GOODS",stockChanges=new Map();
+   const accumulate=(line,sign)=>{const key=[line.itemName,clean(line.batchNo),clean(line.barcode)].join("|"),current=stockChanges.get(key)||{itemName:line.itemName,batchNo:clean(line.batchNo),barcode:clean(line.barcode),unit:line.unit||"KG",qty:0,value:0};current.qty+=sign*num(line.qty);current.value+=sign*num(line.value||num(line.qty)*num(line.rate));stockChanges.set(key,current)};
+   oldLines.forEach(line=>accumulate(line,-1));newLines.forEach(line=>accumulate(line,1));
+   for(const change of stockChanges.values()){
+    if(Math.abs(change.qty)<0.000001)continue;
+    const mode=change.qty>0?"ADD":"SUBTRACT",quantity=Math.abs(change.qty),value=Math.abs(change.value);
+    await adjustStock({companyId,location:job.location,itemType,itemName:change.itemName,unit:change.unit,qty:quantity,value,mode,batchNo:change.batchNo,barcode:change.barcode,mfgDate:dt(body.mfgDate)||entry.mfgDate,expiryDate:dt(body.expiryDate)||entry.expiryDate,session});
+    const stockQuery=InventoryStock.findOne({companyId,location:job.location,itemType,itemName:change.itemName,batchNo:change.batchNo,barcode:change.barcode}).session(session);
+    const stock=await stockQuery.lean(),qtyIn=mode==="ADD"?quantity:0,qtyOut=mode==="SUBTRACT"?quantity:0,valueIn=mode==="ADD"?value:0,valueOut=mode==="SUBTRACT"?value:0;
+    await InventoryMovement.create([{companyId,date:dt(body.date)||entry.date,location:job.location,itemName:change.itemName,itemType,unit:change.unit,qtyIn,qtyOut,valueIn,valueOut,balanceQty:num(stock?.qty),sourceType:"PRODUCTION_EDIT",sourceNo:entry.productionNo,referenceNo:job.jobNo,batchNo:change.batchNo,barcode:change.barcode,narration:`Stock correction for edited production ${entry.productionNo}`,createdBy:req.user._id}],{session});
+   }
+   for(const line of newLines){
+    await InventoryStock.updateOne({companyId,location:job.location,itemType,itemName:line.itemName,batchNo:clean(line.batchNo),barcode:clean(line.barcode)},{$set:{mfgDate:line.mfgDate||dt(body.mfgDate)||null,expiryDate:line.expiryDate||dt(body.expiryDate)||null}},{session});
+   }
+   entry.date=dt(body.date)||entry.date;entry.mfgDate=dt(body.mfgDate);entry.expiryDate=dt(body.expiryDate);entry.batchNo=clean(body.batchNo);entry.notes=clean(body.notes);entry.outputItems=newLines;
+   await entry.save({session});
+   for(const {conversion,voucher} of conversionUpdates){await voucher.save({session});await conversion.save({session});}
+   const allEntries=await ProductionEntry.find({jobId:job._id,companyId,status:"POSTED"}).session(session).lean();
+   const jobProduced=new Map();
+   for(const production of allEntries)for(const line of production.outputItems||[])jobProduced.set(clean(line.itemName).toLowerCase(),(jobProduced.get(clean(line.itemName).toLowerCase())||0)+productionOutput(line).qty);
+   const complete=(job.outputItems||[]).every(line=>(jobProduced.get(clean(line.itemName).toLowerCase())||0)>=plannedOutput(line).qty-0.000001);
+   job.status=complete?"COMPLETED":"POSTED";await job.save({session});
+   result={entry,jobStatus:job.status};
+  });
+  return res.json({success:true,message:`Production ${result.entry.productionNo} updated. Stock, Job Order progress and posted conversion values were synchronized.`,production:result.entry,jobStatus:result.jobStatus});
+ }catch(error){return res.status(error.status||400).json({success:false,message:error.message||"Production could not be updated."})}
+ finally{if(session)await session.endSession();}
 }
 
 export async function getProductionEntries(req,res){try{const filter={};if(req.user?.companyId)filter.companyId=req.user.companyId;if(req.query.jobId)filter.jobId=req.query.jobId;const items=await ProductionEntry.find(filter).sort({date:-1,createdAt:-1}).limit(300).lean();return res.json({success:true,items})}catch(e){return res.status(500).json({success:false,message:e.message})}}
