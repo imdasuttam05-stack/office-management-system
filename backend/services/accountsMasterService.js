@@ -36,9 +36,20 @@ export async function ensureProductOpeningStock(master, ctx={}, {requireLocation
   if (openingQty<=0) return;
   const {user}=requireContext(ctx);
   const companyId=user.companyId||null;
+  const financialYear=clean(ctx.financialYear||user.financialYear);
+  const financialYearMatch=/^(\d{4})-(\d{2})$/.exec(financialYear);
+  if(!financialYearMatch||Number(financialYearMatch[2])!==(Number(financialYearMatch[1])+1)%100){
+    throw new Error("A valid financial year is required to date product opening stock.");
+  }
+  const openingDate=new Date(Date.UTC(Number(financialYearMatch[1]),3,1));
   const sourceNo=`PRODUCT-${master._id}`;
   const existing=await InventoryMovement.findOne({companyId,sourceType:"OPENING_STOCK",sourceNo}).lean();
-  if(existing)return;
+  if(existing){
+    if(new Date(existing.date).getTime()!==openingDate.getTime()){
+      await InventoryMovement.findByIdAndUpdate(existing._id,{$set:{date:openingDate}});
+    }
+    return;
+  }
 
   const location=await resolveProductStockLocation(master,companyId);
   if(!location){
@@ -58,6 +69,7 @@ export async function ensureProductOpeningStock(master, ctx={}, {requireLocation
   try {
     movement=await InventoryMovement.create({
       companyId,
+      date:openingDate,
       location:String(location._id),
       itemName,
       itemType,
