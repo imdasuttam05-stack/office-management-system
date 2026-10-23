@@ -6,6 +6,8 @@ import SupplierMaster from "../models/SupplierMaster.js";
 import UnitMaster from "../models/UnitMaster.js";
 import LocationMaster from "../models/LocationMaster.js";
 import InventoryItemMaster from "../models/InventoryItemMaster.js";
+import InventoryStock from "../models/InventoryStock.js";
+import InventoryMovement from "../models/InventoryMovement.js";
 
 const clean = (v) => String(v ?? "").trim();
 const num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
@@ -18,6 +20,76 @@ const activeFilter = {$or:[{active:true},{active:{$exists:false}}]};
 function requireContext(ctx={}) {
   if (!ctx.user?._id) throw new Error("Authentication is required for master changes.");
   return ctx;
+}
+
+async function resolveProductStockLocation(master, companyId) {
+  const accountLocation=master.locationId
+    ? await AccountsMaster.findOne({_id:master.locationId,masterType:"location"}).select("name").lean()
+    : null;
+  return accountLocation
+    ? LocationMaster.findOne({companyId,name:accountLocation.name}).select("_id name").lean()
+    : null;
+}
+
+export async function ensureProductOpeningStock(master, ctx={}, {requireLocation=false}={}) {
+  const openingQty=num(master.openingQty);
+  if (openingQty<=0) return;
+  const {user}=requireContext(ctx);
+  const companyId=user.companyId||null;
+  const sourceNo=`PRODUCT-${master._id}`;
+  const existing=await InventoryMovement.findOne({companyId,sourceType:"OPENING_STOCK",sourceNo}).lean();
+  if(existing)return;
+
+  const location=await resolveProductStockLocation(master,companyId);
+  if(!location){
+    if(requireLocation)throw new Error("Select a valid Location for the product opening stock.");
+    return;
+  }
+
+  const itemType=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS","REJECTED"].includes(master.itemType)
+    ? master.itemType
+    : "RAW_MATERIAL";
+  const itemName=clean(master.name);
+  const unit=clean(master.unit)||"KG";
+  const hsn=clean(master.hsn);
+  const openingValue=num(master.openingValue);
+  const stockFilter={companyId,location:String(location._id),itemType,itemName,batchNo:"",barcode:""};
+  let movement;
+  try {
+    movement=await InventoryMovement.create({
+      companyId,
+      location:String(location._id),
+      itemName,
+      itemType,
+      unit,
+      qtyIn:openingQty,
+      valueIn:openingValue,
+      balanceQty:0,
+      sourceType:"OPENING_STOCK",
+      sourceNo,
+      referenceNo:clean(master.code)||itemName,
+      narration:`Opening stock for ${itemName}`,
+      createdBy:user._id,
+    });
+  } catch(error) {
+    if(error?.code===11000)return;
+    throw error;
+  }
+
+  try {
+    const stock=await InventoryStock.findOneAndUpdate(
+      stockFilter,
+      {$inc:{qty:openingQty,stockValue:openingValue},$setOnInsert:{companyId,location:String(location._id),itemType,itemName,batchNo:"",barcode:""},$set:{hsn,unit}},
+      {upsert:true,new:true,setDefaultsOnInsert:true}
+    );
+    stock.averageRate=stock.qty?stock.stockValue/stock.qty:0;
+    await stock.save();
+    movement.balanceQty=stock.qty;
+    await movement.save();
+  } catch(error) {
+    await InventoryMovement.deleteOne({_id:movement._id});
+    throw error;
+  }
 }
 
 function inferNature(name, fallback="Asset") {
@@ -189,14 +261,17 @@ async function syncTransactionMaster(master, ctx, previousName = "") {
       }
       if(renamedItem){
         await InventoryItemMaster.findByIdAndUpdate(renamedItem._id,{$set:values});
+        await ensureProductOpeningStock(master,ctx,{requireLocation:true});
         return;
       }
       if(oldItems.length){
         await InventoryItemMaster.findOneAndUpdate({companyId,name:master.name},{$set:values,$setOnInsert:{companyId,name:master.name,createdBy}},{upsert:true,new:true,setDefaultsOnInsert:true});
+        await ensureProductOpeningStock(master,ctx,{requireLocation:true});
         return;
       }
     }
     await InventoryItemMaster.findOneAndUpdate({companyId,name:master.name},{$set:{itemType,hsn:clean(master.hsn),unit:clean(master.unit)||"KG",defaultGstRate:num(master.gstRate),defaultBarcode:clean(master.code),active:true},$setOnInsert:{companyId,name:master.name,createdBy}},{upsert:true,new:true,setDefaultsOnInsert:true});
+    await ensureProductOpeningStock(master,ctx,{requireLocation:true});
     return;
   }
 
@@ -248,9 +323,15 @@ export async function createMaster(payload = {}, ctx = {}) {
     state: clean(payload.state), district: clean(payload.district), pin: clean(payload.pin), address: clean(payload.address),
     mobile: clean(payload.mobile), email: clean(payload.email), gstin: clean(payload.gstin).toUpperCase(), pan: clean(payload.pan).toUpperCase(),
     openingBalance: num(payload.openingBalance), decimalPlaces: Math.max(0, Math.min(6, Number.isFinite(Number(payload.decimalPlaces)) ? Number(payload.decimalPlaces) : 2)), creditLimit: num(payload.creditLimit), creditDays: num(payload.creditDays),
-    gstRate: num(payload.gstRate), purchaseRate: num(payload.purchaseRate), salesRate: num(payload.salesRate), openingQty: num(payload.openingQty), openingValue: num(payload.openingValue),
+    gstRate: num(payload.gstRate), purchaseRate: num(payload.purchaseRate), salesRate: num(payload.salesRate), openingQty: num(payload.openingQty), openingRate: num(payload.openingRate), openingValue: payload.openingRate!==undefined&&payload.openingRate!==""?num(payload.openingQty)*num(payload.openingRate):num(payload.openingValue),
     active:true,
   };
+  if(masterType==="product"&&num(data.openingQty)>0&&!data.locationId){
+    throw new Error("Select a Location for the product opening stock.");
+  }
+  if(masterType==="product"&&num(data.openingQty)>0&&!await resolveProductStockLocation(data,ctx.user?.companyId||null)){
+    throw new Error("The selected Location was not found in inventory masters.");
+  }
   if (masterType === "party") { data.under=data.under||"Sundry Debtors"; data.partyType=data.partyType||"CUSTOMER"; data.nature=data.nature||"Current Assets"; }
   if (masterType === "supplier") { data.under=data.under||"Sundry Creditors"; data.partyType=data.partyType||"SUPPLIER"; data.nature=data.nature||"Current Liabilities"; }
   if (masterType === "product") { data.under=data.under||"Stock-in-Hand"; data.itemType=data.itemType||"RAW_MATERIAL"; data.unit=data.unit||"KG"; }
@@ -293,8 +374,18 @@ export async function updateMaster(id, payload = {}, ctx = {}) {
   const existing = await AccountsMaster.findById(id);
   if (!existing) throw new Error("Master not found.");
   const previousName=existing.name;
-  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","bankDetailsProvided","bankAccountName","bankName","bankBranch","bankAccountNumber","bankIfsc","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingValue","decimalPlaces","gstStateCode","active"];
+  const allowed=["name","alias","code","under","nature","openingBalance","openingType","gstApplicable","gstin","pan","address","state","district","pin","mobile","email","creditLimit","creditDays","bankDetailsProvided","bankAccountName","bankName","bankBranch","bankAccountNumber","bankIfsc","partyType","locationId","locationName","itemType","hsn","unit","gstRate","purchaseRate","salesRate","openingQty","openingRate","openingValue","decimalPlaces","gstStateCode","active"];
   for (const key of allowed) if (payload[key] !== undefined) existing[key]=payload[key];
+  if(existing.masterType==="product"&&num(existing.openingQty)>0&&!existing.locationId){
+    throw new Error("Select a Location for the product opening stock.");
+  }
+  if(existing.masterType==="product"&&num(existing.openingQty)>0&&!await resolveProductStockLocation(existing,ctx.user?.companyId||null)){
+    throw new Error("The selected Location was not found in inventory masters.");
+  }
+  if(existing.masterType==="product"&&payload.openingRate!==undefined){
+    existing.openingRate=num(payload.openingRate);
+    existing.openingValue=num(existing.openingQty)*existing.openingRate;
+  }
   existing.name=clean(existing.name); existing.gstin=clean(existing.gstin).toUpperCase(); existing.pan=clean(existing.pan).toUpperCase();
   if (existing.masterType==="location") {
     existing.code=clean(existing.code).toUpperCase()||existing.name.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,30)||"LOCATION";
