@@ -2,12 +2,21 @@ import mongoose from "mongoose";
 
 const auditLogSchema = new mongoose.Schema(
   {
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+      index: true,
+    },
     actorUser: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
       index: true,
     },
+    actorName: { type: String, default: "", maxlength: 180 },
+    actorEmail: { type: String, default: "", maxlength: 180 },
+    actorRole: { type: String, default: "", maxlength: 80 },
 
     action: {
       type: String,
