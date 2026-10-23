@@ -5,10 +5,33 @@ import "./GSTReports.css";
 
 const API = (import.meta.env.VITE_API_URL || "https://office-management-system-ikx8.onrender.com").replace(/\/+$/, "");
 const today = new Date().toISOString().slice(0, 10);
-const monthStart = `${today.slice(0, 7)}-01`;
 const dateTime = value => value ? new Date(value).toLocaleString("en-IN") : "-";
+const monthName = value => new Date(`${value}-01T00:00:00`).toLocaleDateString("en-IN", {month:"long",year:"numeric"});
 const csvValue = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
 const jsonText = value => value == null ? "-" : JSON.stringify(value, null, 2);
+const auditCategories = [
+  {id:"purchase",label:"Purchase",key:"F11"},
+  {id:"sale",label:"Sale",key:"F12"},
+  {id:"jobOrder",label:"Job Order",key:"F13"},
+  {id:"production",label:"Production",key:"F14"},
+  {id:"grading",label:"Grading",key:"F15"},
+  {id:"pi",label:"PI",key:"F16"},
+  {id:"return",label:"Return",key:"F17"},
+  {id:"damage",label:"Damage",key:"F18"},
+  {id:"repacking",label:"Repacking",key:"F19"},
+  {id:"packingConversion",label:"Packing Conversion",key:"F20"},
+  {id:"jobOrderReport",label:"Job Order Report"},
+  {id:"bomCosting",label:"BOM / Costing"},
+  {id:"stockLedger",label:"Stock / Ledger"},
+  {id:"documents",label:"Documents"},
+  {id:"masters",label:"Masters"},
+];
+const actionTypes = [
+  {id:"created",label:"Create / Post"},
+  {id:"edited",label:"Edit"},
+  {id:"deleted",label:"Delete"},
+  {id:"cancelled",label:"Cancel"},
+];
 const ignoredAuditFields = new Set(["_id", "__v", "createdAt", "updatedAt", "companyId", "financialYear", "createdBy", "updatedBy", "ledger", "partyLedger"]);
 const fieldLabel = value => ({
   voucherNo:"Voucher No.", productionNo:"Production No.", jobNo:"Job Order No.", docNo:"Document No.",
@@ -101,10 +124,13 @@ function SnapshotValue({value, fieldKey = ""}) {
 function recordNumber(row) {
   const before = row.metadata?.before || {};
   const after = row.metadata?.after || {};
-  return after.voucherNo || before.voucherNo ||
+  const knownNumber=after.voucherNo || before.voucherNo ||
     after.productionNo || before.productionNo || after.jobNo || before.jobNo ||
     after.docNo || before.docNo || after.invoiceNo || before.invoiceNo ||
-    after.purchaseNo || before.purchaseNo || after.name || before.name || "-";
+    after.purchaseNo || before.purchaseNo || after.name || before.name;
+  if(knownNumber)return knownNumber;
+  const label=String(row.metadata?.recordLabel||"");
+  return label.includes(" · ") ? label.slice(label.lastIndexOf(" · ")+3) : "-";
 }
 
 function mongoRecordId(row) {
@@ -114,7 +140,11 @@ function mongoRecordId(row) {
 
 export default function BusinessAuditReport() {
   const navigate = useNavigate();
-  const [filters, setFilters] = useState({from:monthStart,to:today,search:"",entity:"",action:""});
+  const [filters, setFilters] = useState({search:"",entity:"",action:""});
+  const [year, setYear] = useState(Number(today.slice(0,4)));
+  const [activeCategory, setActiveCategory] = useState("purchase");
+  const [monthlySummary, setMonthlySummary] = useState({});
+  const [selectedMonth, setSelectedMonth] = useState("");
   const [page, setPage] = useState(1);
   const [logs, setLogs] = useState([]);
   const [pagination, setPagination] = useState({total:0,totalPages:0});
@@ -122,12 +152,14 @@ export default function BusinessAuditReport() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function loadLogs(nextPage=page) {
+  async function loadLogs(nextPage=page, category=activeCategory, month=selectedMonth) {
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams({page:String(nextPage),limit:"100"});
       Object.entries(filters).forEach(([key,value]) => { if(value)params.set(key,value); });
+      if(category)params.set("category",category);
+      if(month)params.set("month",month);
       const token = localStorage.getItem("token") || localStorage.getItem("accessToken") || "";
       const response = await fetch(`${API}/api/security/audit-logs?${params}`,{headers:{Authorization:`Bearer ${token}`}});
       const data = await response.json();
@@ -143,7 +175,71 @@ export default function BusinessAuditReport() {
     }
   }
 
-  useEffect(()=>{loadLogs(1);},[]);
+  async function loadSummary(selectedYear=year) {
+    setLoading(true);
+    setError("");
+    try {
+      const token=localStorage.getItem("token")||localStorage.getItem("accessToken")||"";
+      const response=await fetch(`${API}/api/security/audit-log-summary?year=${selectedYear}`,{headers:{Authorization:`Bearer ${token}`}});
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.message||"Could not load monthly audit counts.");
+      setMonthlySummary(data.summary||{});
+      setSelectedMonth("");
+      setLogs([]);
+      setPagination({total:0,totalPages:0});
+      setExpanded("");
+    } catch(requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(()=>{loadSummary(year);},[]);
+
+  useEffect(()=>{
+    const categoryByFunctionKey=new Map(auditCategories.filter(category=>category.key).map(category=>[category.key,category.id]));
+    const handleShortcut=event=>{
+      const category=categoryByFunctionKey.get(event.key);
+      const isTyping=["INPUT","TEXTAREA","SELECT"].includes(event.target?.tagName);
+      if(!category||isTyping)return;
+      event.preventDefault();
+      setActiveCategory(category);
+      setSelectedMonth("");
+      setLogs([]);
+      setPagination({total:0,totalPages:0});
+      setExpanded("");
+    };
+    window.addEventListener("keydown",handleShortcut);
+    return()=>window.removeEventListener("keydown",handleShortcut);
+  },[]);
+
+  function categoryMonthCounts(category, month) {
+    const counts={created:0,edited:0,deleted:0,cancelled:0};
+    for(const row of monthlySummary[category]||[]) {
+      if(row.month===month&&counts[row.activityType]!==undefined)counts[row.activityType]+=row.count;
+    }
+    return counts;
+  }
+
+  function logActionType(row) {
+    const message=String(row.metadata?.message||"");
+    const status=String(row.metadata?.after?.status||"").toUpperCase();
+    if(status==="CANCELLED"||status==="CANCELED"||/\bcancel(?:led|ed|lation)\b/i.test(message))return "cancelled";
+    if(String(row.action||"").includes("DELETED"))return "deleted";
+    if(String(row.action||"").includes("UPDATED"))return "edited";
+    return "created";
+  }
+
+  function handleListKeyDown(event, selector) {
+    if(!["ArrowDown","ArrowUp","Home","End"].includes(event.key))return;
+    const buttons=[...event.currentTarget.querySelectorAll(selector)].filter(button=>!button.disabled);
+    if(!buttons.length)return;
+    const index=buttons.indexOf(document.activeElement);
+    const next=event.key==="Home"?0:event.key==="End"?buttons.length-1:event.key==="ArrowDown"?Math.min(index+1,buttons.length-1):Math.max(index-1,0);
+    event.preventDefault();
+    buttons[next<0?0:next].focus();
+  }
 
   async function exportCsv() {
     setLoading(true);
@@ -155,6 +251,8 @@ export default function BusinessAuditReport() {
       for(let currentPage=1;currentPage<=totalPages;currentPage++){
         const params=new URLSearchParams({page:String(currentPage),limit:"100"});
         Object.entries(filters).forEach(([key,value])=>{if(value)params.set(key,value)});
+        if(activeCategory)params.set("category",activeCategory);
+        if(selectedMonth)params.set("month",selectedMonth);
         const response=await fetch(`${API}/api/security/audit-logs?${params}`,{headers:{Authorization:`Bearer ${token}`}});
         const data=await response.json();
         if(!response.ok)throw new Error(data.message||"Could not export the audit report.");
@@ -177,7 +275,7 @@ export default function BusinessAuditReport() {
     const url=URL.createObjectURL(new Blob(["\uFEFF",contents],{type:"text/csv;charset=utf-8"}));
     const link=document.createElement("a");
     link.href=url;
-    link.download=`business-audit-${filters.from||"all"}-${filters.to||"all"}.csv`;
+    link.download=`business-audit-${activeCategory}-${selectedMonth||year}.csv`;
     link.click();
     URL.revokeObjectURL(url);
     setLoading(false);
@@ -189,36 +287,60 @@ export default function BusinessAuditReport() {
       <button className="gst-back" type="button" onClick={()=>navigate("/accounts?section=master")}><ArrowLeft size={16}/> Accounts Masters & Operations</button>
     </header>
     <div className="gst-workspace">
-      <aside className="gst-sidebar"><div className="gst-menu-heading">AUDIT REPORT</div><section className="gst-menu-group"><h2>BUSINESS RECORDS</h2><div className="gst-menu-item is-active">Create · Edit · Delete</div><p style={{padding:"6px 10px",color:"#71838e",fontSize:11,lineHeight:1.5}}>Changes include actor, timestamp, record path and captured before / after values.</p></section></aside>
-      <section className="gst-content">
+      <aside className="gst-sidebar">
+        <div className="gst-menu-heading">AUDIT REPORT</div>
+        <section className="gst-menu-group">
+          <h2>VOUCHERS & OPERATIONS</h2>
+          <div className="gst-audit-category-list" onKeyDown={event=>handleListKeyDown(event,"[data-audit-category]")}>
+            {auditCategories.map(category=><button
+              type="button"
+              key={category.id}
+              data-audit-category
+              className={`gst-menu-item ${activeCategory===category.id?"is-active":""}`}
+              aria-pressed={activeCategory===category.id}
+              onClick={()=>{setActiveCategory(category.id);setSelectedMonth("");setLogs([]);setPagination({total:0,totalPages:0});setExpanded("")}}
+            ><span>{category.label}</span>{category.key&&<kbd>{category.key}</kbd>}</button>)}
+          </div>
+          <p className="gst-audit-help">Arrow keys to move · Enter to open · choose a month to view activity.</p>
+        </section>
+      </aside>
+      <section className="gst-content" onKeyDown={event=>{if(event.key==="Escape"&&expanded){setExpanded("");event.stopPropagation()}}}>
         <div className="gst-page-heading">
           <div><div className="gst-eyebrow">ACCOUNTS MASTERS & OPERATIONS</div><h1>Business Activity Log</h1><p>Audit trail of successful business record changes.</p></div>
-          <div className="gst-actions"><button type="button" title="Refresh" aria-label="Refresh" onClick={()=>loadLogs(page)} disabled={loading}><RefreshCw size={16}/></button><button type="button" title="Export CSV" aria-label="Export CSV" onClick={exportCsv} disabled={!logs.length}><Download size={16}/></button><button type="button" title="Print" aria-label="Print" onClick={()=>window.print()}><Printer size={16}/></button></div>
+          <div className="gst-actions"><button type="button" title="Refresh" aria-label="Refresh" onClick={()=>selectedMonth?loadLogs(page):loadSummary(year)} disabled={loading}><RefreshCw size={16}/></button><button type="button" title="Export CSV" aria-label="Export CSV" onClick={exportCsv} disabled={!logs.length||loading}><Download size={16}/></button><button type="button" title="Print" aria-label="Print" onClick={()=>window.print()}><Printer size={16}/></button></div>
         </div>
-        <div className="gst-filterbar">
-          <label>From date<input type="date" value={filters.from} max={filters.to} onChange={event=>setFilters(current=>({...current,from:event.target.value}))}/></label>
-          <label>To date<input type="date" value={filters.to} min={filters.from} onChange={event=>setFilters(current=>({...current,to:event.target.value}))}/></label>
-          <label>Search<input type="search" placeholder="User, action, route..." value={filters.search} onChange={event=>setFilters(current=>({...current,search:event.target.value}))}/></label>
-          <label>Entity<input type="search" placeholder="e.g. PRODUCTION_ENTRY" value={filters.entity} onChange={event=>setFilters(current=>({...current,entity:event.target.value}))}/></label>
-          <label>Action<input type="search" placeholder="e.g. UPDATED" value={filters.action} onChange={event=>setFilters(current=>({...current,action:event.target.value}))}/></label>
-          <button type="button" className="gst-run" onClick={()=>loadLogs(1)} disabled={loading}>{loading?"Loading...":"Run report"}</button>
+        <div className="gst-filterbar gst-audit-toolbar">
+          <label>Financial year<select value={year} onChange={event=>{const selected=Number(event.target.value);setYear(selected);loadSummary(selected)}}>{Array.from({length:7},(_,index)=>Number(today.slice(0,4))-index).map(option=><option key={option} value={option}>{option}–{String(option+1).slice(-2)}</option>)}</select></label>
+          <label>Find entry<input type="search" placeholder="Voucher no., party, product, or user..." value={filters.search} onChange={event=>setFilters(current=>({...current,search:event.target.value}))} onKeyDown={event=>{if(event.key==="Enter"&&selectedMonth)loadLogs(1)}}/></label>
+          {selectedMonth&&<button type="button" className="gst-run" onClick={()=>loadLogs(1)} disabled={loading}>{loading?"Loading...":"Search month"}</button>}
+          {selectedMonth&&<button type="button" className="gst-run gst-audit-back" onClick={()=>{setSelectedMonth("");setLogs([]);setPagination({total:0,totalPages:0});setExpanded("")}}>All months</button>}
         </div>
         {error&&<div className="gst-error" role="alert">{error}</div>}
-        <div className="gst-summary-grid">
-          <div className="gst-summary"><span>Filtered changes</span><strong>{Number(pagination.total||0).toLocaleString("en-IN")}</strong></div>
-          <div className="gst-summary"><span>Page</span><strong>{page} / {pagination.totalPages||0}</strong></div>
-          <div className="gst-summary"><span>Entries on page</span><strong>{logs.length}</strong></div>
-          <div className="gst-summary"><span>Record detail</span><strong>Before → After</strong></div>
-        </div>
+        {!selectedMonth&&<section className="gst-audit-month-panel">
+          <div className="gst-table-heading"><div><h2>{auditCategories.find(category=>category.id===activeCategory)?.label} · Monthly Activity</h2><p>Select a month to see its Create, Edit, Delete and Cancel records.</p></div><span className="gst-source-label">{year}–{String(year+1).slice(-2)}</span></div>
+          <div className="gst-audit-month-grid" onKeyDown={event=>handleListKeyDown(event,"[data-audit-month]")}>
+            {Array.from({length:12},(_,index)=>new Date(Date.UTC(year,index+3,1)).toISOString().slice(0,7)).reverse().map(month=>{
+              const counts=categoryMonthCounts(activeCategory,month),total=Object.values(counts).reduce((sum,count)=>sum+count,0);
+              return <button type="button" data-audit-month key={month} disabled={loading} className="gst-audit-month-card" onClick={()=>{setSelectedMonth(month);loadLogs(1,activeCategory,month)}}>
+                <span className="gst-audit-month-title">{monthName(month)}</span>
+                <strong className="gst-audit-month-total">{total.toLocaleString("en-IN")} <small>entries</small></strong>
+                <span className="gst-audit-month-counts">{actionTypes.map(action=><span key={action.id} className={`gst-audit-count gst-audit-count-${action.id}`}><b>{counts[action.id]}</b> {action.label}</span>)}</span>
+                <span className="gst-audit-open-hint">Enter to open month</span>
+              </button>;
+            })}
+          </div>
+          {activeCategory==="jobOrderReport"&&<div className="gst-notice"><button type="button" className="gst-run" onClick={()=>navigate("/accounts?section=transactions&tab=job-order-report")}>Open Job Order Report</button></div>}
+        </section>}
+        {selectedMonth&&<>
         <div className="gst-report-panel">
-          <div className="gst-table-heading"><div><h2>Business Change Register</h2><p>{logs.length} entries · Page {page} of {pagination.totalPages||0}</p></div><span className="gst-source-label">AUDIT TRAIL</span></div>
-          <div className="gst-table-scroll"><table className="gst-table"><thead><tr><th>Date / Time</th><th>User</th><th>Action</th><th>Record ID</th><th>Entity</th><th>Details</th></tr></thead><tbody>
+          <div className="gst-table-heading"><div><h2>{auditCategories.find(category=>category.id===activeCategory)?.label} · {monthName(selectedMonth)}</h2><p>{Number(pagination.total||0).toLocaleString("en-IN")} activities · Page {page} of {pagination.totalPages||0}</p></div><span className="gst-source-label">ACTIVITY REGISTER</span></div>
+          <div className="gst-table-scroll" onKeyDown={event=>handleListKeyDown(event,"button.gst-audit-detail-button")}><table className="gst-table"><thead><tr><th>Date / Time</th><th>User</th><th>Action</th><th>Record ID</th><th>Entity</th><th>Details</th></tr></thead><tbody>
             {logs.map(row=>{const changes=flattenChanges(row.metadata?.before,row.metadata?.after);return <React.Fragment key={row._id}><tr>
               <td>{dateTime(row.createdAt)}</td><td><b>{row.actorUser?.name||row.actorName||"Unknown user"}</b><small style={{display:"block",color:"#71838e"}}>{row.actorUser?.email||row.actorEmail||""} · {row.actorUser?.role||row.actorRole||""}</small></td>
-              <td><span className="gst-source-label">{row.action}</span></td>
+              <td><span className={`gst-audit-action gst-audit-count-${logActionType(row)}`}>{actionTypes.find(action=>action.id===logActionType(row))?.label||row.action}</span></td>
               <td><b>{recordNumber(row)}</b><small style={{display:"block",maxWidth:180,overflow:"hidden",color:"#71838e",fontFamily:"monospace",fontSize:9,textOverflow:"ellipsis"}} title={mongoRecordId(row)}>{mongoRecordId(row)||"No database ID"}</small></td>
               <td>{row.entity||"-"}</td>
-              <td><button type="button" className="gst-menu-item" style={{display:"inline-block"}} onClick={()=>setExpanded(current=>current===row._id?"":row._id)}>{expanded===row._id?"Hide":"Before / After"}</button></td>
+              <td><button type="button" className="gst-menu-item gst-audit-detail-button" aria-expanded={expanded===row._id} onClick={()=>setExpanded(current=>current===row._id?"":row._id)}>{expanded===row._id?"Close full details":"View full report"} <span>↵</span></button></td>
             </tr>
             {expanded===row._id&&<tr><td colSpan="6"><div style={{whiteSpace:"normal"}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:12}}><div><b>{recordNumber(row)}</b><small style={{display:"block",marginTop:4,color:"#71838e"}}>{row.entity||"Business Record"} · ID: {mongoRecordId(row)||"-"}</small></div><span style={{color:"#71838e",fontSize:11}}>{row.actorUser?.name||row.actorName||"Unknown user"} · {row.actorUser?.role||row.actorRole||""}</span></div>
@@ -244,13 +366,14 @@ export default function BusinessAuditReport() {
             </React.Fragment>})}
             {!logs.length&&<tr><td colSpan="6" className="gst-empty">{loading?"Loading audit records...":"No audit records found for the selected filters."}</td></tr>}
           </tbody></table></div>
-          <footer className="gst-table-footer">Shows successful changes only. Before/after values are sanitized to exclude credentials. 100 records per page.</footer>
+          <footer className="gst-table-footer">Use Enter to open a record and Escape to close its full details. Before/after values exclude credentials.</footer>
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:12}}>
           <button type="button" className="gst-run" disabled={loading||page<=1} onClick={()=>loadLogs(page-1)}>Previous</button>
           <span style={{fontSize:11,color:"#71838e"}}>{pagination.total?`${((page-1)*100)+1}–${Math.min(page*100,pagination.total)} of ${pagination.total}`:"0 records"}</span>
           <button type="button" className="gst-run" disabled={loading||page>=(pagination.totalPages||0)} onClick={()=>loadLogs(page+1)}>Next</button>
         </div>
+        </>}
       </section>
     </div>
   </main>;
