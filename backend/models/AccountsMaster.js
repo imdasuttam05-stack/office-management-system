@@ -39,6 +39,7 @@ const accountsMasterSchema = new mongoose.Schema({
   purchaseRate: { type: Number, default: 0 },
   salesRate: { type: Number, default: 0 },
   openingQty: { type: Number, default: 0 },
+  openingRate: { type: Number, default: 0 },
   openingValue: { type: Number, default: 0 },
   stockLedgerId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountsMaster", default: null },
   gstStateCode: String,
