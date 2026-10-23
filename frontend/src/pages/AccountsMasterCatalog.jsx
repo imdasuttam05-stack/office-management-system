@@ -36,6 +36,7 @@ const STATES = [
   "Delhi","Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry",
 ];
 const asOptions = values => values.map(value => typeof value === "object" ? value : ({value,label:String(value)}));
+const isPacketProduct = name => /(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i.test(String(name||""));
 
 const blank = {
   ledger: {
@@ -609,8 +610,8 @@ export default function AccountsMasterCatalog({ initialType = "ledger", initialM
                 <div className="field"><label>Under / Stock Ledger</label><SearchableSelect value={form.under||"Stock-in-Hand"} options={asOptions(["Stock-in-Hand",...groups.map(group=>typeof group==="string"?group:group.name).filter(Boolean)])} onChange={value=>update("under",value)} placeholder="Search stock groups..." /></div>
                 <div className="field"><label>Purchase Rate</label><input type="number" value={form.purchaseRate||""} onChange={e=>update("purchaseRate",e.target.value)}/></div>
                 <div className="field"><label>Sales Rate</label><input type="number" value={form.salesRate||""} onChange={e=>update("salesRate",e.target.value)}/></div>
-                <div className="field"><label>Opening Qty</label><input type="number" min="0" step="0.000001" value={form.openingQty||""} onChange={e=>update("openingQty",e.target.value)}/></div>
-                <div className="field"><label>Opening Rate (₹ / Unit)</label><input type="number" min="0" step="0.0001" value={form.openingRate||""} onChange={e=>update("openingRate",e.target.value)}/></div>
+                <div className="field"><label>Opening Qty{isPacketProduct(form.name)?" (PCS)":""}</label><input type="number" min="0" step="0.000001" value={form.openingQty||""} onChange={e=>update("openingQty",e.target.value)}/></div>
+                <div className="field"><label>Opening Rate (₹ / {isPacketProduct(form.name)?"PCS":"Unit"})</label><input type="number" min="0" step="0.0001" value={form.openingRate||""} onChange={e=>update("openingRate",e.target.value)}/></div>
                 <div className="field"><label>Opening Value (₹)</label><input type="number" value={form.openingValue||0} readOnly/><div className="hint">Opening Qty × Opening Rate</div></div>
                 <div className="field"><label>Location</label><SearchableSelect value={form.locationId||""} options={asOptions([{value:"",label:"Select Location"},...locations.map(x=>({value:x._id,label:x.name}))])} onChange={value=>update("locationId",value)} placeholder="Search locations..." /></div>
               </>}
