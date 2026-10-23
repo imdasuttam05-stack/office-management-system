@@ -78,9 +78,10 @@ async function createSalesEntry(payload, user={}){
     subtotal+=taxable;cg+=c;sg+=s;ig+=i;
   }
   const invoiceNo=await next("SALE","SAL");
-  const inv=await SalesInvoice.create({invoiceNo,inventoryNo:clean(b.inventoryNo),importedFrom:clean(b.importedFrom),companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig),remarks:clean(b.remarks),createdBy:user?._id});
+  const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),extraCosts=r2(labourCost+transportCost+otherCost);
+  const inv=await SalesInvoice.create({invoiceNo,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,importedFrom:clean(b.importedFrom),companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig+extraCosts),remarks:clean(b.remarks),createdBy:user?._id});
   for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
-  const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal,narration:`Sales ${invoiceNo}`}];
+  const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig+extraCosts,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts, narration:`Sales and additional charges ${invoiceNo}`}];
   if(cg)voucherLines.push({ledger:outputCgst._id,debit:0,credit:cg,narration:`Output CGST ${invoiceNo}`});
   if(sg)voucherLines.push({ledger:outputSgst._id,debit:0,credit:sg,narration:`Output SGST ${invoiceNo}`});
   if(ig)voucherLines.push({ledger:outputIgst._id,debit:0,credit:ig,narration:`Output IGST ${invoiceNo}`});
@@ -796,6 +797,8 @@ export async function importSalesUpload(req,res){
       const partyValue=importValue(raw,["party","customer","customer name","party name","buyer","client"]);
       const itemValue=importValue(raw,["item","product","product name","item name","goods","goods name","stock item","inventory item"]);
       const inventoryNoValue=importValue(raw,["inventory no","inventory number","vch no","voucher no","voucher number"]);
+      const customerInvoiceNoValue=importValue(raw,["invoice no","invoice number","inv no","customer invoice no"]);
+      const customerInvoiceDateValue=importValue(raw,["inv date","invoice date","customer invoice date"]);
       const qtyValue=importValue(raw,["qty","quantity","total qty","pcs","packets","kg"]);
       const rateValue=importValue(raw,["rate","unit rate","sales rate","price","amount per unit"]);
       const gstValue=importValue(raw,["gst","gst rate","gst %","tax %","vat %"]);
@@ -803,6 +806,11 @@ export async function importSalesUpload(req,res){
         const date = ensureImportDate(dateValue);
         const payload={
           date,
+          customerInvoiceNo: String(customerInvoiceNoValue||""),
+          customerInvoiceDate: parseImportDate(customerInvoiceDateValue),
+          labourCost: parseImportNumber(importValue(raw,["labour cost","labor cost","labour"])),
+          transportCost: parseImportNumber(importValue(raw,["transport cost","transport"])),
+          otherCost: parseImportNumber(importValue(raw,["other cost","other charges"])),
           location: String(locationValue||""),
           inventoryNo: String(inventoryNoValue||""),
           importedFrom: "SALES_REGISTER_EXCEL",
