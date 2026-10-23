@@ -8,9 +8,10 @@ import {
 } from "../services/accountsMasterService.js";
 import auth from "../middleware/auth.js";
 import requireCompanyContext from "../middleware/companyContext.js";
+import businessAudit from "../middleware/businessAudit.js";
 
 const router = express.Router();
-router.use(auth, requireCompanyContext);
+router.use(auth, requireCompanyContext, businessAudit);
 
 router.get("/", async (req, res, next) => {
   try {
