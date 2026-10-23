@@ -38,7 +38,8 @@ function sanitizeMetadata(value) {
 
     walk(copy);
     return copy;
-  } catch {
+  } catch (error) {
+    console.error("AUDIT METADATA SANITIZATION ERROR:", error?.message || error);
     return {};
   }
 }
@@ -52,8 +53,13 @@ export async function writeAuditLog({
   metadata = {},
 }) {
   try {
+    const actor = actorUser || req?.user || null;
     await AuditLog.create({
-      actorUser: actorUser?._id || actorUser || null,
+      companyId: req?.company?._id || req?.user?.companyId || req?.get?.("X-Company-Id") || null,
+      actorUser: actor?._id || actor || null,
+      actorName: String(actor?.name || "").slice(0, 180),
+      actorEmail: String(actor?.email || "").slice(0, 180),
+      actorRole: String(actor?.role || "").slice(0, 80),
       action,
       entity,
       entityId: entityId || null,
