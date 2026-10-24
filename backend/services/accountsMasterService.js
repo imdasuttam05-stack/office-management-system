@@ -8,6 +8,7 @@ import LocationMaster from "../models/LocationMaster.js";
 import InventoryItemMaster from "../models/InventoryItemMaster.js";
 import InventoryStock from "../models/InventoryStock.js";
 import InventoryMovement from "../models/InventoryMovement.js";
+import { getCompanyScope } from "../middleware/companyContext.js";
 
 const clean = (v) => String(v ?? "").trim();
 const num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
@@ -144,7 +145,6 @@ async function ensureRealLedger(name, {under,nature,openingBalance,openingType,g
   const ledgerName = clean(name);
   if (!ledgerName) return null;
   const group = await ensureRealGroup(under || "Current Assets", nature || "Asset", userId);
-  let row = await Ledger.findOne({name:ledgerName,group:group._id});
   const payload = {
     name:ledgerName,
     group:group._id,
@@ -171,9 +171,23 @@ async function ensureRealLedger(name, {under,nature,openingBalance,openingType,g
     bankIfsc:clean(bankIfsc).toUpperCase(),
     isActive:true,
   };
-  if (!row) row = await Ledger.create({...payload,createdBy:userId});
-  else await Ledger.findByIdAndUpdate(row._id,{$set:payload});
-  return row;
+  const syncExistingLedger = async (row) => {
+    const scope=getCompanyScope();
+    const sameCompany=String(row.companyId||"")===String(scope?.companyId||"");
+    const set=sameCompany?payload:{isActive:true};
+    await Ledger.collection.updateOne({_id:row._id},{$set:set});
+    return {...row,...set};
+  };
+  let row=await Ledger.collection.findOne({name:ledgerName,group:group._id});
+  if(row)return syncExistingLedger(row);
+  try {
+    return await Ledger.create({...payload,createdBy:userId});
+  } catch(error) {
+    if(error?.code!==11000)throw error;
+    row=await Ledger.collection.findOne({name:ledgerName,group:group._id});
+    if(!row)throw error;
+    return syncExistingLedger(row);
+  }
 }
 
 export async function syncLedgerCounterparty(master, ledger, ctx={}) {
