@@ -5,7 +5,7 @@ import auth from "../middleware/auth.js";
 import requireCompanyContext from "../middleware/companyContext.js";
 import requireRole from "../middleware/role.js";
 import businessAudit from "../middleware/businessAudit.js";
-import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,updateLocationMaster,deleteLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,updateJobOrder,createJobOrderReturn,getJobs,getJobOrderStockReport,getJobOrderReportDetail,createProductionEntry,updateProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,getSales,getGstReport,importSalesUpload} from "../controllers/inventoryController.js";
+import {getPurchaseMasters,lookupPincode,lookupGSTIN,createLocationMaster,updateLocationMaster,deleteLocationMaster,createSupplierMaster,createCustomerMaster,createInventoryItemMaster,updateCustomerMaster,deleteCustomerMaster,updateSupplierMaster,deleteSupplierMaster,updateInventoryItemMaster,deleteInventoryItemMaster,createUnitMaster,updateUnitMaster,deleteUnitMaster,createRawMaterialPurchase,updateRawMaterialPurchase,deleteRawMaterialPurchase,getRawMaterialPurchases,getRawMaterialStock,getStock,createJobOrder,updateJobOrder,createJobOrderReturn,getJobs,getJobOrderStockReport,getJobOrderReportDetail,createProductionEntry,updateProductionEntry,getProductionEntries,getBomProductionRequirements,createSale,updateSale,getSales,getGstReport,importSalesUpload} from "../controllers/inventoryController.js";
 const router=express.Router();
 const salesUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024}});
 router.use(auth, requireCompanyContext, businessAudit);
@@ -44,6 +44,7 @@ router.put("/production/:id",requireRole("Admin","Manager"),updateProductionEntr
 router.get("/production-requirements",getBomProductionRequirements);
 router.get("/production",getProductionEntries);
 router.post("/sales",requireRole("Admin","Manager"),createSale);
+router.put("/sales/:id",requireRole("Admin","Manager"),updateSale);
 router.post("/sales/upload",requireRole("Admin","Manager"),salesUpload.single("file"),importSalesUpload);
 router.get("/sales",getSales);
 router.get("/gst-report",getGstReport);
