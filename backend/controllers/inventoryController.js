@@ -59,10 +59,16 @@ async function createSalesEntry(payload, user={}){
   const customerGSTIN=clean(b.customerGSTIN||customer.gstin).toUpperCase();
   const customerState=GST_STATE[gstStateCode("",customerGSTIN)]||clean(customer.state)||clean(b.customerState);
   const sourceStateCode=gstStateCode(sourceState,sourceState?"":company?.gstin),customerStateCode=gstStateCode(customerState,customerGSTIN);
-  const customerLedger=customer.ledgerId?await Ledger.findById(customer.ledgerId):await ensureLedger({name:customer.name,groupName:"Sundry Debtors",nature:"Asset",req:{user},gstin:customer.gstin,address:customer.address,phone:customer.phone});
-  if(!customer.ledgerId){customer.ledgerId=customerLedger._id;await customer.save();}
+  let customerLedger=customer.ledgerId?await Ledger.findById(customer.ledgerId):null;
+  if(!customerLedger){
+    customerLedger=await ensureLedger({name:customer.name,groupName:"Sundry Debtors",nature:"Asset",req:{user},gstin:customer.gstin,address:customer.address,phone:customer.phone});
+    if(!customerLedger)throw new Error(`Could not find or create the customer ledger for ${customer.name}.`);
+    customer.ledgerId=customerLedger._id;
+    await customer.save();
+  }
   const salesLedger=await ensureLedger({name:"Sales",groupName:"Sales",nature:"Income",req:{user}});
   const outputCgst=await ensureGstLedger("Output CGST", {user}),outputSgst=await ensureGstLedger("Output SGST", {user}),outputIgst=await ensureGstLedger("Output IGST", {user});
+  if(!salesLedger||!outputCgst||!outputSgst||!outputIgst)throw new Error("Could not find or create the required sales and GST ledgers.");
   const built=[];let subtotal=0,cg=0,sg=0,ig=0;
   for(const x of lines){
     const itemName=clean(x.itemName),requestedItemType=SALEABLE_ITEM_TYPES.includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";
