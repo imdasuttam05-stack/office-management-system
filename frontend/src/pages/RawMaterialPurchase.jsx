@@ -645,6 +645,15 @@ export default function RawMaterialPurchase() {
           background:#f3f8f6
         }
 
+        .rmp-section-title{font-size:15px;font-weight:700;margin:0 0 12px;color:#173f35}
+        .rmp-tally-table{min-width:1050px}
+        .rmp-tally-table th,.rmp-tally-table td{padding:9px 8px;vertical-align:middle}
+        .rmp-tally-table td:first-child select{min-width:220px}
+        .rmp-number{text-align:right!important;font-variant-numeric:tabular-nums}
+        .rmp-tally-summary{padding-top:16px;margin-top:16px;border-top:1px solid #d8e2df;align-items:center}
+        .rmp-tally-summary span{display:flex;gap:8px;align-items:center}
+        .rmp-grand-total{padding:10px 14px;background:#eaf5f0;border-radius:7px;font-size:15px}
+
         .rmp-table input,
         .rmp-table select{
           padding:7px;
@@ -1108,28 +1117,23 @@ export default function RawMaterialPurchase() {
           </div>
 
           <div className="rmp-card">
+            <div className="rmp-section-title">Raw Material Lines</div>
             <div className="rmp-scroll">
-              <table className="rmp-table">
+              <table className="rmp-table rmp-tally-table">
                 <thead>
                   <tr>
-                    <th>Raw Material *</th>
-                    <th>HSN</th>
-                    <th>Unit</th>
-                    <th>Batch</th>
-                    <th>Barcode</th>
-                    <th>MFG</th>
-                    <th>Expiry</th>
-                    <th>Qty *</th>
-                    <th>Rate *</th>
-                    <th>Discount</th>
-                    <th>GST %</th>
-                    <th>GST Type</th>
-                    <th></th>
+                    <th>Item *</th><th>Unit</th><th>Qty *</th><th>Rate *</th><th>Discount</th><th>GST %</th><th>GST Type</th>
+                    <th>CGST</th><th>SGST</th><th>IGST</th><th>Total GST</th><th>Value</th><th></th>
                   </tr>
                 </thead>
-
                 <tbody>
-                  {lines.map((l, i) => (
+                  {lines.map((l, i) => {
+                    const taxableValue = Math.max(0, Number(l.qty || 0) * Number(l.purchaseRate || 0) - Number(l.discount || 0));
+                    const lineGst = l.gstType === "NONE" ? 0 : taxableValue * Number(l.gstRate || 0) / 100;
+                    const lineCgst = l.gstType === "CGST_SGST" ? lineGst / 2 : 0;
+                    const lineSgst = l.gstType === "CGST_SGST" ? lineGst / 2 : 0;
+                    const lineIgst = l.gstType === "IGST" ? lineGst : 0;
+                    return (
                     <tr key={i}>
                       <td>
                         <select
@@ -1167,79 +1171,12 @@ export default function RawMaterialPurchase() {
 
                       <td>
                         <input
-                          value={l.hsn}
-                          onChange={(e) =>
-                            setLine(
-                              i,
-                              "hsn",
-                              e.target.value
-                            )
-                          }
-                        />
-                      </td>
-
-                      <td>
-                        <input
                           value={l.unit}
                           onKeyDown={(event) => openMasterShortcut(event, "unit")}
                           onChange={(e) =>
                             setLine(
                               i,
                               "unit",
-                              e.target.value
-                            )
-                          }
-                        />
-                      </td>
-
-                      <td>
-                        <input
-                          value={l.batchNo}
-                          onChange={(e) =>
-                            setLine(
-                              i,
-                              "batchNo",
-                              e.target.value
-                            )
-                          }
-                        />
-                      </td>
-
-                      <td>
-                        <input
-                          value={l.barcode}
-                          onChange={(e) =>
-                            setLine(
-                              i,
-                              "barcode",
-                              e.target.value
-                            )
-                          }
-                        />
-                      </td>
-
-                      <td>
-                        <input
-                          type="date"
-                          value={l.mfgDate}
-                          onChange={(e) =>
-                            setLine(
-                              i,
-                              "mfgDate",
-                              e.target.value
-                            )
-                          }
-                        />
-                      </td>
-
-                      <td>
-                        <input
-                          type="date"
-                          value={l.expiryDate}
-                          onChange={(e) =>
-                            setLine(
-                              i,
-                              "expiryDate",
                               e.target.value
                             )
                           }
@@ -1337,6 +1274,11 @@ export default function RawMaterialPurchase() {
                         </select>
                       </td>
 
+                      <td className="rmp-number">₹ {money(lineCgst)}</td>
+                      <td className="rmp-number">₹ {money(lineSgst)}</td>
+                      <td className="rmp-number">₹ {money(lineIgst)}</td>
+                      <td className="rmp-number"><strong>₹ {money(lineGst)}</strong></td>
+                      <td className="rmp-number"><strong>₹ {money(taxableValue + lineGst)}</strong></td>
                       <td>
                         <button
                           className="rmp-btn rmp-danger"
@@ -1355,7 +1297,8 @@ export default function RawMaterialPurchase() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1391,41 +1334,14 @@ export default function RawMaterialPurchase() {
               </div>
             </div>
 
-            <div className="rmp-summary">
-              <span>
-                Taxable:{" "}
-                <strong>
-                  ₹ {money(totals.taxable)}
-                </strong>
-              </span>
-
-              <span>
-                CGST:{" "}
-                <strong>
-                  ₹ {money(totals.cgst)}
-                </strong>
-              </span>
-
-              <span>
-                SGST:{" "}
-                <strong>
-                  ₹ {money(totals.sgst)}
-                </strong>
-              </span>
-
-              <span>
-                IGST:{" "}
-                <strong>
-                  ₹ {money(totals.igst)}
-                </strong>
-              </span>
-
-              <span>
-                Grand Total:{" "}
-                <strong>
-                  ₹ {money(grand)}
-                </strong>
-              </span>
+            <div className="rmp-summary rmp-tally-summary">
+              <span>Subtotal <strong>₹ {money(totals.taxable)}</strong></span>
+              <span>Total CGST <strong>₹ {money(totals.cgst)}</strong></span>
+              <span>Total SGST <strong>₹ {money(totals.sgst)}</strong></span>
+              <span>Total IGST <strong>₹ {money(totals.igst)}</strong></span>
+              <span>Total GST <strong>₹ {money(totals.cgst + totals.sgst + totals.igst)}</strong></span>
+              <span>Transport + Other <strong>₹ {money(Number(form.transportCost || 0) + Number(form.otherCost || 0))}</strong></span>
+              <span className="rmp-grand-total">Grand Total <strong>₹ {money(grand)}</strong></span>
             </div>
 
             <div className="rmp-actions">
