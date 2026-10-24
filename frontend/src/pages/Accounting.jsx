@@ -47,6 +47,9 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [openBills, setOpenBills] = useState([]);
+  const [billAllocations, setBillAllocations] = useState([]);
+  const [loadingBills, setLoadingBills] = useState(false);
 
   const openVoucherCenter = () => { window.location.href = "/voucher"; };
 
@@ -129,6 +132,45 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   useEffect(() => {
     loadAll();
   }, []);
+
+  const allocationBillType = ["Receipt", "Credit Note"].includes(voucher.type)
+    ? "SALE"
+    : ["Payment", "Debit Note"].includes(voucher.type)
+      ? "PURCHASE"
+      : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    setOpenBills([]);
+    setBillAllocations([]);
+    if (!allocationBillType || !voucher.partyLedger) return undefined;
+    setLoadingBills(true);
+    fetch(`${API}/api/accounting/open-bills?type=${allocationBillType}&partyLedgerId=${encodeURIComponent(voucher.partyLedger)}`, { headers: headers() })
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "Unable to load outstanding bills");
+        if (!cancelled) setOpenBills(data.bills || []);
+      })
+      .catch(err => { if (!cancelled) setError(err.message || "Unable to load outstanding bills"); })
+      .finally(() => { if (!cancelled) setLoadingBills(false); });
+    return () => { cancelled = true; };
+  }, [allocationBillType, voucher.partyLedger]);
+
+  function updateBillAllocation(index, field, value) {
+    setBillAllocations(old => old.map((row, i) => {
+      if (i !== index) return row;
+      if (field === "invoiceId") {
+        const bill = openBills.find(item => item._id === value);
+        const voucherAmount = Math.max(Number(totalDebit || 0), Number(totalCredit || 0));
+        return { invoiceType: allocationBillType, invoiceId: value, invoiceNo: bill?.invoiceNo || "", amount: bill ? String(Math.min(Number(bill.outstanding), voucherAmount || Number(bill.outstanding))) : "" };
+      }
+      return { ...row, [field]: value };
+    }));
+  }
+
+  function addBillAllocation() {
+    setBillAllocations(old => [...old, { invoiceType: allocationBillType, invoiceId: "", invoiceNo: "", amount: "" }]);
+  }
 
   /* ======================================================
      KEYBOARD SHORTCUTS
@@ -240,32 +282,27 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   ====================================================== */
 
   function handleEnter(e) {
-    if (e.key !== "Enter") return;
-
-    if (e.shiftKey) return;
-
-    if (e.target.tagName === "TEXTAREA") return;
-
-    e.preventDefault();
-
-    const form = e.currentTarget;
-
-    const fields = [
-      ...form.querySelectorAll(
-        "input:not([disabled]), select, textarea, button"
-      ),
-    ].filter((el) => el.offsetParent !== null);
-
-    const currentIndex = fields.indexOf(e.target);
-
-    if (
-      currentIndex >= 0 &&
-      currentIndex < fields.length - 1
-    ) {
-      fields[currentIndex + 1].focus();
-    } else {
-      form.requestSubmit();
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const target = e.target;
+      if (target?.matches?.("[data-voucher-field]")) {
+        const form = e.currentTarget;
+        const fields = Array.from(form.querySelectorAll(`[data-voucher-field="${target.dataset.voucherField}"]:not([disabled])`)).filter(el => el.offsetParent !== null);
+        const index = fields.indexOf(target);
+        const next = fields[index + (e.key === "ArrowDown" ? 1 : -1)];
+        if (next) { e.preventDefault(); next.focus(); if (next.select && next.tagName === "INPUT") next.select(); }
+      }
+      return;
     }
+    if (e.key !== "Enter" || e.target.tagName === "TEXTAREA") return;
+    if (e.target.tagName === "BUTTON") return;
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fields = Array.from(form.querySelectorAll("input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled])"))
+      .filter(el => el.offsetParent !== null && el.getAttribute("aria-hidden") !== "true");
+    const currentIndex = fields.indexOf(e.target);
+    const nextIndex = currentIndex + (e.shiftKey ? -1 : 1);
+    if (currentIndex >= 0 && nextIndex >= 0 && nextIndex < fields.length) fields[nextIndex].focus();
+    else if (!e.shiftKey) form.querySelector("button[type=submit], button:not([type])")?.focus();
   }
 
   /* ======================================================
@@ -457,6 +494,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
         ...voucher,
         partyLedger: voucher.partyLedger || null,
         lines,
+        billAllocations: billAllocations.filter(row => row.invoiceId && Number(row.amount) > 0).map(row => ({ invoiceType: allocationBillType, invoiceId: row.invoiceId, amount: Number(row.amount) })),
       });
 
       setVoucher({
@@ -481,6 +519,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
         ],
       });
 
+      setBillAllocations([]);
       setMessage("Voucher saved successfully.");
 
       await loadAll();
@@ -491,6 +530,17 @@ export default function Accounting({ initialTab = "groups" } = {}) {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  async function reverseVoucher(voucherId) {
+    if (!window.confirm("Create a reversal voucher? The original voucher will remain in the register for audit.")) return;
+    try {
+      const response = await fetch(`${API}/api/accounting/vouchers/${voucherId}/reverse`, { method: "POST", headers: headers(), body: JSON.stringify({}) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to reverse voucher");
+      setMessage(data.message || "Reversal voucher created.");
+      await loadAll();
+    } catch (err) { setError(err.message || "Unable to reverse voucher"); }
   }
 
   /* ======================================================
@@ -964,6 +1014,38 @@ export default function Accounting({ initialTab = "groups" } = {}) {
             </div>
           </div>
 
+          {allocationBillType && (
+            <section style={{ margin: "14px 0", padding: 14, border: "1px solid #d0d5dd", borderRadius: 10, background: "#f9fafb" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <strong>Bill-wise Adjustment</strong>
+                  <div style={{ fontSize: 12, color: "#667085", marginTop: 4 }}>
+                    {voucher.type} will be allocated against {allocationBillType === "SALE" ? "Sales Bills / Customer Invoices" : "Purchase Bills / Supplier Invoices"}. Allocation cannot exceed bill outstanding.
+                  </div>
+                </div>
+                <button type="button" onClick={addBillAllocation} disabled={!voucher.partyLedger || loadingBills || openBills.length === 0} className="add-line">+ Allocate Bill</button>
+              </div>
+              {!voucher.partyLedger && <p style={{ color: "#b42318", marginBottom: 0 }}>Select a Party Ledger to load outstanding bills.</p>}
+              {loadingBills && <p style={{ marginBottom: 0 }}>Loading outstanding bills…</p>}
+              {!loadingBills && voucher.partyLedger && openBills.length === 0 && <p style={{ marginBottom: 0 }}>No open bills found for this party.</p>}
+              {billAllocations.map((row, index) => (
+                <div key={`${index}-${row.invoiceId}`} style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(120px,1fr) auto", gap: 8, marginTop: 10, alignItems: "end" }}>
+                  <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 700 }}>Bill
+                    <select value={row.invoiceId} onChange={e => updateBillAllocation(index, "invoiceId", e.target.value)} style={{ minWidth: 0, padding: 9, border: "1px solid #d0d5dd", borderRadius: 6 }}>
+                      <option value="">Select outstanding bill</option>
+                      {openBills.map(bill => <option key={bill._id} value={bill._id}>{bill.invoiceNo} · {new Date(bill.date).toLocaleDateString("en-IN")} · Due ₹{Number(bill.outstanding).toFixed(2)}</option>)}
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 700 }}>Allocated Amount
+                    <input type="number" min="0.01" max={openBills.find(b => b._id === row.invoiceId)?.outstanding || undefined} step="0.01" value={row.amount} onChange={e => updateBillAllocation(index, "amount", e.target.value)} placeholder="0.00" style={{ padding: 9, border: "1px solid #d0d5dd", borderRadius: 6, width: "100%" }} />
+                  </label>
+                  <button type="button" className="delete-line" aria-label="Remove bill allocation" onClick={() => setBillAllocations(old => old.filter((_, i) => i !== index))}>×</button>
+                </div>
+              ))}
+              {billAllocations.length > 0 && <div style={{ textAlign: "right", fontWeight: 700, marginTop: 10 }}>Allocated: {money(billAllocations.reduce((sum, row) => sum + (Number(row.amount) || 0), 0))}</div>}
+            </section>
+          )}
+
           <div className="voucher-table-head">
             <span>#</span>
             <span>LEDGER</span>
@@ -987,6 +1069,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
                   </b>
 
                   <select
+                    data-voucher-field="ledger"
                     value={
                       line.ledger
                     }
@@ -1017,6 +1100,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
                   </select>
 
                   <input
+                    data-voucher-field="debit"
                     type="number"
                     min="0"
                     step="0.01"
@@ -1034,6 +1118,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
                   />
 
                   <input
+                    data-voucher-field="credit"
                     type="number"
                     min="0"
                     step="0.01"
@@ -1051,6 +1136,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
                   />
 
                   <input
+                    data-voucher-field="line-narration"
                     value={
                       line.narration
                     }
@@ -1219,9 +1305,11 @@ export default function Accounting({ initialTab = "groups" } = {}) {
                     )}
                   </span>
 
-                  <span>
-                    {item.narration ||
-                      "—"}
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span>{item.narration || "—"}</span>
+                    {!item.reversesVoucherId && !vouchers.some(v => String(v.reversesVoucherId || "") === String(item._id)) && (
+                      <button type="button" onClick={() => reverseVoucher(item._id)} title="Create reversal voucher" style={{ border: "1px solid #fda29b", color: "#b42318", background: "#fff", borderRadius: 6, padding: "4px 7px", cursor: "pointer", whiteSpace: "nowrap" }}>Reverse</button>
+                    )}
                   </span>
                 </div>
               )
