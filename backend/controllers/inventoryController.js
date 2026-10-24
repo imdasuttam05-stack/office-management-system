@@ -22,6 +22,7 @@ import { ensureProductOpeningStock } from "../services/accountsMasterService.js"
 import mongoose from "mongoose";
 import xlsx from "xlsx";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function q6(v){return Math.round((num(v)+Number.EPSILON)*1000000)/1000000} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
+function formatImportMoney(v){return r2(v).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
 function escapeRegExp(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}
 function packetWeightKg(name){const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);if(!match)return 0;const amount=Number(match[1]);return q6(/^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000)}
 function packetUnit(unit){return ["PC","PCS","PACKET","PACKETS","PIECE","PIECES"].includes(clean(unit).toUpperCase())}
@@ -75,7 +76,7 @@ async function createSalesEntry(payload, user={}){
     const itemTypes=requestedItemType==="PACKED_GOODS"?["PACKED_GOODS","FINISHED_GOODS"]:[requestedItemType];
     const itemMaster=await InventoryItemMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:new RegExp(`^${escapeRegExp(itemName)}$`,"i")},{itemType:{$in:itemTypes}},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("defaultGstRate hsn").lean();
     const qty=num(x.qty),rate=num(x.rate),discount=Math.min(Math.max(num(x.discount),0),qty*rate),taxable=r2(qty*rate-discount);
-    const gstRate=Math.max(0,num(x.gstRate)||num(itemMaster?.defaultGstRate));
+    const gstRate=Math.max(0,x.useMasterGstRate?num(itemMaster?.defaultGstRate):(num(x.gstRate)||num(itemMaster?.defaultGstRate)));
     if(gstRate>0&&(!sourceStateCode||!customerStateCode))throw new Error("GST cannot be calculated automatically. Add the state to the selected location and customer / party.");
     const gstType=gstRate<=0?"NONE":sourceStateCode===customerStateCode?"CGST_SGST":"IGST";
     const gst=gstType==="NONE"?0:r2(taxable*gstRate/100),c=gstType==="CGST_SGST"?r2(gst/2):0,s=gstType==="CGST_SGST"?r2(gst-c):0,i=gstType==="IGST"?gst:0;
@@ -86,10 +87,10 @@ async function createSalesEntry(payload, user={}){
     subtotal+=taxable;cg+=c;sg+=s;ig+=i;
   }
   const invoiceNo=await next("SALE","SAL");
-  const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),extraCosts=r2(labourCost+transportCost+otherCost);
-  const inv=await SalesInvoice.create({invoiceNo,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,importedFrom:clean(b.importedFrom),companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig+extraCosts),remarks:clean(b.remarks),createdBy:user?._id});
+  const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),roundOff=num(b.roundOff),extraCosts=r2(labourCost+transportCost+otherCost);
+  const inv=await SalesInvoice.create({invoiceNo,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,roundOff,importedFrom:clean(b.importedFrom),companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig+extraCosts+roundOff),remarks:clean(b.remarks),createdBy:user?._id});
   for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
-  const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig+extraCosts,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts, narration:`Sales and additional charges ${invoiceNo}`}];
+  const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig+extraCosts+roundOff,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts+roundOff, narration:`Sales and additional charges ${invoiceNo}`}];
   if(cg)voucherLines.push({ledger:outputCgst._id,debit:0,credit:cg,narration:`Output CGST ${invoiceNo}`});
   if(sg)voucherLines.push({ledger:outputSgst._id,debit:0,credit:sg,narration:`Output SGST ${invoiceNo}`});
   if(ig)voucherLines.push({ledger:outputIgst._id,debit:0,credit:ig,narration:`Output IGST ${invoiceNo}`});
@@ -852,12 +853,12 @@ export async function updateSale(req,res){
    const cost=r2(num(stock?.averageRate)*line.qty);
    await adjustStock({companyId,location,itemType:line.itemType,itemName:line.itemName,unit:line.unit,qty:line.qty,value:cost,mode:"SUBTRACT",hsn:line.hsn,batchNo:line.batchNo,barcode:line.barcode});
   }
-  const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),extraCosts=r2(labourCost+transportCost+otherCost);
-  Object.assign(invoice,{date:dt(b.date)||invoice.date,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines,subtotal:r2(subtotal),totalCGST:r2(cgstTotal),totalSGST:r2(sgstTotal),totalIGST:r2(igstTotal),grandTotal:r2(subtotal+cgstTotal+sgstTotal+igstTotal+extraCosts),remarks:clean(b.remarks)});
+  const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),roundOff=num(b.roundOff),extraCosts=r2(labourCost+transportCost+otherCost);
+  Object.assign(invoice,{date:dt(b.date)||invoice.date,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,roundOff,location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines,subtotal:r2(subtotal),totalCGST:r2(cgstTotal),totalSGST:r2(sgstTotal),totalIGST:r2(igstTotal),grandTotal:r2(subtotal+cgstTotal+sgstTotal+igstTotal+extraCosts+roundOff),remarks:clean(b.remarks)});
   await invoice.save();
   await GstLedger.deleteMany({companyId,sourceType:"SALE",sourceId:invoice._id});
   for(const line of lines)await GstLedger.create({companyId,sourceType:"SALE",sourceId:invoice._id,documentNo:invoice.invoiceNo,date:invoice.date,partyName:customer.name,partyGSTIN:customerGSTIN,location,hsn:line.hsn,taxableAmount:line.taxableAmount,cgst:line.cgst,sgst:line.sgst,igst:line.igst,gstRate:line.gstRate,supplyType:invoice.supplyType});
-  const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cgstTotal+sgstTotal+igstTotal+extraCosts,credit:0,narration:`Sales ${invoice.invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts,narration:`Sales and additional charges ${invoice.invoiceNo}`}];
+  const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cgstTotal+sgstTotal+igstTotal+extraCosts+roundOff,credit:0,narration:`Sales ${invoice.invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts+roundOff,narration:`Sales and additional charges ${invoice.invoiceNo}`}];
   if(cgstTotal)voucherLines.push({ledger:outputCgst._id,debit:0,credit:cgstTotal,narration:`Output CGST ${invoice.invoiceNo}`});
   if(sgstTotal)voucherLines.push({ledger:outputSgst._id,debit:0,credit:sgstTotal,narration:`Output SGST ${invoice.invoiceNo}`});
   if(igstTotal)voucherLines.push({ledger:outputIgst._id,debit:0,credit:igstTotal,narration:`Output IGST ${invoice.invoiceNo}`});
@@ -893,7 +894,7 @@ export async function importSalesUpload(req,res){
         const isInvoiceHeader = !!date && !!party && !!location && !!invoiceNo;
         if(!isInvoiceHeader) continue;
 
-        const invoice={date:date.toISOString().slice(0,10), location, customerName:party, invoiceNo, lines:[], salesAmount:0, outputCgst:0, outputSgst:0, roundOff:0};
+        const invoice={date:date.toISOString().slice(0,10), location, customerName:party, invoiceNo,headerTotal:parseImportNumber(row[8]||row[9]),lines:[],salesAmount:0,outputCgst:0,outputSgst:0,outputIgst:0,roundOff:0};
         let j=i+1;
         while(j<rows.length){
           const next = rows[j] || [];
@@ -917,7 +918,11 @@ export async function importSalesUpload(req,res){
           else if(label === "SALES ACCOUNT") invoice.salesAmount = Math.max(invoice.salesAmount, creditValue);
           else if(label === "OUTPUT CGST") invoice.outputCgst = Math.max(invoice.outputCgst, creditValue);
           else if(label === "OUTPUT SGST") invoice.outputSgst = Math.max(invoice.outputSgst, creditValue);
-          else if(label === "ROUND OFF") invoice.roundOff = parseImportNumber(next[8] || next[9] || next[4]);
+          else if(label === "OUTPUT IGST") invoice.outputIgst = Math.max(invoice.outputIgst, creditValue);
+          else if(label === "ROUND OFF") {
+            const roundOffValue=parseImportNumber(next[8] || next[9] || next[4]);
+            invoice.roundOff=/CR/i.test(clean(next[5]))?-roundOffValue:roundOffValue;
+          }
           else if(itemName && (qty>0 || rate>0 || amount>0)) invoice.lines.push({itemName, qty, rate, amount});
 
           j += 1;
@@ -925,7 +930,7 @@ export async function importSalesUpload(req,res){
 
         if(invoice.lines.length){
           const taxable = invoice.lines.reduce((sum,line)=>sum + parseImportNumber(line.amount),0);
-          const gstTotal = invoice.outputCgst + invoice.outputSgst;
+          const gstTotal = invoice.outputCgst + invoice.outputSgst + invoice.outputIgst;
           const gstRate = taxable>0 ? (gstTotal / taxable) * 100 : 0;
           const normalizedLines = invoice.lines.map(line=>{
             const itemAmount = parseImportNumber(line.amount) || (parseImportNumber(line.qty) * parseImportNumber(line.rate));
@@ -943,11 +948,77 @@ export async function importSalesUpload(req,res){
     const invoices = parseDayBookInvoices(rawRows);
     if(!invoices.length) return res.status(400).json({success:false,message:"No sale invoice headers were detected in the uploaded file. Please use the standard DayBook sale register layout.",errors:[]});
 
-    const created=[]; const errors=[];
     const companyId=req.user?.companyId||null;
     const companyScope={$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]};
+    let decisions={};
+    if(req.body?.decisions){
+      try{decisions=JSON.parse(req.body.decisions)}catch{throw new Error("Invalid invoice correction choices. Please upload and review the file again.");}
+    }
+    if(!req.body?.decisions){
+      const company=companyId?await Company.findById(companyId).select("state gstin").lean():null;
+      const preview=[];
+      for(const invoice of invoices){
+        const issues=[],blockingErrors=[];
+        const locationMaster=await LocationMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(invoice.location)}$`,"i")},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id state").lean();
+        const customerMaster=await CustomerMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(invoice.customerName)}$`,"i")},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id name gstin state").lean();
+        if(!locationMaster)blockingErrors.push(`Location Master not found: ${invoice.location}.`);
+        if(!customerMaster)blockingErrors.push(`Party Master not found: ${invoice.customerName}.`);
+        if(customerMaster){
+          const duplicate=await SalesInvoice.findOne({companyId,customerId:customerMaster._id,customerInvoiceNo:invoice.invoiceNo,importedFrom:"SALES_REGISTER_EXCEL",status:"POSTED"}).select("invoiceNo").lean();
+          if(duplicate)blockingErrors.push(`Already imported as ${duplicate.invoiceNo}.`);
+        }
+        const products=[];
+        let expectedTaxable=0,expectedGst=0,actualTaxable=0;
+        for(const line of invoice.lines){
+          const productMaster=await InventoryItemMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(line.itemName)}$`,"i")},{itemType:{$in:SALEABLE_ITEM_TYPES}},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("name itemType unit defaultGstRate").lean();
+          if(!productMaster){
+            blockingErrors.push(`Product Master not found: ${line.itemName}.`);
+            continue;
+          }
+          const expectedAmount=r2(num(line.qty)*num(line.rate));
+          const importedAmount=r2(num(line.amount));
+          if(Math.abs(expectedAmount-importedAmount)>0.01)issues.push(`${line.itemName}: Qty × Rate = ₹${formatImportMoney(expectedAmount)}, but Excel line amount is ₹${formatImportMoney(importedAmount)}.`);
+          const gstRate=productMaster.defaultGstRate===undefined||productMaster.defaultGstRate===null?num(line.gstRate):num(productMaster.defaultGstRate);
+          const expectedLineGst=r2(expectedAmount*gstRate/100);
+          expectedTaxable+=expectedAmount;actualTaxable+=importedAmount;expectedGst+=expectedLineGst;
+          const unit=clean(productMaster.unit||"KG").toUpperCase(),weight=packetWeightKg(productMaster.name);
+          const stockQty=weight>0&&!packetUnit(unit)?q6(num(line.qty)*weight):num(line.qty);
+          let stock=await InventoryStock.findOne({companyId,location:String(locationMaster?._id||""),itemType:productMaster.itemType,itemName:productMaster.name,batchNo:"",barcode:""}).select("qty unit").lean();
+          if(!stock&&productMaster.itemType==="PACKED_GOODS")stock=await InventoryStock.findOne({companyId,location:String(locationMaster?._id||""),itemType:"FINISHED_GOODS",itemName:productMaster.name,batchNo:"",barcode:""}).select("qty unit").lean();
+          if(locationMaster&&!stock)blockingErrors.push(`No stock record for ${productMaster.name} at ${invoice.location}.`);
+          else if(stock&&num(stock.qty)+0.000001<stockQty)blockingErrors.push(`Insufficient stock for ${productMaster.name}: available ${num(stock.qty)} ${stock.unit}, required ${stockQty} ${stock.unit}.`);
+          products.push({itemName:productMaster.name,qty:line.qty,rate:line.rate,excelAmount:importedAmount,calculatedAmount:expectedAmount,itemType:productMaster.itemType,unit});
+        }
+        const sourceState=clean(locationMaster?.state)||clean(company?.state)||GST_STATE[gstStateCode("",company?.gstin)]||"";
+        const customerState=GST_STATE[gstStateCode("",customerMaster?.gstin)]||clean(customerMaster?.state);
+        const sourceCode=gstStateCode(sourceState,company?.gstin),customerCode=gstStateCode(customerState,customerMaster?.gstin);
+        const actualGst=invoice.outputCgst+invoice.outputSgst+invoice.outputIgst;
+        if(expectedGst>0&&(!sourceCode||!customerCode))blockingErrors.push("GST state is missing for location or party; verify the state before importing.");
+        else if(expectedGst>0){
+          if(sourceCode===customerCode){
+            const expectedCgst=r2(expectedGst/2),expectedSgst=r2(expectedGst-expectedCgst);
+            if(Math.abs(invoice.outputIgst)>0.01||Math.abs(invoice.outputCgst-expectedCgst)>0.01||Math.abs(invoice.outputSgst-expectedSgst)>0.01)
+              issues.push(`Same-state sale should have CGST ₹${formatImportMoney(expectedCgst)} + SGST ₹${formatImportMoney(expectedSgst)} and IGST ₹0; Excel has CGST ₹${formatImportMoney(invoice.outputCgst)}, SGST ₹${formatImportMoney(invoice.outputSgst)}, IGST ₹${formatImportMoney(invoice.outputIgst)}.`);
+          }else if(Math.abs(invoice.outputCgst)>0.01||Math.abs(invoice.outputSgst)>0.01||Math.abs(invoice.outputIgst-expectedGst)>0.01)
+            issues.push(`Inter-state sale should have IGST ₹${formatImportMoney(expectedGst)} and CGST/SGST ₹0; Excel has CGST ₹${formatImportMoney(invoice.outputCgst)}, SGST ₹${formatImportMoney(invoice.outputSgst)}, IGST ₹${formatImportMoney(invoice.outputIgst)}.`);
+        }else if(Math.abs(actualGst)>0.01)issues.push(`Excel has GST ₹${formatImportMoney(actualGst)} but product GST rates calculate to ₹0.`);
+        if(Math.abs(actualTaxable-expectedTaxable)>0.01)
+          issues.push(`Excel item total is ₹${formatImportMoney(actualTaxable)}; Qty × Rate total is ₹${formatImportMoney(expectedTaxable)}.`);
+        const expectedTotal=r2(expectedTaxable+expectedGst+invoice.roundOff);
+        if(invoice.headerTotal>0&&Math.abs(invoice.headerTotal-expectedTotal)>0.01)
+          issues.push(`Invoice total should be ₹${formatImportMoney(expectedTotal)} (including round off ₹${formatImportMoney(invoice.roundOff)}); Excel header shows ₹${formatImportMoney(invoice.headerTotal)}.`);
+        preview.push({choiceKey:`${invoice.invoiceNo}::${invoice.customerName}::${invoice.date}`,invoiceNo:invoice.invoiceNo,date:invoice.date,customerName:invoice.customerName,location:invoice.location,lines:products,issues,blockingErrors,expectedSubtotal:r2(expectedTaxable),excelSubtotal:r2(actualTaxable),expectedCGST:sourceCode&&customerCode&&sourceCode===customerCode?r2(expectedGst/2):0,expectedSGST:sourceCode&&customerCode&&sourceCode===customerCode?r2(expectedGst-r2(expectedGst/2)):0,expectedIGST:sourceCode&&customerCode&&sourceCode!==customerCode?r2(expectedGst):0,excelCGST:invoice.outputCgst,excelSGST:invoice.outputSgst,excelIGST:invoice.outputIgst,roundOff:invoice.roundOff,expectedTotal,excelTotal:invoice.headerTotal});
+      }
+      return res.json({success:true,preview:true,message:`Review ${preview.length} invoice(s). Choose whether to correct and post each invoice.`,invoices:preview});
+    }
+
+    const created=[]; const errors=[];
     for(const invoice of invoices){
       try{
+        const choiceKey=`${invoice.invoiceNo}::${invoice.customerName}::${invoice.date}`;
+        const decision=String(decisions[choiceKey]||"").toUpperCase();
+        if(decision==="NO"){errors.push({invoice:invoice.invoiceNo,message:"Skipped. Correct this invoice in the spreadsheet manually, then upload it again."});continue;}
+        if(decision!=="YES")throw new Error("Choose Yes (correct and post) or No (skip) for this invoice in the preview.");
         const itemLines = invoice.lines.filter(line => line.itemName && (line.qty>0 || line.amount>0));
         if(!itemLines.length) throw new Error(`No product lines found for invoice ${invoice.invoiceNo}.`);
 
@@ -968,6 +1039,7 @@ export async function importSalesUpload(req,res){
           customerName: customerMaster.name,
           customerGSTIN: clean(customerMaster.gstin).toUpperCase(),
           customerState: clean(customerMaster.state),
+          roundOff:invoice.roundOff,
           importedFrom: "SALES_REGISTER_EXCEL",
           remarks: `Imported from DayBook invoice ${invoice.invoiceNo}`,
           lines: itemLines.map(line=>({
@@ -994,7 +1066,8 @@ export async function importSalesUpload(req,res){
           }
           line.unit=unit;
           line.itemType=productMaster.itemType;
-          line.gstRate=parseImportNumber(productMaster.defaultGstRate)||line.gstRate;
+          line.gstRate=productMaster.defaultGstRate===undefined||productMaster.defaultGstRate===null?line.gstRate:parseImportNumber(productMaster.defaultGstRate);
+          line.useMasterGstRate=true;
         }
 
         const result=await createSalesEntry(payload, req.user);
@@ -1002,6 +1075,7 @@ export async function importSalesUpload(req,res){
       }catch(error){errors.push({invoice:invoice.invoiceNo, message:error.message || "Invoice validation failed."});}
     }
 
+    if(!created.length&&errors.length&&errors.every(item=>item.message.startsWith("Skipped.")))return res.status(200).json({success:true,message:`All ${errors.length} invoice(s) were skipped as requested.`,createdCount:0,created,errors});
     if(!created.length){return res.status(400).json({success:false,message:"No valid sales rows were found in the upload. Review the validation errors.",errors})}
     return res.status(200).json({success:true,message:created.length===1?`1 sale invoice imported successfully.`:`${created.length} sale invoices imported successfully.`,createdCount:created.length,created,errors});
   }catch(e){return res.status(400).json({success:false,message:e.message||"Could not import uploaded sale file."})}
