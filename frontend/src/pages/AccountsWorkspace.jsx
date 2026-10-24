@@ -100,6 +100,8 @@ export default function AccountsWorkspace() {
   useEffect(() => {
 
     const handleKeyboard = (event) => {
+      // Let the active child workspace own a key after it has handled it.
+      if (event.defaultPrevented) return;
 
       const key =
         event.key.toLowerCase();
@@ -193,6 +195,27 @@ export default function AccountsWorkspace() {
         setActive("inventory");
 
         return;
+      }
+
+      /* Enter moves to the next enabled form field (Tally-style); Shift+Enter moves backwards.
+         Keep native behavior for buttons, textareas, and open selects. */
+      if (event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        const target = event.target;
+        const tag = target?.tagName;
+        const isTextArea = tag === "TEXTAREA";
+        const isButton = tag === "BUTTON" || target?.getAttribute?.("role") === "button";
+        const isSelect = tag === "SELECT";
+        if (!isTextArea && !isButton && !isSelect && contentRef.current?.contains(target)) {
+          const fields = Array.from(contentRef.current.querySelectorAll(
+            'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )).filter((el) => el.offsetParent !== null && el.getAttribute("aria-hidden") !== "true");
+          const index = fields.indexOf(target);
+          if (index >= 0) {
+            event.preventDefault();
+            const nextIndex = (index + (event.shiftKey ? -1 : 1) + fields.length) % fields.length;
+            fields[nextIndex]?.focus();
+          }
+        }
       }
 
       /* ESC */
