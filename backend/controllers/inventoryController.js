@@ -782,60 +782,111 @@ export async function importSalesUpload(req,res){
     try{ workbook = xlsx.read(req.file.buffer,{type:"buffer",cellDates:true}); }catch(error){ throw new Error("The file could not be read as spreadsheet data."); }
     const sheetName=workbook.SheetNames[0];
     if(!sheetName) return res.status(400).json({success:false,message:"The uploaded file has no worksheet."});
-    const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "", raw: false, blankrows: false });
-    if(!rows.length) return res.status(400).json({success:false,message:"No rows were found in the uploaded file."});
-    const normalizedRows = rows.map((row,index)=>{
-      const byKey={};
-      for(const [header,value] of Object.entries(row||{})){ byKey[normalizeImportHeader(header)] = value; }
-      return {rowNumber:index+2, row:byKey};
-    });
-    const created=[]; const errors=[];
-    for(const item of normalizedRows){
-      const raw=item.row;
-      const dateValue=importValue(raw,["date","invoice date","sale date","posting date"]);
-      const locationValue=importValue(raw,["location","location name","warehouse","branch","vch type","voucher type"]);
-      const partyValue=importValue(raw,["party","customer","customer name","party name","buyer","client"]);
-      const itemValue=importValue(raw,["item","product","product name","item name","goods","goods name","stock item","inventory item"]);
-      const inventoryNoValue=importValue(raw,["inventory no","inventory number","vch no","voucher no","voucher number"]);
-      const customerInvoiceNoValue=importValue(raw,["invoice no","invoice number","inv no","customer invoice no"]);
-      const customerInvoiceDateValue=importValue(raw,["inv date","invoice date","customer invoice date"]);
-      const qtyValue=importValue(raw,["qty","quantity","total qty","pcs","packets","kg"]);
-      const rateValue=importValue(raw,["rate","unit rate","sales rate","price","amount per unit"]);
-      const gstValue=importValue(raw,["gst","gst rate","gst %","tax %","vat %"]);
-      try{
-        const date = ensureImportDate(dateValue);
-        const payload={
-          date,
-          customerInvoiceNo: String(customerInvoiceNoValue||""),
-          customerInvoiceDate: parseImportDate(customerInvoiceDateValue),
-          labourCost: parseImportNumber(importValue(raw,["labour cost","labor cost","labour"])),
-          transportCost: parseImportNumber(importValue(raw,["transport cost","transport"])),
-          otherCost: parseImportNumber(importValue(raw,["other cost","other charges"])),
-          location: String(locationValue||""),
-          inventoryNo: String(inventoryNoValue||""),
-          importedFrom: "SALES_REGISTER_EXCEL",
-          customerName: String(partyValue||""),
-          customerGSTIN: String(importValue(raw,["gstin","customer gstin","party gstin"])||""),
-          customerState: String(importValue(raw,["customer state","state","party state"])||""),
-          remarks: String(importValue(raw,["remarks","notes","narration"])||""),
-          lines:[{itemName:String(itemValue||""),qty:parseImportNumber(qtyValue),rate:parseImportNumber(rateValue),gstRate:parseImportNumber(gstValue),unit:String(importValue(raw,["unit","qty unit"])||"KG").toUpperCase()||"KG",itemType:"FINISHED_GOODS"}]
-        };
-        if(!payload.location || !payload.customerName || !payload.lines[0].itemName) throw new Error("Missing location, party or item in row.");
-        if(payload.lines[0].qty<=0 || payload.lines[0].rate<=0) throw new Error("Qty and rate must be greater than zero.");
-        const companyId=req.user?.companyId||null;
-        const scope={$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]};
-        const locationMaster=await LocationMaster.findOne({$and:[scope,{name:payload.location},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id").lean();
-        if(!locationMaster) throw new Error(`Location Master not found: ${payload.location}. Create it manually before importing this invoice.`);
-        const customerMaster=await CustomerMaster.findOne({$and:[scope,{name:payload.customerName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id").lean();
-        if(!customerMaster) throw new Error(`Party Master not found: ${payload.customerName}. Create it manually before importing this invoice.`);
-        const productMaster=await InventoryItemMaster.findOne({companyId,name:payload.lines[0].itemName,itemType:{$in:["FINISHED_GOODS","PACKED_GOODS"]},$or:[{active:true},{active:{$exists:false}},{active:null}]}).select("_id").lean();
-        if(!productMaster) throw new Error(`Product Master not found: ${payload.lines[0].itemName}. Create it manually before importing this invoice.`);
-        const result=await createSalesEntry(payload, req.user);
-        created.push({row:item.rowNumber, invoiceNo:result.invoice.invoiceNo, customer:payload.customerName, location:payload.location, date:payload.date});
-      }catch(error){errors.push({row:item.rowNumber, message:error.message || "Row validation failed."});}
+    const rawRows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false, blankrows: false });
+    if(!rawRows.length) return res.status(400).json({success:false,message:"No rows were found in the uploaded file."});
+
+    function parseDayBookInvoices(rows){
+      const invoices=[];
+      for(let i=0;i<rows.length;i++){
+        const row = rows[i] || [];
+        const date = parseImportDate(row[0]);
+        const party = clean(row[1]);
+        const location = clean(row[6]);
+        const invoiceNo = clean(row[7]);
+        const isInvoiceHeader = !!date && !!party && !!location && !!invoiceNo;
+        if(!isInvoiceHeader) continue;
+
+        const invoice={date:date.toISOString().slice(0,10), location, customerName:party, invoiceNo, lines:[], salesAmount:0, outputCgst:0, outputSgst:0, roundOff:0};
+        let j=i+1;
+        while(j<rows.length){
+          const next = rows[j] || [];
+          const nextDate = parseImportDate(next[0]);
+          const nextParty = clean(next[1]);
+          const nextLocation = clean(next[6]);
+          const nextInvoiceNo = clean(next[7]);
+          const nextHeader = !!nextDate && !!nextParty && !!nextLocation && !!nextInvoiceNo;
+          if(nextHeader) break;
+
+          const itemName = clean(next[1]);
+          const qty = parseImportNumber(next[2]);
+          const rate = parseImportNumber(next[3]);
+          const amount = parseImportNumber(next[4]);
+          const creditValue = parseImportNumber(next[8] || next[9] || next[4]);
+          const label = itemName.toUpperCase();
+
+          if(label === "SALES ACCOUNT") invoice.salesAmount = Math.max(invoice.salesAmount, creditValue);
+          else if(label === "OUTPUT CGST") invoice.outputCgst = Math.max(invoice.outputCgst, creditValue);
+          else if(label === "OUTPUT SGST") invoice.outputSgst = Math.max(invoice.outputSgst, creditValue);
+          else if(label === "ROUND OFF") invoice.roundOff = parseImportNumber(next[8] || next[9] || next[4]);
+          else if(itemName && (qty>0 || rate>0 || amount>0)) invoice.lines.push({itemName, qty, rate, amount});
+
+          j += 1;
+        }
+
+        if(invoice.lines.length){
+          const taxable = invoice.lines.reduce((sum,line)=>sum + parseImportNumber(line.amount),0);
+          const gstTotal = invoice.outputCgst + invoice.outputSgst;
+          const gstRate = taxable>0 ? (gstTotal / taxable) * 100 : 0;
+          const normalizedLines = invoice.lines.map(line=>{
+            const itemAmount = parseImportNumber(line.amount) || (parseImportNumber(line.qty) * parseImportNumber(line.rate));
+            const itemRate = parseImportNumber(line.rate) || (itemAmount / Math.max(parseImportNumber(line.qty),1));
+            return {itemName:line.itemName, qty:parseImportNumber(line.qty), rate:itemRate, gstRate:r2(gstRate), itemType:"FINISHED_GOODS", amount:itemAmount};
+          });
+          invoice.lines = normalizedLines;
+          invoices.push(invoice);
+        }
+        i = j - 1;
+      }
+      return invoices;
     }
+
+    const invoices = parseDayBookInvoices(rawRows);
+    if(!invoices.length) return res.status(400).json({success:false,message:"No sale invoice headers were detected in the uploaded file. Please use the standard DayBook sale register layout.",errors:[]});
+
+    const created=[]; const errors=[];
+    const companyId=req.user?.companyId||null;
+    const companyScope={$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]};
+    for(const invoice of invoices){
+      try{
+        const itemLines = invoice.lines.filter(line => line.itemName && (line.qty>0 || line.amount>0));
+        if(!itemLines.length) throw new Error(`No product lines found for invoice ${invoice.invoiceNo}.`);
+
+        const locationMaster=await LocationMaster.findOne({$and:[companyScope,{name:invoice.location},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id state").lean();
+        if(!locationMaster) throw new Error(`Location Master not found: ${invoice.location}. Create it manually before importing this invoice.`);
+
+        const customerMaster=await CustomerMaster.findOne({$and:[companyScope,{name:invoice.customerName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id gstin state").lean();
+        if(!customerMaster) throw new Error(`Party Master not found: ${invoice.customerName}. Create it manually before importing this invoice.`);
+
+        const payload={
+          date: invoice.date,
+          location: invoice.location,
+          customerName: invoice.customerName,
+          customerGSTIN: clean(customerMaster.gstin).toUpperCase(),
+          customerState: clean(customerMaster.state),
+          remarks: `Imported from DayBook invoice ${invoice.invoiceNo}`,
+          lines: itemLines.map(line=>({
+            itemName: line.itemName,
+            qty: line.qty || (line.amount / Math.max(line.rate, 1)),
+            rate: line.rate || (line.amount / Math.max(line.qty, 1)),
+            gstRate: line.gstRate || 0,
+            itemType: "FINISHED_GOODS",
+            unit: "KG"
+          }))
+        };
+
+        for(const line of payload.lines){
+          const productMaster=await InventoryItemMaster.findOne({companyId,name:line.itemName,itemType:{$in:["FINISHED_GOODS","PACKED_GOODS"]},$or:[{active:true},{active:{$exists:false}},{active:null}]}).select("_id defaultGstRate").lean();
+          if(!productMaster) throw new Error(`Product Master not found: ${line.itemName}. Create it manually before importing this invoice.`);
+          if(!line.gstRate && productMaster.defaultGstRate) line.gstRate = parseImportNumber(productMaster.defaultGstRate);
+        }
+
+        const result=await createSalesEntry(payload, req.user);
+        created.push({invoiceNo:result.invoice.invoiceNo, customer:payload.customerName, location:payload.location, date:payload.date});
+      }catch(error){errors.push({invoice:invoice.invoiceNo, message:error.message || "Invoice validation failed."});}
+    }
+
     if(!created.length){return res.status(400).json({success:false,message:"No valid sales rows were found in the upload. Review the validation errors.",errors})}
-    return res.status(200).json({success:true,message:created.length===1?`1 sale row imported successfully.`:`${created.length} sale rows imported successfully.`,createdCount:created.length,created,errors});
+    return res.status(200).json({success:true,message:created.length===1?`1 sale invoice imported successfully.`:`${created.length} sale invoices imported successfully.`,createdCount:created.length,created,errors});
   }catch(e){return res.status(400).json({success:false,message:e.message||"Could not import uploaded sale file."})}
 }
 export async function getSales(req,res){try{const filter={status:"POSTED"};if(req.user?.companyId)filter.companyId=req.user.companyId;return listModel(req,res,SalesInvoice,filter,[{invoiceNo:1},{customerName:1},{"lines.itemName":1}])}catch(e){return res.status(500).json({success:false,message:e.message})}}
