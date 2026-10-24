@@ -31,6 +31,7 @@ const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const GST_STATE={
 "01":"Jammu and Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh","05":"Uttarakhand","06":"Haryana","07":"Delhi","08":"Rajasthan","09":"Uttar Pradesh","10":"Bihar","11":"Sikkim","12":"Arunachal Pradesh","13":"Nagaland","14":"Manipur","15":"Mizoram","16":"Tripura","17":"Meghalaya","18":"Assam","19":"West Bengal","20":"Jharkhand","21":"Odisha","22":"Chhattisgarh","23":"Madhya Pradesh","24":"Gujarat","26":"Dadra and Nagar Haveli and Daman and Diu","27":"Maharashtra","28":"Andhra Pradesh","29":"Karnataka","30":"Goa","31":"Lakshadweep","32":"Kerala","33":"Tamil Nadu","34":"Puducherry","35":"Andaman and Nicobar Islands","36":"Telangana","37":"Andhra Pradesh","38":"Ladakh"
 };
+const SALEABLE_ITEM_TYPES=["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS"];
 function gstStateCode(state,gstin=""){
  const code=clean(gstin).slice(0,2);
  if(GST_STATE[code])return code;
@@ -64,8 +65,8 @@ async function createSalesEntry(payload, user={}){
   const outputCgst=await ensureGstLedger("Output CGST", {user}),outputSgst=await ensureGstLedger("Output SGST", {user}),outputIgst=await ensureGstLedger("Output IGST", {user});
   const built=[];let subtotal=0,cg=0,sg=0,ig=0;
   for(const x of lines){
-    const itemName=clean(x.itemName),requestedItemType=["FINISHED_GOODS","PACKED_GOODS"].includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";
-    const itemTypes=requestedItemType==="PACKED_GOODS"?["PACKED_GOODS","FINISHED_GOODS"]:["FINISHED_GOODS","PACKED_GOODS"];
+    const itemName=clean(x.itemName),requestedItemType=SALEABLE_ITEM_TYPES.includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";
+    const itemTypes=requestedItemType==="PACKED_GOODS"?["PACKED_GOODS","FINISHED_GOODS"]:[requestedItemType];
     const itemMaster=await InventoryItemMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:new RegExp(`^${escapeRegExp(itemName)}$`,"i")},{itemType:{$in:itemTypes}},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("defaultGstRate hsn").lean();
     const qty=num(x.qty),rate=num(x.rate),discount=Math.min(Math.max(num(x.discount),0),qty*rate),taxable=r2(qty*rate-discount);
     const gstRate=Math.max(0,num(x.gstRate)||num(itemMaster?.defaultGstRate));
@@ -74,7 +75,7 @@ async function createSalesEntry(payload, user={}){
     const gst=gstType==="NONE"?0:r2(taxable*gstRate/100),c=gstType==="CGST_SGST"?r2(gst/2):0,s=gstType==="CGST_SGST"?r2(gst-c):0,i=gstType==="IGST"?gst:0;
     let st=await InventoryStock.findOne({companyId,location,itemType:requestedItemType,itemName,batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
     if(!st&&requestedItemType==="PACKED_GOODS")st=await InventoryStock.findOne({companyId,location,itemType:"FINISHED_GOODS",itemName,batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
-    if(!st||num(st.qty)<qty)throw new Error(`Insufficient ${requestedItemType==="PACKED_GOODS"?"packing":"finished goods"} stock for ${itemName}.`);
+    if(!st||num(st.qty)<qty)throw new Error(`Insufficient ${st?.itemType||requestedItemType} stock for ${itemName}. Available ${num(st?.qty)} ${clean(st?.unit)||clean(x.unit)}; required ${qty} ${clean(st?.unit)||clean(x.unit)}.`);
     built.push({...x,itemName,itemType:st.itemType,stockId:st._id,unit:clean(x.unit)||st.unit,qty,rate,discount,taxableAmount:taxable,hsn:clean(x.hsn)||st.hsn||itemMaster?.hsn||"",gstRate,gstType,cgst:c,sgst:s,igst:i,lineTotal:r2(taxable+c+s+i),batchNo:clean(x.batchNo),barcode:clean(x.barcode)});
     subtotal+=taxable;cg+=c;sg+=s;ig+=i;
   }
@@ -815,7 +816,10 @@ export async function importSalesUpload(req,res){
           const creditValue = parseImportNumber(next[8] || next[9] || next[4]);
           const label = itemName.toUpperCase();
 
-          if(label === "SALES ACCOUNT") invoice.salesAmount = Math.max(invoice.salesAmount, creditValue);
+          if(label === "NEW REF") {
+            // DayBook reference rows carry the invoice total but are not sale items.
+          }
+          else if(label === "SALES ACCOUNT") invoice.salesAmount = Math.max(invoice.salesAmount, creditValue);
           else if(label === "OUTPUT CGST") invoice.outputCgst = Math.max(invoice.outputCgst, creditValue);
           else if(label === "OUTPUT SGST") invoice.outputSgst = Math.max(invoice.outputSgst, creditValue);
           else if(label === "ROUND OFF") invoice.roundOff = parseImportNumber(next[8] || next[9] || next[4]);
@@ -876,13 +880,13 @@ export async function importSalesUpload(req,res){
             qty: line.qty || (line.amount / Math.max(line.rate, 1)),
             rate: line.rate || (line.amount / Math.max(line.qty, 1)),
             gstRate: line.gstRate || 0,
-            itemType: "FINISHED_GOODS",
+            itemType: "",
             unit: "KG"
           }))
         };
 
         for(const line of payload.lines){
-          const productMaster=await InventoryItemMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(line.itemName)}$`,"i")},{itemType:{$in:["FINISHED_GOODS","PACKED_GOODS"]},$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id name itemType unit defaultGstRate").lean();
+          const productMaster=await InventoryItemMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(line.itemName)}$`,"i")},{itemType:{$in:SALEABLE_ITEM_TYPES},$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id name itemType unit defaultGstRate").lean();
           if(!productMaster) throw new Error(`Product Master not found: ${line.itemName}. Create it manually before importing this invoice.`);
           line.itemName=productMaster.name;
           const unit=clean(productMaster.unit||"KG").toUpperCase();
