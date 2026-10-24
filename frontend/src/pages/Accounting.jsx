@@ -56,6 +56,8 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   const groupNameRef = useRef(null);
   const ledgerNameRef = useRef(null);
   const voucherDateRef = useRef(null);
+  const voucherTypeRef = useRef(null);
+  const partyLedgerRef = useRef(null);
 
   const [group, setGroup] = useState({
     name: "",
@@ -174,87 +176,83 @@ export default function Accounting({ initialTab = "groups" } = {}) {
 
   /* ======================================================
      KEYBOARD SHORTCUTS
+     Tally-style voucher keys are active only inside Voucher Entry.
   ====================================================== */
 
   useEffect(() => {
     const handleKeyboard = (e) => {
-      // Ctrl + G = Groups
-      if (e.ctrlKey && e.key.toLowerCase() === "g") {
-        e.preventDefault();
-        openTab("groups");
-      }
+      const key = e.key;
+      const lowerKey = key.toLowerCase();
 
-      // Ctrl + L = Ledgers
-      if (e.ctrlKey && e.key.toLowerCase() === "l") {
-        e.preventDefault();
-        openTab("ledgers");
-      }
-
-      // Ctrl + V = Voucher
-      if (e.ctrlKey && e.key.toLowerCase() === "v") {
-        e.preventDefault();
-        openTab("voucher");
-      }
-
-      // F4 = Groups
-      if (e.key === "F4") {
-        e.preventDefault();
-        openTab("groups");
-      }
-
-      // F5 = Ledgers
-      if (e.key === "F5") {
-        e.preventDefault();
-        openTab("ledgers");
-      }
-
-      // F6 = Voucher
-      if (e.key === "F6") {
-        e.preventDefault();
-        openTab("voucher");
-      }
-
-      // F8 = Voucher Center
-      if (e.key === "F8") {
-        e.preventDefault();
-        openVoucherCenter();
-      }
-
-      // F7 = Register
-      if (e.key === "F7") {
-        e.preventDefault();
-        openTab("register");
-      }
-
-      // Alt+C = Create
-      if (e.altKey && e.key.toLowerCase() === "c") {
-        e.preventDefault();
-
-        if (tab === "groups") {
-          groupNameRef.current?.focus();
+      // Inside Voucher Entry, use Tally-style function keys.
+      if (tab === "voucher") {
+        const voucherKeyMap = {
+          F4: "Contra",
+          F5: "Payment",
+          F6: "Receipt",
+          F7: "Journal",
+          F8: "Sales",
+          F9: "Purchase",
+        };
+        if (voucherKeyMap[key]) {
+          e.preventDefault();
+          setVoucher((old) => ({ ...old, type: voucherKeyMap[key] }));
+          setMessage("");
+          setError("");
+          return;
         }
-
-        if (tab === "ledgers") {
-          ledgerNameRef.current?.focus();
-        }
-
-        if (tab === "voucher") {
+        if (key === "F2") {
+          e.preventDefault();
           voucherDateRef.current?.focus();
+          return;
         }
+        if (key === "F10") {
+          e.preventDefault();
+          voucherTypeRef.current?.focus();
+          return;
+        }
+        if (key === "F11") {
+          e.preventDefault();
+          openTab("register");
+          return;
+        }
+      } else {
+        // Master/register navigation shortcuts outside Voucher Entry.
+        if (key === "F4") { e.preventDefault(); openTab("groups"); }
+        if (key === "F5") { e.preventDefault(); openTab("ledgers"); }
+        if (key === "F6") { e.preventDefault(); openTab("voucher"); }
+        if (key === "F7") { e.preventDefault(); openTab("register"); }
+        if (key === "F8") { e.preventDefault(); openVoucherCenter(); }
       }
 
-      // Escape
-      if (e.key === "Escape") {
+      if (e.ctrlKey && lowerKey === "g") {
+        e.preventDefault();
+        openTab("groups");
+      }
+      if (e.ctrlKey && lowerKey === "l") {
+        e.preventDefault();
+        openTab("ledgers");
+      }
+      if (e.ctrlKey && lowerKey === "v") {
+        e.preventDefault();
+        openTab("voucher");
+      }
+
+      if (e.altKey && lowerKey === "c") {
+        e.preventDefault();
+        if (tab === "groups") groupNameRef.current?.focus();
+        if (tab === "ledgers") ledgerNameRef.current?.focus();
+        if (tab === "voucher") partyLedgerRef.current?.focus();
+      }
+
+      if (key === "Escape") {
         setMessage("");
         setError("");
       }
     };
 
     window.addEventListener("keydown", handleKeyboard);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyboard);
-    };
+    return () => window.removeEventListener("keydown", handleKeyboard);
   }, [tab]);
 
   function openTab(nextTab) {
@@ -278,31 +276,52 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   }
 
   /* ======================================================
-     ENTER = NEXT FIELD
+     KEYBOARD-FIRST VOUCHER NAVIGATION
+     Enter/Shift+Enter move through fields. Up/Down moves within amount columns;
+     selects keep native Up/Down so ledger/type options remain selectable.
   ====================================================== */
 
   function handleEnter(e) {
+    if (e.ctrlKey && e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.requestSubmit();
+      return;
+    }
+
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       const target = e.target;
-      if (target?.matches?.("[data-voucher-field]")) {
+      const column = target?.dataset?.voucherColumn;
+      // Keep native select behaviour: Up/Down chooses a ledger/type option.
+      if (column && target.tagName !== "SELECT") {
         const form = e.currentTarget;
-        const fields = Array.from(form.querySelectorAll(`[data-voucher-field="${target.dataset.voucherField}"]:not([disabled])`)).filter(el => el.offsetParent !== null);
+        const fields = Array.from(
+          form.querySelectorAll(`[data-voucher-column="${column}"]:not([disabled])`)
+        ).filter((el) => el.offsetParent !== null);
         const index = fields.indexOf(target);
         const next = fields[index + (e.key === "ArrowDown" ? 1 : -1)];
-        if (next) { e.preventDefault(); next.focus(); if (next.select && next.tagName === "INPUT") next.select(); }
+        if (next) {
+          e.preventDefault();
+          next.focus();
+          if (typeof next.select === "function") next.select();
+        }
       }
       return;
     }
-    if (e.key !== "Enter" || e.target.tagName === "TEXTAREA") return;
-    if (e.target.tagName === "BUTTON") return;
+
+    if (e.key !== "Enter" || e.target.tagName === "TEXTAREA" || e.target.tagName === "BUTTON") return;
     e.preventDefault();
     const form = e.currentTarget;
-    const fields = Array.from(form.querySelectorAll("input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled])"))
-      .filter(el => el.offsetParent !== null && el.getAttribute("aria-hidden") !== "true");
+    const fields = Array.from(
+      form.querySelectorAll("input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled])")
+    ).filter((el) => el.offsetParent !== null && el.getAttribute("aria-hidden") !== "true");
     const currentIndex = fields.indexOf(e.target);
     const nextIndex = currentIndex + (e.shiftKey ? -1 : 1);
-    if (currentIndex >= 0 && nextIndex >= 0 && nextIndex < fields.length) fields[nextIndex].focus();
-    else if (!e.shiftKey) form.querySelector("button[type=submit], button:not([type])")?.focus();
+    if (currentIndex >= 0 && nextIndex >= 0 && nextIndex < fields.length) {
+      fields[nextIndex].focus();
+      if (fields[nextIndex].tagName === "INPUT" && fields[nextIndex].type !== "date") fields[nextIndex].select?.();
+    } else if (!e.shiftKey) {
+      form.querySelector("button[type=submit], button:not([type])")?.focus();
+    }
   }
 
   /* ======================================================
@@ -669,33 +688,28 @@ export default function Accounting({ initialTab = "groups" } = {}) {
       ================================================== */}
 
       <div className="keyboard-bar">
-        <span>
-          <kbd>F4</kbd> Groups
-        </span>
-
-        <span>
-          <kbd>F5</kbd> Ledgers
-        </span>
-
-        <span>
-          <kbd>F6</kbd> Voucher
-        </span>
-
-        <span>
-          <kbd>F7</kbd> Register
-        </span>
-
-        <span>
-          <kbd>Alt+C</kbd> Create
-        </span>
-
-        <span>
-          <kbd>Enter</kbd> Next
-        </span>
-
-        <span>
-          <kbd>Esc</kbd> Clear
-        </span>
+        {tab === "voucher" ? (
+          <>
+            <span><kbd>F2</kbd> Date</span>
+            <span><kbd>F4</kbd> Contra</span>
+            <span><kbd>F5</kbd> Payment</span>
+            <span><kbd>F6</kbd> Receipt</span>
+            <span><kbd>F7</kbd> Journal</span>
+            <span><kbd>F8</kbd> Sales</span>
+            <span><kbd>F9</kbd> Purchase</span>
+            <span><kbd>F10</kbd> Other Vouchers</span>
+          </>
+        ) : (
+          <>
+            <span><kbd>F4</kbd> Groups</span>
+            <span><kbd>F5</kbd> Ledgers</span>
+            <span><kbd>F6</kbd> Voucher</span>
+            <span><kbd>F7</kbd> Register</span>
+            <span><kbd>Alt+C</kbd> Create</span>
+            <span><kbd>Enter</kbd> Next</span>
+            <span><kbd>Esc</kbd> Clear</span>
+          </>
+        )}
       </div>
 
       {/* ==================================================
@@ -892,335 +906,167 @@ export default function Accounting({ initialTab = "groups" } = {}) {
 
       {tab === "voucher" && (
         <form
-          className="voucher-panel"
+          className="voucher-panel tally-voucher-panel"
           onSubmit={saveVoucher}
           onKeyDown={handleEnter}
         >
-          <div className="voucher-header">
-            <div>
-              <span>
-                TRANSACTION
-              </span>
-
-              <h2>Voucher Entry</h2>
-
-              <p>
-                Double-entry accounting
-              </p>
-            </div>
-
-            <div
-              className={
-                Math.abs(difference) < 0.005
-                  ? "balanced"
-                  : "not-balanced"
-              }
-            >
-              {Math.abs(difference) <
-              0.005
-                ? "✓ BALANCED"
-                : `Difference ${money(
-                    Math.abs(difference)
-                  )}`}
-            </div>
-          </div>
-
-          <div className="voucher-top">
-            <div>
-              <label>Date</label>
-
-              <input
-                ref={voucherDateRef}
-                autoFocus
-                type="date"
-                value={voucher.date}
-                onChange={(e) =>
-                  setVoucher({
-                    ...voucher,
-                    date: e.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div>
-              <label>Voucher Type</label>
-
-              <select
-                value={voucher.type}
-                onChange={(e) =>
-                  setVoucher({
-                    ...voucher,
-                    type: e.target.value,
-                  })
-                }
-              >
-                {voucherTypes.map(
-                  (type) => (
-                    <option key={type}>
-                      {type}
-                    </option>
-                  )
-                )}
-              </select>
-            </div>
-
-            <div>
-              <label>Reference No.</label>
-
-              <input
-                value={
-                  voucher.referenceNo
-                }
-                onChange={(e) =>
-                  setVoucher({
-                    ...voucher,
-                    referenceNo:
-                      e.target.value,
-                  })
-                }
-                placeholder="Optional"
-              />
-            </div>
-
-            <div>
-              <label>Party Ledger</label>
-
-              <select
-                value={
-                  voucher.partyLedger
-                }
-                onChange={(e) =>
-                  setVoucher({
-                    ...voucher,
-                    partyLedger:
-                      e.target.value,
-                  })
-                }
-              >
-                <option value="">
-                  Select Party
-                </option>
-
-                {ledgers.map((item) => (
-                  <option
-                    key={item._id}
-                    value={item._id}
-                  >
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {allocationBillType && (
-            <section style={{ margin: "14px 0", padding: 14, border: "1px solid #d0d5dd", borderRadius: 10, background: "#f9fafb" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div>
-                  <strong>Bill-wise Adjustment</strong>
-                  <div style={{ fontSize: 12, color: "#667085", marginTop: 4 }}>
-                    {voucher.type} will be allocated against {allocationBillType === "SALE" ? "Sales Bills / Customer Invoices" : "Purchase Bills / Supplier Invoices"}. Allocation cannot exceed bill outstanding.
-                  </div>
-                </div>
-                <button type="button" onClick={addBillAllocation} disabled={!voucher.partyLedger || loadingBills || openBills.length === 0} className="add-line">+ Allocate Bill</button>
-              </div>
-              {!voucher.partyLedger && <p style={{ color: "#b42318", marginBottom: 0 }}>Select a Party Ledger to load outstanding bills.</p>}
-              {loadingBills && <p style={{ marginBottom: 0 }}>Loading outstanding bills…</p>}
-              {!loadingBills && voucher.partyLedger && openBills.length === 0 && <p style={{ marginBottom: 0 }}>No open bills found for this party.</p>}
-              {billAllocations.map((row, index) => (
-                <div key={`${index}-${row.invoiceId}`} style={{ display: "grid", gridTemplateColumns: "minmax(180px,2fr) minmax(120px,1fr) auto", gap: 8, marginTop: 10, alignItems: "end" }}>
-                  <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 700 }}>Bill
-                    <select value={row.invoiceId} onChange={e => updateBillAllocation(index, "invoiceId", e.target.value)} style={{ minWidth: 0, padding: 9, border: "1px solid #d0d5dd", borderRadius: 6 }}>
-                      <option value="">Select outstanding bill</option>
-                      {openBills.map(bill => <option key={bill._id} value={bill._id}>{bill.invoiceNo} · {new Date(bill.date).toLocaleDateString("en-IN")} · Due ₹{Number(bill.outstanding).toFixed(2)}</option>)}
-                    </select>
-                  </label>
-                  <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 700 }}>Allocated Amount
-                    <input type="number" min="0.01" max={openBills.find(b => b._id === row.invoiceId)?.outstanding || undefined} step="0.01" value={row.amount} onChange={e => updateBillAllocation(index, "amount", e.target.value)} placeholder="0.00" style={{ padding: 9, border: "1px solid #d0d5dd", borderRadius: 6, width: "100%" }} />
-                  </label>
-                  <button type="button" className="delete-line" aria-label="Remove bill allocation" onClick={() => setBillAllocations(old => old.filter((_, i) => i !== index))}>×</button>
-                </div>
-              ))}
-              {billAllocations.length > 0 && <div style={{ textAlign: "right", fontWeight: 700, marginTop: 10 }}>Allocated: {money(billAllocations.reduce((sum, row) => sum + (Number(row.amount) || 0), 0))}</div>}
-            </section>
-          )}
-
-          <div className="voucher-table-head">
-            <span>#</span>
-            <span>LEDGER</span>
-            <span>DEBIT</span>
-            <span>CREDIT</span>
-            <span>NARRATION</span>
-            <span></span>
-          </div>
-
-          <div className="voucher-lines">
-            {voucher.lines.map(
-              (line, index) => (
-                <div
-                  className="voucher-line"
-                  key={index}
-                >
-                  <b>
-                    {String(
-                      index + 1
-                    ).padStart(2, "0")}
-                  </b>
-
-                  <select
-                    data-voucher-field="ledger"
-                    value={
-                      line.ledger
-                    }
-                    onChange={(e) =>
-                      updateLine(
-                        index,
-                        "ledger",
-                        e.target.value
-                      )
-                    }
-                  >
-                    <option value="">
-                      Select Ledger
-                    </option>
-
-                    {ledgers.map(
-                      (item) => (
-                        <option
-                          key={item._id}
-                          value={
-                            item._id
-                          }
-                        >
-                          {item.name}
-                        </option>
-                      )
-                    )}
-                  </select>
-
-                  <input
-                    data-voucher-field="debit"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={
-                      line.debit
-                    }
-                    onChange={(e) =>
-                      updateLine(
-                        index,
-                        "debit",
-                        e.target.value
-                      )
-                    }
-                    placeholder="0.00"
-                  />
-
-                  <input
-                    data-voucher-field="credit"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={
-                      line.credit
-                    }
-                    onChange={(e) =>
-                      updateLine(
-                        index,
-                        "credit",
-                        e.target.value
-                      )
-                    }
-                    placeholder="0.00"
-                  />
-
-                  <input
-                    data-voucher-field="line-narration"
-                    value={
-                      line.narration
-                    }
-                    onChange={(e) =>
-                      updateLine(
-                        index,
-                        "narration",
-                        e.target.value
-                      )
-                    }
-                    placeholder="Narration"
-                  />
-
-                  <button
-                    type="button"
-                    className="delete-line"
-                    onClick={() =>
-                      removeLine(index)
-                    }
-                  >
-                    ×
-                  </button>
-                </div>
-              )
-            )}
-          </div>
-
-          <div className="voucher-actions">
-            <button
-              type="button"
-              className="add-line"
-              onClick={addLine}
-            >
-              + Add Line
-            </button>
-
-            <div className="totals">
+          <div className="tally-voucher-main">
+            <div className="tally-voucher-titlebar">
               <div>
-                Debit
-                <strong>
-                  {money(totalDebit)}
-                </strong>
+                <span className="tally-kicker">BUSINESS SOFTWARE · TRANSACTION</span>
+                <h2>Voucher Entry</h2>
+                <p>Keyboard-first double-entry accounting</p>
               </div>
-
-              <div>
-                Credit
-                <strong>
-                  {money(totalCredit)}
-                </strong>
+              <div className="tally-title-status">
+                <div className="tally-voucher-date-label">{voucher.date ? new Date(`${voucher.date}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Select date"}</div>
+                <div className={totalDebit + totalCredit > 0 && Math.abs(difference) < 0.005 ? "balanced" : "not-balanced"}>
+                  {totalDebit + totalCredit === 0 ? "ENTER AMOUNTS" : Math.abs(difference) < 0.005 ? "✓ BALANCED" : `DIFFERENCE ${money(Math.abs(difference))}`}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="voucher-bottom">
-            <div>
-              <label>
-                Voucher Narration
+            <div className="tally-voucher-meta">
+              <label className="tally-field">
+                <span>Date <kbd>F2</kbd></span>
+                <input
+                  ref={voucherDateRef}
+                  autoFocus
+                  data-voucher-meta="date"
+                  type="date"
+                  value={voucher.date}
+                  onChange={(e) => setVoucher({ ...voucher, date: e.target.value })}
+                />
               </label>
-
-              <input
-                value={
-                  voucher.narration
-                }
-                onChange={(e) =>
-                  setVoucher({
-                    ...voucher,
-                    narration:
-                      e.target.value,
-                  })
-                }
-                placeholder="Enter transaction narration"
-              />
+              <label className="tally-field">
+                <span>Voucher Type <kbd>F10</kbd></span>
+                <select
+                  ref={voucherTypeRef}
+                  value={voucher.type}
+                  onChange={(e) => setVoucher({ ...voucher, type: e.target.value })}
+                >
+                  {voucherTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </label>
+              <label className="tally-field">
+                <span>Reference / Voucher Ref.</span>
+                <input value={voucher.referenceNo} onChange={(e) => setVoucher({ ...voucher, referenceNo: e.target.value })} placeholder="Enter reference number" />
+              </label>
             </div>
 
-            <button
-              className="save-voucher"
-              disabled={saving}
-            >
-              {saving
-                ? "Saving..."
-                : "Save Voucher"}
-              <kbd>Enter</kbd>
-            </button>
+            <div className="tally-party-band">
+              <label className="tally-field tally-party-field">
+                <span>Party A/c Name</span>
+                <select
+                  ref={partyLedgerRef}
+                  value={voucher.partyLedger}
+                  onChange={(e) => setVoucher({ ...voucher, partyLedger: e.target.value })}
+                >
+                  <option value="">Select Party Ledger</option>
+                  {ledgers.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+                </select>
+              </label>
+              <div className="tally-current-type">
+                <span>VOUCHER TYPE</span>
+                <strong>{voucher.type.toUpperCase()}</strong>
+              </div>
+            </div>
+
+            {allocationBillType && (
+              <section className="tally-billwise">
+                <div className="tally-billwise-header">
+                  <div>
+                    <strong>Bill-wise Adjustment</strong>
+                    <p>{voucher.type} against {allocationBillType === "SALE" ? "Sales Bills / Customer Invoices" : "Purchase Bills / Supplier Invoices"}</p>
+                  </div>
+                  <button type="button" onClick={addBillAllocation} disabled={!voucher.partyLedger || loadingBills || openBills.length === 0} className="add-line">+ Allocate Bill</button>
+                </div>
+                {!voucher.partyLedger && <p className="tally-inline-note">Select a Party Ledger to load outstanding bills.</p>}
+                {loadingBills && <p className="tally-inline-note">Loading outstanding bills…</p>}
+                {!loadingBills && voucher.partyLedger && openBills.length === 0 && <p className="tally-inline-note">No open bills found for this party.</p>}
+                {billAllocations.map((row, index) => (
+                  <div className="tally-allocation-row" key={`${index}-${row.invoiceId}`}>
+                    <label className="tally-field">
+                      <span>Against Bill</span>
+                      <select value={row.invoiceId} onChange={(e) => updateBillAllocation(index, "invoiceId", e.target.value)}>
+                        <option value="">Select outstanding bill</option>
+                        {openBills.map((bill) => <option key={bill._id} value={bill._id}>{bill.invoiceNo} · {new Date(bill.date).toLocaleDateString("en-IN")} · Due {money(bill.outstanding)}</option>)}
+                      </select>
+                    </label>
+                    <label className="tally-field">
+                      <span>Allocated Amount (₹)</span>
+                      <input type="number" min="0.01" max={openBills.find((bill) => bill._id === row.invoiceId)?.outstanding || undefined} step="0.01" value={row.amount} onChange={(e) => updateBillAllocation(index, "amount", e.target.value)} placeholder="0.00" />
+                    </label>
+                    <button type="button" className="delete-line" aria-label="Remove bill allocation" onClick={() => setBillAllocations((old) => old.filter((_, i) => i !== index))}>×</button>
+                  </div>
+                ))}
+                {billAllocations.length > 0 && <div className="tally-allocation-total">Allocated: {money(billAllocations.reduce((sum, row) => sum + (Number(row.amount) || 0), 0))}</div>}
+              </section>
+            )}
+
+            <div className="tally-ledger-grid">
+              <div className="tally-ledger-head">
+                <span>No.</span><span>Particulars / Ledger</span><span>Debit (₹)</span><span>Credit (₹)</span><span>Narration</span><span></span>
+              </div>
+              <div className="voucher-lines tally-voucher-lines">
+                {voucher.lines.map((line, index) => (
+                  <div className="voucher-line tally-voucher-line" key={index}>
+                    <b>{String(index + 1).padStart(2, "0")}</b>
+                    <select value={line.ledger} onChange={(e) => updateLine(index, "ledger", e.target.value)} aria-label={`Ledger line ${index + 1}`}>
+                      <option value="">Select Ledger</option>
+                      {ledgers.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+                    </select>
+                    <input data-voucher-column="debit" type="number" min="0" step="0.01" value={line.debit} onChange={(e) => updateLine(index, "debit", e.target.value)} placeholder="0.00" aria-label={`Debit line ${index + 1}`} />
+                    <input data-voucher-column="credit" type="number" min="0" step="0.01" value={line.credit} onChange={(e) => updateLine(index, "credit", e.target.value)} placeholder="0.00" aria-label={`Credit line ${index + 1}`} />
+                    <input value={line.narration} onChange={(e) => updateLine(index, "narration", e.target.value)} placeholder="Line narration" aria-label={`Narration line ${index + 1}`} />
+                    <button type="button" className="delete-line" aria-label={`Remove ledger line ${index + 1}`} onClick={() => removeLine(index)}>×</button>
+                  </div>
+                ))}
+              </div>
+              <div className="tally-ledger-foot">
+                <span></span><strong>Total</strong><strong>{money(totalDebit)}</strong><strong>{money(totalCredit)}</strong><span></span><span></span>
+              </div>
+            </div>
+
+            <div className="tally-voucher-actions">
+              <button type="button" className="add-line" onClick={addLine}>+ Add Line</button>
+              <div className="tally-difference">
+                <span>Difference</span><strong className={Math.abs(difference) < 0.005 ? "tally-zero-difference" : "tally-has-difference"}>{money(Math.abs(difference))}</strong>
+              </div>
+            </div>
+
+            <div className="tally-voucher-footer">
+              <label className="tally-field tally-narration-field">
+                <span>Voucher Narration</span>
+                <input value={voucher.narration} onChange={(e) => setVoucher({ ...voucher, narration: e.target.value })} placeholder="Being ..." />
+              </label>
+              <button type="submit" className="save-voucher" disabled={saving || totalDebit <= 0 || Math.abs(difference) > 0.005}>
+                {saving ? "Saving…" : "Save Voucher"}<kbd>Ctrl+Enter</kbd>
+              </button>
+            </div>
+            <div className="tally-keyboard-hint">Enter: next field · Shift+Enter: previous field · ↑/↓: move between amount rows · Esc: clear notices</div>
           </div>
+
+          <aside className="tally-function-panel" aria-label="Voucher function keys">
+            <div className="tally-function-title">Voucher Keys</div>
+            <button type="button" onClick={() => voucherDateRef.current?.focus()}><kbd>F2</kbd><span>Date</span></button>
+            <div className="tally-function-divider" />
+            {[
+              ["F4", "Contra", "Contra"],
+              ["F5", "Payment", "Payment"],
+              ["F6", "Receipt", "Receipt"],
+              ["F7", "Journal", "Journal"],
+              ["F8", "Sales", "Sales"],
+              ["F9", "Purchase", "Purchase"],
+            ].map(([key, label, type]) => (
+              <button type="button" key={key} className={voucher.type === type ? "active" : ""} onClick={() => { setVoucher((old) => ({ ...old, type })); setMessage(""); setError(""); }}>
+                <kbd>{key}</kbd><span>{label}</span>
+              </button>
+            ))}
+            <button type="button" onClick={() => voucherTypeRef.current?.focus()}><kbd>F10</kbd><span>Other Vouchers</span></button>
+            <div className="tally-function-divider" />
+            <button type="button" onClick={() => openTab("register")}><kbd>F11</kbd><span>Register</span></button>
+            <button type="button" onClick={() => { setMessage(""); setError(""); }}><kbd>Esc</kbd><span>Clear Notice</span></button>
+          </aside>
         </form>
       )}
 
@@ -2259,4 +2105,95 @@ kbd {
     min-width: 600px;
   }
 }
+
+/* TALLY-STYLE VOUCHER ENTRY: visual/navigation layer only; API and posting logic stay unchanged */
+.tally-voucher-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 176px;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #a8bacb;
+  border-radius: 4px;
+  background: #fff7fc;
+  box-shadow: 0 8px 24px rgba(25, 54, 82, .08);
+  color: #101820;
+}
+.tally-voucher-main { min-width: 0; padding: 0 0 14px; }
+.tally-voucher-titlebar {
+  min-height: 70px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  color: #fff; background: #1766a5; border-bottom: 3px solid #9ccce8;
+}
+.tally-voucher-titlebar .tally-kicker { display: block; color: #d5eafa; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.tally-voucher-titlebar h2 { margin: 4px 0 1px; font-size: 22px; line-height: 1.1; letter-spacing: 0; color: white; }
+.tally-voucher-titlebar p { margin: 0; color: #e6f4ff; font-size: 11px; }
+.tally-title-status { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.tally-title-status .balanced, .tally-title-status .not-balanced { padding: 5px 8px; border-radius: 3px; font-size: 9px; white-space: nowrap; }
+.tally-voucher-date-label { font-size: 12px; font-weight: 800; color: #fff; }
+.tally-voucher-meta { display: grid; grid-template-columns: minmax(135px, .8fr) minmax(150px, 1fr) minmax(180px, 1.2fr); gap: 12px; padding: 12px 14px 10px; border-bottom: 1px solid #d9cbd5; }
+.tally-field { min-width: 0; display: flex !important; flex-direction: column; gap: 5px; margin: 0 !important; color: #233a4a !important; font-size: 11px !important; font-weight: 800 !important; }
+.tally-field > span { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.tally-field > span kbd { padding: 1px 4px; font-size: 9px; }
+.tally-voucher-panel .tally-field input, .tally-voucher-panel .tally-field select {
+  min-width: 0; height: 34px; padding: 6px 8px; border: 1px solid #aebdca; border-radius: 2px; background: #fffefa; color: #111827; font-size: 12px; box-shadow: none;
+}
+.tally-voucher-panel .tally-field input:focus, .tally-voucher-panel .tally-field select:focus { border-color: #1766a5; outline: 2px solid rgba(23, 102, 165, .2); box-shadow: none; }
+.tally-party-band { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 18px; padding: 10px 14px; border-bottom: 1px solid #d9cbd5; background: #fffafd; }
+.tally-party-field select { font-weight: 800 !important; }
+.tally-current-type { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; padding: 0 2px 7px 8px; }
+.tally-current-type span { font-size: 9px; color: #68798a; font-weight: 900; letter-spacing: .08em; }
+.tally-current-type strong { font-size: 12px; color: #175f99; }
+.tally-billwise { margin: 12px 14px; padding: 10px; border: 1px solid #c9d6df; background: #f7fbfe; border-radius: 3px; }
+.tally-billwise-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tally-billwise-header strong { color: #174e78; font-size: 12px; }
+.tally-billwise-header p { margin: 3px 0 0; color: #657786; font-size: 10px; }
+.tally-inline-note { margin: 8px 0 0; color: #7b5565; font-size: 11px; }
+.tally-allocation-row { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(130px, .8fr) 30px; align-items: end; gap: 8px; margin-top: 8px; }
+.tally-allocation-total { text-align: right; font-size: 11px; font-weight: 900; margin-top: 8px; color: #154f7f; }
+.tally-ledger-grid { margin: 10px 14px 0; border: 1px solid #c8d2db; background: #fffafd; }
+.tally-ledger-head, .tally-voucher-line, .tally-ledger-foot { display: grid; grid-template-columns: 38px minmax(160px, 1.55fr) minmax(105px, .8fr) minmax(105px, .8fr) minmax(130px, 1fr) 30px; gap: 6px; align-items: center; }
+.tally-ledger-head { min-height: 32px; padding: 5px 8px; background: #dceefa; color: #123e60; font-size: 10px; font-weight: 900; border-bottom: 1px solid #b3c8d8; }
+.tally-voucher-lines { background: #fff7fc; }
+.tally-voucher-line { padding: 5px 8px; min-height: 43px; border-bottom: 1px solid #efe3eb; }
+.tally-voucher-line:last-child { border-bottom: 1px solid #c8d2db; }
+.tally-voucher-line > b { padding-left: 4px; font-size: 10px; color: #536b7e; }
+.tally-voucher-panel .tally-voucher-line input, .tally-voucher-panel .tally-voucher-line select { height: 32px; min-width: 0; padding: 5px 7px; border: 1px solid #d0d5da; border-radius: 2px; background: #fffefa; color: #111827; font-size: 11px; }
+.tally-voucher-panel .tally-voucher-line input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+.tally-ledger-foot { min-height: 36px; padding: 5px 8px; background: #edf6fc; color: #143f60; font-size: 11px; }
+.tally-ledger-foot strong:nth-child(3), .tally-ledger-foot strong:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
+.tally-voucher-actions { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 10px 14px 0; }
+.tally-difference { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #526779; font-weight: 800; }
+.tally-zero-difference { color: #137044; }
+.tally-has-difference { color: #b42318; }
+.tally-voucher-footer { display: grid; grid-template-columns: minmax(0,1fr) 185px; gap: 12px; align-items: end; margin: 12px 14px 0; padding-top: 10px; border-top: 1px solid #d9cbd5; }
+.tally-narration-field input { width: 100%; }
+.tally-voucher-panel .save-voucher { height: 37px; border-radius: 3px; background: #1766a5; font-size: 12px; }
+.tally-voucher-panel .save-voucher:disabled { opacity: .55; cursor: not-allowed; }
+.tally-voucher-panel .save-voucher kbd { margin-left: 6px; padding: 2px 4px; font-size: 9px; }
+.tally-keyboard-hint { padding: 8px 14px 0; font-size: 9px; color: #6c7e8c; }
+.tally-function-panel { min-width: 0; padding: 0 7px 10px; border-left: 1px solid #b9ccd8; background: #deeff8; display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
+.tally-function-title { margin: 0 -7px 5px; padding: 11px 9px; background: #c1e0f0; border-bottom: 1px solid #9abfd5; color: #164769; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+.tally-function-panel button { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 32px; border: 0; border-bottom: 1px solid #b5d2e1; border-radius: 0; padding: 5px 3px; text-align: left; background: transparent; color: #173e59; font-size: 11px; cursor: pointer; }
+.tally-function-panel button:hover, .tally-function-panel button.active { background: #b8ddef; color: #0b3552; }
+.tally-function-panel button kbd { flex: 0 0 auto; min-width: 29px; text-align: center; background: #f6fbfe; border: 1px solid #98bacd; border-bottom-width: 2px; border-radius: 2px; padding: 3px 4px; color: #1c5e8a; font-size: 9px; }
+.tally-function-panel button span { min-width: 0; }
+.tally-function-divider { height: 6px; }
+@media (max-width: 1100px) {
+  .tally-voucher-panel { grid-template-columns: minmax(0, 1fr) 150px; }
+  .tally-ledger-head, .tally-voucher-line, .tally-ledger-foot { grid-template-columns: 28px minmax(120px, 1.4fr) minmax(82px, .7fr) minmax(82px, .7fr) minmax(100px, 1fr) 26px; gap: 4px; }
+}
+@media (max-width: 760px) {
+  .tally-voucher-panel { grid-template-columns: minmax(0,1fr); }
+  .tally-function-panel { border-left: 0; border-top: 1px solid #b9ccd8; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); padding: 8px; }
+  .tally-function-title { grid-column: 1 / -1; margin: -8px -8px 4px; }
+  .tally-function-divider { display: none; }
+  .tally-voucher-meta { grid-template-columns: 1fr 1fr; }
+  .tally-voucher-meta .tally-field:last-child { grid-column: 1 / -1; }
+  .tally-party-band { grid-template-columns: minmax(0,1fr); }
+  .tally-current-type { align-items: flex-start; padding: 0; }
+  .tally-ledger-grid { overflow-x: auto; }
+  .tally-ledger-head, .tally-voucher-line, .tally-ledger-foot { min-width: 740px; }
+  .tally-voucher-footer { grid-template-columns: minmax(0,1fr); }
+}
+
 `;
