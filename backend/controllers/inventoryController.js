@@ -22,6 +22,7 @@ import { ensureProductOpeningStock } from "../services/accountsMasterService.js"
 import mongoose from "mongoose";
 import xlsx from "xlsx";
 function clean(v){return String(v??"").trim()} function num(v){const n=Number(v);return Number.isFinite(n)?n:0} function r2(v){return Math.round((num(v)+Number.EPSILON)*100)/100} function q6(v){return Math.round((num(v)+Number.EPSILON)*1000000)/1000000} function dt(v){if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d}
+function escapeRegExp(value){return String(value).replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}
 function packetWeightKg(name){const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);if(!match)return 0;const amount=Number(match[1]);return q6(/^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000)}
 function packetUnit(unit){return ["PC","PCS","PACKET","PACKETS","PIECE","PIECES"].includes(clean(unit).toUpperCase())}
 function plannedOutput(line){const weight=num(line.packetWeightKg)||packetWeightKg(line.itemName),hasPacketPlan=num(line.packetCount)>0;const packetCount=hasPacketPlan?num(line.packetCount):weight>0?(packetUnit(line.unit)?num(line.qty):num(line.qty)/weight):0;const qty=hasPacketPlan&&weight>0?packetCount*weight:weight>0&&!packetUnit(line.unit)?num(line.qty):weight>0?num(line.qty)*weight:num(line.qty);return {packetCount:q6(packetCount),packetWeightKg:weight,qty:q6(qty)}}
@@ -65,7 +66,7 @@ async function createSalesEntry(payload, user={}){
   for(const x of lines){
     const itemName=clean(x.itemName),requestedItemType=["FINISHED_GOODS","PACKED_GOODS"].includes(String(x.itemType||""))?String(x.itemType):"FINISHED_GOODS";
     const itemTypes=requestedItemType==="PACKED_GOODS"?["PACKED_GOODS","FINISHED_GOODS"]:["FINISHED_GOODS","PACKED_GOODS"];
-    const itemMaster=await InventoryItemMaster.findOne({companyId,name:itemName,itemType:{$in:itemTypes}}).select("defaultGstRate hsn").lean();
+    const itemMaster=await InventoryItemMaster.findOne({$and:[{$or:[{companyId},{companyId:null},{companyId:{$exists:false}}]},{name:new RegExp(`^${escapeRegExp(itemName)}$`,"i")},{itemType:{$in:itemTypes}},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("defaultGstRate hsn").lean();
     const qty=num(x.qty),rate=num(x.rate),discount=Math.min(Math.max(num(x.discount),0),qty*rate),taxable=r2(qty*rate-discount);
     const gstRate=Math.max(0,num(x.gstRate)||num(itemMaster?.defaultGstRate));
     if(gstRate>0&&(!sourceStateCode||!customerStateCode))throw new Error("GST cannot be calculated automatically. Add the state to the selected location and customer / party.");
@@ -851,18 +852,24 @@ export async function importSalesUpload(req,res){
         const itemLines = invoice.lines.filter(line => line.itemName && (line.qty>0 || line.amount>0));
         if(!itemLines.length) throw new Error(`No product lines found for invoice ${invoice.invoiceNo}.`);
 
-        const locationMaster=await LocationMaster.findOne({$and:[companyScope,{name:invoice.location},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id state").lean();
+        const locationMaster=await LocationMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(invoice.location)}$`,"i")},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id state").lean();
         if(!locationMaster) throw new Error(`Location Master not found: ${invoice.location}. Create it manually before importing this invoice.`);
 
-        const customerMaster=await CustomerMaster.findOne({$and:[companyScope,{name:invoice.customerName},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id gstin state").lean();
+        const customerMaster=await CustomerMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(invoice.customerName)}$`,"i")},{$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id name gstin state").lean();
         if(!customerMaster) throw new Error(`Party Master not found: ${invoice.customerName}. Create it manually before importing this invoice.`);
+        const existingInvoice=await SalesInvoice.findOne({companyId,customerId:customerMaster._id,customerInvoiceNo:invoice.invoiceNo,importedFrom:"SALES_REGISTER_EXCEL",status:"POSTED"}).select("invoiceNo").lean();
+        if(existingInvoice) throw new Error(`This source invoice was already imported as ${existingInvoice.invoiceNo}.`);
 
         const payload={
           date: invoice.date,
-          location: invoice.location,
-          customerName: invoice.customerName,
+          customerInvoiceNo: invoice.invoiceNo,
+          customerInvoiceDate: invoice.date,
+          location: String(locationMaster._id),
+          partyId: String(customerMaster._id),
+          customerName: customerMaster.name,
           customerGSTIN: clean(customerMaster.gstin).toUpperCase(),
           customerState: clean(customerMaster.state),
+          importedFrom: "SALES_REGISTER_EXCEL",
           remarks: `Imported from DayBook invoice ${invoice.invoiceNo}`,
           lines: itemLines.map(line=>({
             itemName: line.itemName,
@@ -875,9 +882,20 @@ export async function importSalesUpload(req,res){
         };
 
         for(const line of payload.lines){
-          const productMaster=await InventoryItemMaster.findOne({companyId,name:line.itemName,itemType:{$in:["FINISHED_GOODS","PACKED_GOODS"]},$or:[{active:true},{active:{$exists:false}},{active:null}]}).select("_id defaultGstRate").lean();
+          const productMaster=await InventoryItemMaster.findOne({$and:[companyScope,{name:new RegExp(`^${escapeRegExp(line.itemName)}$`,"i")},{itemType:{$in:["FINISHED_GOODS","PACKED_GOODS"]},$or:[{active:true},{active:{$exists:false}},{active:null}]}]}).select("_id name itemType unit defaultGstRate").lean();
           if(!productMaster) throw new Error(`Product Master not found: ${line.itemName}. Create it manually before importing this invoice.`);
-          if(!line.gstRate && productMaster.defaultGstRate) line.gstRate = parseImportNumber(productMaster.defaultGstRate);
+          line.itemName=productMaster.name;
+          const unit=clean(productMaster.unit||"KG").toUpperCase();
+          const packetWeight=packetWeightKg(line.itemName);
+          const sourceQty=line.qty;
+          const sourceRate=line.rate;
+          if(packetWeight>0&&!packetUnit(unit)){
+            line.qty=q6(sourceQty*packetWeight);
+            line.rate=sourceRate/packetWeight;
+          }
+          line.unit=unit;
+          line.itemType=productMaster.itemType;
+          line.gstRate=parseImportNumber(productMaster.defaultGstRate)||line.gstRate;
         }
 
         const result=await createSalesEntry(payload, req.user);
