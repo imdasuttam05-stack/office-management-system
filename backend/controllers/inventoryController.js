@@ -89,7 +89,7 @@ async function createSalesEntry(payload, user={}){
   const invoiceNo=await next("SALE","SAL");
   const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),roundOff=num(b.roundOff),extraCosts=r2(labourCost+transportCost+otherCost);
   const inv=await SalesInvoice.create({invoiceNo,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,roundOff,importedFrom:clean(b.importedFrom),companyId,date:dt(b.date)||new Date(),location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines:built,subtotal:r2(subtotal),totalCGST:r2(cg),totalSGST:r2(sg),totalIGST:r2(ig),grandTotal:r2(subtotal+cg+sg+ig+extraCosts+roundOff),remarks:clean(b.remarks),createdBy:user?._id});
-  for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
+  for(const x of built){const old=await InventoryStock.findById(x.stockId).lean();const cost=r2(num(old?.averageRate)*x.qty);await adjustStock({companyId,location,itemType:x.itemType||"FINISHED_GOODS",itemName:x.itemName,unit:x.unit,qty:x.qty,value:cost,mode:"SUBTRACT",batchNo:x.batchNo,barcode:x.barcode});await recordSaleStockMovement({companyId,invoice:inv,line:x,valueOut:cost});await GstLedger.create({companyId,sourceType:"SALE",sourceId:inv._id,documentNo:invoiceNo,date:inv.date,partyName:customerName,partyGSTIN:inv.customerGSTIN,location,hsn:x.hsn,taxableAmount:x.taxableAmount,cgst:x.cgst,sgst:x.sgst,igst:x.igst,gstRate:x.gstRate,supplyType:inv.supplyType});}
   const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cg+sg+ig+extraCosts+roundOff,credit:0,narration:`Sales ${invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts+roundOff, narration:`Sales and additional charges ${invoiceNo}`}];
   if(cg)voucherLines.push({ledger:outputCgst._id,debit:0,credit:cg,narration:`Output CGST ${invoiceNo}`});
   if(sg)voucherLines.push({ledger:outputSgst._id,debit:0,credit:sg,narration:`Output SGST ${invoiceNo}`});
@@ -119,6 +119,10 @@ async function adjustStock({companyId,location,itemType,itemName,unit,qty,value,
  if(mode!=="ADD" && oq+q < -0.000001) throw new Error(`Insufficient ${itemType} stock for ${itemName}. Available ${oq}, required ${qty}.`);
  const nq=q6(oq+q), nv=r2(Math.max(0,ov+v));
  const update=InventoryStock.findOneAndUpdate(filter,{$set:{hsn,unit,mfgDate,expiryDate,averageRate:nq?r2(nv/nq):0,lastPurchaseRate:mode==="ADD"?r2(value/(qty||1)):undefined,lastPurchaseDate:mode==="ADD"?new Date():undefined},$inc:{qty:q,stockValue:v},$setOnInsert:{companyId:companyId||null,location,itemType,itemName,batchNo:batchNo||"",barcode:barcode||""}},{upsert:true,new:true});if(session)update.session(session);await update;
+}
+async function recordSaleStockMovement({companyId,invoice,line,valueOut}){
+ const stock=await InventoryStock.findById(line.stockId).select("qty").lean();
+ await InventoryMovement.create({companyId,date:invoice.date,location:invoice.location,itemName:line.itemName,itemType:line.itemType,unit:line.unit||"KG",qtyIn:0,qtyOut:line.qty,valueIn:0,valueOut,balanceQty:num(stock?.qty),sourceType:"SALE",sourceNo:invoice.invoiceNo,referenceNo:invoice.customerInvoiceNo||invoice.invoiceNo,batchNo:line.batchNo||"",barcode:line.barcode||"",narration:`Sale ${invoice.invoiceNo} to ${invoice.customerName}`,createdBy:invoice.createdBy});
 }
 function buildLine(x){const qty=num(x.qty),rate=num(x.purchaseRate),gross=qty*rate,discount=Math.min(Math.max(num(x.discount),0),gross),taxable=r2(gross-discount),gstRate=Math.max(0,Math.min(num(x.gstRate),100)),gstType=["NONE","CGST_SGST","IGST"].includes(x.gstType)?x.gstType:"NONE",gst=gstType==="NONE"?0:r2(taxable*gstRate/100),cgst=gstType==="CGST_SGST"?r2(gst/2):0,sgst=gstType==="CGST_SGST"?r2(gst-cgst):0,igst=gstType==="IGST"?gst:0;return {itemId:clean(x.itemId)||null,itemName:clean(x.itemName),hsn:clean(x.hsn),unit:clean(x.unit)||"KG",batchNo:clean(x.batchNo),barcode:clean(x.barcode),mfgDate:dt(x.mfgDate),expiryDate:dt(x.expiryDate),qty,purchaseRate:rate,discount:r2(discount),taxableAmount:taxable,gstRate,gstType,cgst,sgst,igst,lineTotal:r2(taxable+cgst+sgst+igst),landedCost:0}}
 export async function lookupPincode(req,res){
@@ -848,14 +852,18 @@ export async function updateSale(req,res){
    const restoreValue=r2(num(stock.averageRate)*qty);
    await adjustStock({companyId,location:stock.location,itemType:stock.itemType,itemName:stock.itemName,unit:stock.unit,qty,value:restoreValue,mode:"ADD",hsn:stock.hsn,batchNo:stock.batchNo,barcode:stock.barcode});
   }
+  const saleMovementValues=[];
   for(const line of lines){
    const stock=await InventoryStock.findById(line.stockId).lean();
    const cost=r2(num(stock?.averageRate)*line.qty);
    await adjustStock({companyId,location,itemType:line.itemType,itemName:line.itemName,unit:line.unit,qty:line.qty,value:cost,mode:"SUBTRACT",hsn:line.hsn,batchNo:line.batchNo,barcode:line.barcode});
+   saleMovementValues.push({line,valueOut:cost});
   }
   const labourCost=Math.max(0,num(b.labourCost)),transportCost=Math.max(0,num(b.transportCost)),otherCost=Math.max(0,num(b.otherCost)),roundOff=num(b.roundOff),extraCosts=r2(labourCost+transportCost+otherCost);
   Object.assign(invoice,{date:dt(b.date)||invoice.date,inventoryNo:clean(b.inventoryNo),customerInvoiceNo:clean(b.customerInvoiceNo),customerInvoiceDate:dt(b.customerInvoiceDate),labourCost,transportCost,otherCost,roundOff,location,customerId:customer._id,customerLedgerId:customerLedger._id,customerName:customer.name,customerGSTIN,customerState,supplierState:sourceState,supplyType:customerGSTIN?"B2B":"B2C",placeOfSupply:customerState,lines,subtotal:r2(subtotal),totalCGST:r2(cgstTotal),totalSGST:r2(sgstTotal),totalIGST:r2(igstTotal),grandTotal:r2(subtotal+cgstTotal+sgstTotal+igstTotal+extraCosts+roundOff),remarks:clean(b.remarks)});
   await invoice.save();
+  await InventoryMovement.deleteMany({companyId,sourceType:"SALE",sourceNo:invoice.invoiceNo});
+  for(const movement of saleMovementValues)await recordSaleStockMovement({companyId,invoice,line:movement.line,valueOut:movement.valueOut});
   await GstLedger.deleteMany({companyId,sourceType:"SALE",sourceId:invoice._id});
   for(const line of lines)await GstLedger.create({companyId,sourceType:"SALE",sourceId:invoice._id,documentNo:invoice.invoiceNo,date:invoice.date,partyName:customer.name,partyGSTIN:customerGSTIN,location,hsn:line.hsn,taxableAmount:line.taxableAmount,cgst:line.cgst,sgst:line.sgst,igst:line.igst,gstRate:line.gstRate,supplyType:invoice.supplyType});
   const voucherLines=[{ledger:customerLedger._id,debit:subtotal+cgstTotal+sgstTotal+igstTotal+extraCosts+roundOff,credit:0,narration:`Sales ${invoice.invoiceNo}`},{ledger:salesLedger._id,debit:0,credit:subtotal+extraCosts+roundOff,narration:`Sales and additional charges ${invoice.invoiceNo}`}];
