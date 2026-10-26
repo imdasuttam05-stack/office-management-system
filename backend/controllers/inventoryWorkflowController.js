@@ -17,7 +17,7 @@ import Voucher from "../models/Voucher.js";
 import InventoryCounter from "../models/InventoryCounter.js";
 import AccountsMaster from "../models/AccountsMaster.js";
 import { ensureProductOpeningStock } from "../services/accountsMasterService.js";
-const clean=v=>String(v??"").trim(); const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0}; const r2=v=>Math.round((num(v)+Number.EPSILON)*100)/100; const q6=v=>Math.round((num(v)+Number.EPSILON)*1000000)/1000000;
+const clean=v=>String(v??"").trim(); const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0}; const r2=v=>Math.round((num(v)+Number.EPSILON)*100)/100; const q6=v=>Math.round((num(v)+Number.EPSILON)*1000000)/1000000; const escapeRegExp=value=>String(value).replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
 const parseDateOnly=value=>{const text=clean(value);if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return null;const date=new Date(`${text}T00:00:00.000Z`);return Number.isNaN(date.getTime())||date.toISOString().slice(0,10)!==text?null:date};
 const packageWeightKg=name=>{const match=clean(name).match(/(\d+(?:\.\d+)?)\s*(mg|g|gm|grams?|kg|kgs|kilograms?)\b/i);if(!match)return 0;const amount=Number(match[1]);return /^mg$/i.test(match[2])?amount/1000000:/^kg/i.test(match[2])?amount:amount/1000};
 const packetUnit=unit=>["PC","PCS","PACKET","PACKETS","PIECE","PIECES"].includes(clean(unit).toUpperCase());
@@ -320,8 +320,11 @@ export async function getStockLedger(req,res){
  try{
   const filter={companyId:req.user?.companyId||null};
   for(const field of ["location","itemName","itemType","batchNo","barcode"]){
+   if(!Object.prototype.hasOwnProperty.call(req.query,field))continue;
    const value=clean(req.query[field]);
-   if(value)filter[field]=value;
+   if(field==="itemName"&&value)filter.itemName=new RegExp(`^${escapeRegExp(value)}$`,"i");
+   else if(["batchNo","barcode"].includes(field))filter[field]=value;
+   else if(value)filter[field]=value;
   }
   if(filter.itemName&&filter.itemType&&filter.location){
    const openingMasters=await AccountsMaster.find({masterType:"product",name:filter.itemName,itemType:filter.itemType,active:{$ne:false},openingQty:{$gte:0}}).lean();
@@ -336,7 +339,7 @@ export async function getStockLedger(req,res){
    for(const purchase of purchases){
     if(loggedPurchaseNos.has(purchase.purchaseNo))continue;
     for(const [index,line] of (purchase.lines||[]).entries()){
-     if(line.itemName!==filter.itemName||(filter.batchNo&&(line.batchNo||"")!==filter.batchNo)||(filter.barcode&&(line.barcode||"")!==filter.barcode))continue;
+     if(String(line.itemName||"").trim().toLowerCase()!==String(req.query.itemName||"").trim().toLowerCase()||(filter.batchNo!==undefined&&(line.batchNo||"")!==filter.batchNo)||(filter.barcode!==undefined&&(line.barcode||"")!==filter.barcode))continue;
      items.push({_id:`legacy-${purchase._id}-${index}`,companyId:purchase.companyId,date:purchase.date,createdAt:purchase.createdAt,location:purchase.location,itemName:line.itemName,itemType:"RAW_MATERIAL",unit:line.unit||"KG",qtyIn:num(line.qty),qtyOut:0,valueIn:num(line.landedCost),valueOut:0,sourceType:"PURCHASE",sourceNo:purchase.purchaseNo,referenceNo:purchase.supplierInvoiceNo||purchase.purchaseNo,batchNo:line.batchNo||"",barcode:line.barcode||"",narration:`Raw material purchased from ${purchase.supplierName} (${purchase.purchaseNo})`});
     }
    }
@@ -357,7 +360,7 @@ export async function getStockLedger(req,res){
   for(const movement of items){
    if(movement.sourceType==="OPENING_STOCK")movement.sourceNo=movement.itemName;
   }
-  const currentStock=filter.itemName&&filter.itemType&&filter.location?await InventoryStock.findOne(filter).lean():null;
+  const currentStock=filter.itemName&&filter.itemType&&filter.location?(await InventoryStock.aggregate([{$match:filter},{$group:{_id:null,qty:{$sum:"$qty"},stockValue:{$sum:"$stockValue"},unit:{$first:"$unit"}}},{$addFields:{averageRate:{$cond:[{$gt:["$qty",0]},{$round:[{$divide:["$stockValue","$qty"]},2]},0]}}}]))[0]||null:null;
   res.json({success:true,items,stock:currentStock});
  }catch(e){
   res.status(500).json({success:false,message:e.message});
