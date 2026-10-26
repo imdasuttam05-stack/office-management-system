@@ -11,6 +11,7 @@ import BOM from "../models/BOM.js";
 import BOMCostItemMaster from "../models/BOMCostItemMaster.js";
 import PackingConversionRate from "../models/PackingConversionRate.js";
 import RawMaterialPurchase from "../models/RawMaterialPurchase.js";
+import SalesInvoice from "../models/SalesInvoice.js";
 import Ledger from "../models/Ledger.js";
 import Group from "../models/Group.js";
 import Voucher from "../models/Voucher.js";
@@ -341,6 +342,25 @@ export async function getStockLedger(req,res){
     for(const [index,line] of (purchase.lines||[]).entries()){
      if(String(line.itemName||"").trim().toLowerCase()!==String(req.query.itemName||"").trim().toLowerCase()||(filter.batchNo!==undefined&&(line.batchNo||"")!==filter.batchNo)||(filter.barcode!==undefined&&(line.barcode||"")!==filter.barcode))continue;
      items.push({_id:`legacy-${purchase._id}-${index}`,companyId:purchase.companyId,date:purchase.date,createdAt:purchase.createdAt,location:purchase.location,itemName:line.itemName,itemType:"RAW_MATERIAL",unit:line.unit||"KG",qtyIn:num(line.qty),qtyOut:0,valueIn:num(line.landedCost),valueOut:0,sourceType:"PURCHASE",sourceNo:purchase.purchaseNo,referenceNo:purchase.supplierInvoiceNo||purchase.purchaseNo,batchNo:line.batchNo||"",barcode:line.barcode||"",narration:`Raw material purchased from ${purchase.supplierName} (${purchase.purchaseNo})`});
+    }
+   }
+  }
+  if(filter.itemName&&filter.itemType&&filter.location){
+   const itemNamePattern=new RegExp(`^${escapeRegExp(String(req.query.itemName||""))}$`,"i");
+   const saleFilter={companyId:req.user?.companyId||null,location:filter.location,status:"POSTED","lines.itemName":itemNamePattern};
+   if(filter.batchNo!==undefined)saleFilter["lines.batchNo"]=filter.batchNo;
+   if(filter.barcode!==undefined)saleFilter["lines.barcode"]=filter.barcode;
+   const sales=await SalesInvoice.find(saleFilter).sort({date:1,createdAt:1}).limit(1000).lean();
+   const stockIds=[...new Set(sales.flatMap(invoice=>(invoice.lines||[]).map(line=>line.stockId).filter(Boolean).map(String)))];
+   const historicalStocks=stockIds.length?await InventoryStock.find({_id:{$in:stockIds}}).select("itemType").lean():[];
+   const stockTypeById=new Map(historicalStocks.map(stock=>[String(stock._id),stock.itemType]));
+   const loggedSaleNos=new Set(movements.filter(row=>row.sourceType==="SALE").map(row=>row.sourceNo));
+   for(const invoice of sales){
+    if(loggedSaleNos.has(invoice.invoiceNo))continue;
+    for(const [index,line] of (invoice.lines||[]).entries()){
+     const itemType=line.itemType||stockTypeById.get(String(line.stockId))||"FINISHED_GOODS";
+     if(String(line.itemName||"").trim().toLowerCase()!==String(req.query.itemName||"").trim().toLowerCase()||itemType!==filter.itemType||(filter.batchNo!==undefined&&(line.batchNo||"")!==filter.batchNo)||(filter.barcode!==undefined&&(line.barcode||"")!==filter.barcode))continue;
+     items.push({_id:`legacy-sale-${invoice._id}-${index}`,companyId:invoice.companyId,date:invoice.date,createdAt:invoice.createdAt,location:invoice.location,itemName:line.itemName,itemType,unit:line.unit||"KG",qtyIn:0,qtyOut:num(line.qty),valueIn:0,valueOut:0,sourceType:"SALE",sourceNo:invoice.invoiceNo,referenceNo:invoice.customerInvoiceNo||invoice.invoiceNo,batchNo:line.batchNo||"",barcode:line.barcode||"",narration:`Historical sale ${invoice.invoiceNo} to ${invoice.customerName}`});
     }
    }
   }
