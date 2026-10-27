@@ -7,7 +7,7 @@ import mongoose from "mongoose";
 import { syncLedgerCounterparty } from "../services/accountsMasterService.js";
 
 export async function listGroups(req, res) {
-  const groups = await Group.find({ isActive: true }).populate("parent", "name").sort({ nature: 1, name: 1 });
+  const groups = await Group.find({ isActive: true }).populate("parent", "name").sort({ nature: 1, name: 1 }).lean();
   res.json({ success: true, groups });
 }
 
@@ -79,7 +79,7 @@ export async function createGroup(req, res) {
 export async function listLedgers(req, res) {
   const filter = { isActive: true };
   if (req.query.group) filter.group = req.query.group;
-  const ledgers = await Ledger.find(filter).populate("group", "name nature").sort({ name: 1 });
+  const ledgers = await Ledger.find(filter).populate("group", "name nature").sort({ name: 1 }).lean();
   res.json({ success: true, ledgers });
 }
 
@@ -94,7 +94,7 @@ export async function createLedger(req, res) {
 }
 
 export async function listVouchers(req, res) {
-  const vouchers = await Voucher.find().populate("lines.ledger", "name").populate("partyLedger", "name").sort({ date: -1, createdAt: -1 }).limit(300);
+  const vouchers = await Voucher.find().populate("lines.ledger", "name").populate("partyLedger", "name").sort({ date: -1, createdAt: -1 }).limit(300).lean();
   res.json({ success: true, vouchers });
 }
 
