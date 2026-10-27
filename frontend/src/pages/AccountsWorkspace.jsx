@@ -1,16 +1,20 @@
 import "./AccountsGSTTheme.css";
 import React, {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
 } from "react";
 
-import Accounting from "./Accounting.jsx";
-import InventoryMasters from "./InventoryMasters.jsx";
-import RawMaterialPurchase from "./RawMaterialPurchase.jsx";
-import Inventory from "./Inventory.jsx";
-import Manufacturing from "./Manufacturing.jsx";
-import VoucherCenter from "./VoucherCenter.jsx";
+// Keep the Accounts shell lightweight. Each workspace is downloaded only when
+// first opened, instead of bundling every large accounting/inventory screen.
+const Accounting = lazy(() => import("./Accounting.jsx"));
+const InventoryMasters = lazy(() => import("./InventoryMasters.jsx"));
+const RawMaterialPurchase = lazy(() => import("./RawMaterialPurchase.jsx"));
+const Inventory = lazy(() => import("./Inventory.jsx"));
+const Manufacturing = lazy(() => import("./Manufacturing.jsx"));
+const VoucherCenter = lazy(() => import("./VoucherCenter.jsx"));
 
 export default function AccountsWorkspace() {
 
@@ -267,6 +271,26 @@ export default function AccountsWorkspace() {
         * {
           box-sizing: border-box;
         }
+
+        .accounts-loading {
+          min-height: 220px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          color: #475467;
+          font-size: 13px;
+          font-weight: 600;
+        }
+        .accounts-loading-spinner {
+          width: 18px;
+          height: 18px;
+          border: 2px solid #d0d5dd;
+          border-top-color: #245a96;
+          border-radius: 50%;
+          animation: accounts-spin .7s linear infinite;
+        }
+        @keyframes accounts-spin { to { transform: rotate(360deg); } }
 
         .accounts-workspace {
           min-height: 100vh;
@@ -845,7 +869,14 @@ export default function AccountsWorkspace() {
         className="accounts-content"
       >
 
-        <CurrentComponent />
+        <Suspense fallback={
+          <div className="accounts-loading" role="status" aria-live="polite">
+            <span className="accounts-loading-spinner" />
+            <span>Opening {current.label}…</span>
+          </div>
+        }>
+          <CurrentComponent />
+        </Suspense>
 
       </main>
 
