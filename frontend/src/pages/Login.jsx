@@ -32,7 +32,11 @@ export default function Login() {
 
     try {
       setLoading(true);
-      const { data } = await axios.post(`${API_URL}/api/auth/login`, { mobile, password });
+      const { data } = await axios.post(
+        `${API_URL}/api/auth/login`,
+        { mobile, password },
+        { withCredentials: true }
+      );
       if (data.success) {
         saveSession(data);
         navigate("/dashboard", { replace: true });
