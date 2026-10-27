@@ -335,7 +335,7 @@ export async function getStockLedger(req,res){
   const items=[...movements];
   if(filter.itemType==="RAW_MATERIAL"&&filter.itemName&&filter.location){
    const purchaseFilter={companyId:req.user?.companyId||null,location:filter.location,status:"POSTED","lines.itemName":filter.itemName};
-   const purchases=await RawMaterialPurchase.find(purchaseFilter).sort({date:1,createdAt:1}).lean();
+   const purchases=await RawMaterialPurchase.find(purchaseFilter).select("purchaseNo date createdAt companyId location supplierName supplierInvoiceNo lines").sort({date:1,createdAt:1}).lean();
    const loggedPurchaseNos=new Set(movements.filter(row=>row.sourceType==="PURCHASE").map(row=>row.sourceNo));
    for(const purchase of purchases){
     if(loggedPurchaseNos.has(purchase.purchaseNo))continue;
@@ -350,7 +350,7 @@ export async function getStockLedger(req,res){
    const saleFilter={companyId:req.user?.companyId||null,location:filter.location,status:"POSTED","lines.itemName":itemNamePattern};
    if(filter.batchNo!==undefined)saleFilter["lines.batchNo"]=filter.batchNo;
    if(filter.barcode!==undefined)saleFilter["lines.barcode"]=filter.barcode;
-   const sales=await SalesInvoice.find(saleFilter).sort({date:1,createdAt:1}).limit(1000).lean();
+   const sales=await SalesInvoice.find(saleFilter).select("invoiceNo customerInvoiceNo date createdAt companyId location customerName lines").sort({date:1,createdAt:1}).limit(1000).lean();
    const stockIds=[...new Set(sales.flatMap(invoice=>(invoice.lines||[]).map(line=>line.stockId).filter(Boolean).map(String)))];
    const historicalStocks=stockIds.length?await InventoryStock.find({_id:{$in:stockIds}}).select("itemType").lean():[];
    const stockTypeById=new Map(historicalStocks.map(stock=>[String(stock._id),stock.itemType]));
