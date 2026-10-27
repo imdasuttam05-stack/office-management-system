@@ -15,8 +15,10 @@ export default function IntegratedOperations(){
  const locationLabel=value=>m.locations.find(location=>String(location._id)===String(value))?.name||value||"-";
  async function get(url){const r=await fetch(API+url,{headers:H()});const d=await r.json();if(!r.ok)throw Error(d.message||"Load failed");return d}
  async function post(url,body){const r=await fetch(API+url,{method:"POST",headers:H(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.message||"Save failed");return d}
- async function load(){try{const [a,b,c,d]=await Promise.all([get("/api/inventory/workflow/masters"),get("/api/inventory/workflow/boms"),get("/api/inventory/workflow/documents"),get("/api/inventory/workflow/stock-ledger")]);setM(a);setBoms(b.items||[]);setDocs(c.items||[]);setLedger(d.items||[])}catch(e){setErr(e.message)}}
+ async function load(){try{const requests=[get("/api/inventory/workflow/masters"),get("/api/inventory/workflow/boms"),get("/api/inventory/workflow/documents")];if(tab==="stock")requests.push(get("/api/inventory/workflow/stock-ledger"));const result=await Promise.all(requests);setM(result[0]);setBoms(result[1].items||[]);setDocs(result[2].items||[]);if(tab==="stock"&&result[3])setLedger(result[3].items||[])}catch(e){setErr(e.message)}}
+ async function loadStockLedger(){try{const d=await get("/api/inventory/workflow/stock-ledger");setLedger(d.items||[])}catch(e){setErr(e.message)}}
  useEffect(()=>{load()},[]);
+ useEffect(()=>{if(tab==="stock"&&!ledger.length)loadStockLedger()},[tab]);
  const products=useMemo(()=>m.items||[],[m.items]);
  const outputProducts=products.filter(x=>["GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS"].includes(x.itemType));
  const inputProducts=products.filter(x=>["RAW_MATERIAL","GRADE","FINISHED_GOODS","PACKED_GOODS","RETURN_GOODS"].includes(x.itemType));

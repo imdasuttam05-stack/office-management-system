@@ -106,6 +106,7 @@ export default function AccountsTransactionCenter({ initialTab="purchase", stand
   const [stock,setStock]=useState([]), [docs,setDocs]=useState([]), [ledger,setLedger]=useState([]), [jobs,setJobs]=useState([]), [allJobs,setAllJobs]=useState([]), [selectedJob,setSelectedJob]=useState(null);
   const stockRequest=useRef(0);
   const [stockDetail,setStockDetail]=useState(null), [stockMovements,setStockMovements]=useState([]), [stockDetailLoading,setStockDetailLoading]=useState(false), [stockDetailError,setStockDetailError]=useState("");
+  const stockMovementCache=useRef(new Map());
   const [jobHistoryLoading,setJobHistoryLoading]=useState(false);
   const [jobSourceStock,setJobSourceStock]=useState({});
   const [jobSourceStockLoading,setJobSourceStockLoading]=useState(false);
@@ -235,7 +236,15 @@ export default function AccountsTransactionCenter({ initialTab="purchase", stand
     }catch(error){setErr(error.message)}finally{setBusy(false)}
   }
   async function loadStock(){const request=++stockRequest.current;try{const params=new URLSearchParams({itemType:stockType,limit:"200"});if(stockLocation)params.set("location",stockLocation);if(stockSearch.trim())params.set("search",stockSearch.trim());const d=await get(`/api/inventory/stock?${params}`);if(request===stockRequest.current)setStock(d.items||[])}catch(e){if(request===stockRequest.current)setErr(e.message)}}
-  async function showStockMovements(item){setStockDetail(item);setStockMovements([]);setStockDetailError("");setStockDetailLoading(true);try{const params=new URLSearchParams({itemType:item.itemType,itemName:item.itemName,location:item.location,batchNo:item.batchNo||"",barcode:item.barcode||""});const d=await get(`/api/inventory/workflow/stock-ledger?${params}`);setStockMovements(d.items||[]);if(d.stock)setStockDetail(current=>({...current,...d.stock,itemName:item.itemName,batchNo:item.batchNo,barcode:item.barcode}))}catch(e){setStockDetailError(e.message);setErr(e.message)}finally{setStockDetailLoading(false)}}
+  async function showStockMovements(item){
+    const params=new URLSearchParams({itemType:item.itemType,itemName:item.itemName,location:item.location,batchNo:item.batchNo||"",barcode:item.barcode||""});
+    const cacheKey=params.toString(),cached=stockMovementCache.current.get(cacheKey);
+    setStockDetail(item);setStockDetailError("");
+    if(cached){setStockMovements(cached.items);if(cached.stock)setStockDetail(current=>({...current,...cached.stock,itemName:item.itemName,batchNo:item.batchNo,barcode:item.barcode}));setStockDetailLoading(false);return;}
+    setStockMovements([]);setStockDetailLoading(true);
+    try{const d=await get(`/api/inventory/workflow/stock-ledger?${params}`);const result={items:d.items||[],stock:d.stock||null};stockMovementCache.current.set(cacheKey,result);setStockMovements(result.items);if(result.stock)setStockDetail(current=>({...current,...result.stock,itemName:item.itemName,batchNo:item.batchNo,barcode:item.barcode}))}
+    catch(e){setStockDetailError(e.message);setErr(e.message)}finally{setStockDetailLoading(false)}
+  }
   async function loadDocs(){try{const d=await get("/api/inventory/workflow/documents");setDocs(d.items||[]);const l=await get("/api/inventory/workflow/stock-ledger");setLedger(l.items||[])}catch(e){setErr(e.message)}}
   const reportTitle=({purchase:"Purchase Report","purchase-history":"Purchase Report",sale:"Sale Report","sale-history":"Sale Report",job:"Job Order Report","job-history":"Job Order Report","job-return":"Job Order Return Report",production:"Production Report","production-history":"Production Report",grading:"Grading Report",pi:"Proforma Invoice Report",return:"Return Report",damage:"Damage Report",repack:"Repacking Report",packing:"Packing Conversion Report",bom:"BOM / Costing Report","bom-history":"BOM / Costing Report",stock:"Stock / Ledger Report",documents:"Documents Report"})[tab]||"Operations Report";
   function getReportRows(){
