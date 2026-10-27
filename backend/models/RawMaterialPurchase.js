@@ -54,6 +54,7 @@ const rawMaterialPurchaseSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+rawMaterialPurchaseSchema.index({ companyId: 1, location: 1, status: 1, "lines.itemName": 1, date: 1 });
 rawMaterialPurchaseSchema.index({ companyId: 1, date: -1 });
 rawMaterialPurchaseSchema.index({ location: 1, date: -1 });
 rawMaterialPurchaseSchema.index({ supplierName: 1, date: -1 });
