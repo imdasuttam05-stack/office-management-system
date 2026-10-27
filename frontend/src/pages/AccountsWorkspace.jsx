@@ -9,7 +9,7 @@ import React, {
 
 // Keep the Accounts shell lightweight. Each workspace is downloaded only when
 // first opened, instead of bundling every large accounting/inventory screen.
-const Accounting = lazy(() => import("./Accounting.jsx"));
+import Accounting from "./Accounting.jsx";
 const InventoryMasters = lazy(() => import("./InventoryMasters.jsx"));
 const RawMaterialPurchase = lazy(() => import("./RawMaterialPurchase.jsx"));
 const Inventory = lazy(() => import("./Inventory.jsx"));

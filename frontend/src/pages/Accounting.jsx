@@ -92,43 +92,25 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   ====================================================== */
 
   async function loadAll() {
-    try {
-      setError("");
-
-      const [g, l, v] = await Promise.all([
-        fetch(`${API}/api/accounting/groups`, {
-          headers: headers(),
-        }),
-        fetch(`${API}/api/accounting/ledgers`, {
-          headers: headers(),
-        }),
-        fetch(`${API}/api/accounting/vouchers`, {
-          headers: headers(),
-        }),
-      ]);
-
-      const gd = await g.json();
-      const ld = await l.json();
-      const vd = await v.json();
-
-      if (!g.ok) {
-        throw new Error(gd.message || "Unable to load groups");
+    setError("");
+    const request = async (path, key, setter, fallbackMessage) => {
+      try {
+        const response = await fetch(`${API}${path}`, { headers: headers() });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || fallbackMessage);
+        setter(Array.isArray(data[key]) ? data[key] : []);
+      } catch (err) {
+        setError((current) => current ? `${current} · ${err.message || fallbackMessage}` : (err.message || fallbackMessage));
       }
+    };
 
-      if (!l.ok) {
-        throw new Error(ld.message || "Unable to load ledgers");
-      }
-
-      if (!v.ok) {
-        throw new Error(vd.message || "Unable to load vouchers");
-      }
-
-      setGroups(gd.groups || []);
-      setLedgers(ld.ledgers || []);
-      setVouchers(vd.vouchers || []);
-    } catch (err) {
-      setError(err.message || "Unable to load accounting data");
-    }
+    // Render each dataset as soon as its own request finishes instead of
+    // making Groups wait for the slowest of Groups, Ledgers and Vouchers.
+    await Promise.all([
+      request("/api/accounting/groups", "groups", setGroups, "Unable to load groups"),
+      request("/api/accounting/ledgers", "ledgers", setLedgers, "Unable to load ledgers"),
+      request("/api/accounting/vouchers", "vouchers", setVouchers, "Unable to load vouchers"),
+    ]);
   }
 
   useEffect(() => {
