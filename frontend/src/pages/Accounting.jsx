@@ -50,6 +50,13 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   const [openBills, setOpenBills] = useState([]);
   const [billAllocations, setBillAllocations] = useState([]);
   const [loadingBills, setLoadingBills] = useState(false);
+  const [partyLedgerId, setPartyLedgerId] = useState("");
+  const [partyLedgerType, setPartyLedgerType] = useState("ALL");
+  const [partyLedgerFrom, setPartyLedgerFrom] = useState("");
+  const [partyLedgerTo, setPartyLedgerTo] = useState("");
+  const [partyLedgerRows, setPartyLedgerRows] = useState([]);
+  const [partyLedgerMeta, setPartyLedgerMeta] = useState(null);
+  const [partyLedgerLoading, setPartyLedgerLoading] = useState(false);
 
   const openVoucherCenter = () => { window.location.href = "/voucher"; };
 
@@ -90,6 +97,34 @@ export default function Accounting({ initialTab = "groups" } = {}) {
   /* ======================================================
      LOAD DATA
   ====================================================== */
+
+  async function loadPartyLedgerReport() {
+    if (!partyLedgerId) {
+      setError("Please select a party ledger.");
+      return;
+    }
+    setPartyLedgerLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ partyLedgerId, type: partyLedgerType });
+      if (partyLedgerFrom) params.set("from", partyLedgerFrom);
+      if (partyLedgerTo) params.set("to", partyLedgerTo);
+      const response = await fetch(`${API}/api/accounting/party-ledger?${params.toString()}`, { headers: headers() });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to load party ledger.");
+      setPartyLedgerRows(Array.isArray(data.entries) ? data.entries : []);
+      setPartyLedgerMeta(data);
+    } catch (err) {
+      setPartyLedgerRows([]);
+      setPartyLedgerMeta(null);
+      setError(err.message || "Unable to load party ledger.");
+    } finally {
+      setPartyLedgerLoading(false);
+    }
+  }
+
+  const partyLedgerOptions = ledgers.filter(item => /sundry debtors|sundry creditors/i.test(item.group?.name || ""));
+  const availablePartyLedgers = partyLedgerOptions.length ? partyLedgerOptions : ledgers;
 
   async function loadAll() {
     setError("");
@@ -590,7 +625,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
 
   return (
     <div className="accounts-page">
-      <style>{`${styles}\n.top-tabs{display:none!important}`}</style>
+      <style>{`${styles}\n.top-tabs{display:flex!important}`}</style>
 
       {/* ==================================================
           HEADER
@@ -608,7 +643,7 @@ export default function Accounting({ initialTab = "groups" } = {}) {
             <h1>Accounts</h1>
 
             <p>
-              Groups · Ledgers · Voucher Entry · Register
+              Groups · Ledgers · Voucher Entry · Register · Party Ledger
             </p>
           </div>
         </div>
@@ -661,6 +696,13 @@ export default function Accounting({ initialTab = "groups" } = {}) {
           >
             <span>Register</span>
             <kbd>F7</kbd>
+          </button>
+
+          <button
+            className={tab === "party-ledger" ? "top-tab active" : "top-tab"}
+            onClick={() => openTab("party-ledger")}
+          >
+            <span>Party Ledger</span>
           </button>
         </div>
       </div>
@@ -1055,6 +1097,52 @@ export default function Accounting({ initialTab = "groups" } = {}) {
       {/* ==================================================
           REGISTER
       ================================================== */}
+
+      {tab === "party-ledger" && (
+        <div className="register-panel party-ledger-panel">
+          <div className="list-header">
+            <div><span>PARTY ACCOUNT STATEMENT</span><h2>Party-wise Sales & Purchase Ledger</h2><p>View invoices, purchase bills, receipts, payments and running balance.</p></div>
+          </div>
+          <div className="party-ledger-filters">
+            <label>Party / Ledger
+              <select value={partyLedgerId} onChange={e => setPartyLedgerId(e.target.value)}>
+                <option value="">Select Party Ledger</option>
+                {availablePartyLedgers.map(item => <option key={item._id} value={item._id}>{item.name}{item.group?.name ? ` · ${item.group.name}` : ""}</option>)}
+              </select>
+            </label>
+            <label>Ledger Type
+              <select value={partyLedgerType} onChange={e => setPartyLedgerType(e.target.value)}>
+                <option value="ALL">Sales + Purchase + Payments</option>
+                <option value="SALE">Sales / Debtors</option>
+                <option value="PURCHASE">Purchase / Creditors</option>
+              </select>
+            </label>
+            <label>From Date<input type="date" value={partyLedgerFrom} onChange={e => setPartyLedgerFrom(e.target.value)} /></label>
+            <label>To Date<input type="date" value={partyLedgerTo} onChange={e => setPartyLedgerTo(e.target.value)} /></label>
+            <button type="button" className="primary-button" onClick={loadPartyLedgerReport} disabled={partyLedgerLoading || !partyLedgerId}>{partyLedgerLoading ? "Loading…" : "Show Ledger"}</button>
+          </div>
+          {partyLedgerMeta && <div className="party-ledger-summary">
+            <div><span>Party</span><strong>{partyLedgerMeta.ledger?.name || "—"}</strong></div>
+            <div><span>Total Debit</span><strong>{money(partyLedgerMeta.totals?.debit)}</strong></div>
+            <div><span>Total Credit</span><strong>{money(partyLedgerMeta.totals?.credit)}</strong></div>
+            <div><span>Closing Balance</span><strong>{money(Math.abs(Number(partyLedgerMeta.closingBalance || 0)))} {partyLedgerMeta.closingType || "Dr"}</strong></div>
+          </div>}
+          <div className="table register-table party-ledger-table">
+            <div className="table-head"><span>DATE</span><span>VOUCHER NO.</span><span>TYPE</span><span>REFERENCE</span><span>NARRATION</span><span>DEBIT</span><span>CREDIT</span><span>BALANCE</span></div>
+            {partyLedgerRows.map((item, index) => <div className="table-row" key={`${item.sourceType}-${item.voucherNo}-${index}`}>
+              <span>{item.date ? new Date(item.date).toLocaleDateString("en-IN") : "—"}</span>
+              <strong>{item.voucherNo || "—"}</strong>
+              <span>{item.type || "—"}</span>
+              <span>{item.referenceNo || "—"}</span>
+              <span>{item.narration || "—"}</span>
+              <span>{Number(item.debit || 0) ? money(item.debit) : "—"}</span>
+              <span>{Number(item.credit || 0) ? money(item.credit) : "—"}</span>
+              <strong>{money(Math.abs(Number(item.balance || 0)))} {item.balanceType || "Dr"}</strong>
+            </div>)}
+            {partyLedgerMeta && partyLedgerRows.length === 0 && <div className="table-row"><span>No transactions found for the selected party and date range.</span></div>}
+          </div>
+        </div>
+      )}
 
       {tab === "register" && (
         <div className="register-panel">
@@ -2177,5 +2265,30 @@ kbd {
   .tally-ledger-head, .tally-voucher-line, .tally-ledger-foot { min-width: 740px; }
   .tally-voucher-footer { grid-template-columns: minmax(0,1fr); }
 }
+
+.party-ledger-panel { min-width: 0; }
+.party-ledger-panel .list-header p { margin: 5px 0 0; color: #667085; font-size: 12px; }
+.party-ledger-filters { display: grid; grid-template-columns: minmax(220px,1.5fr) minmax(180px,1.1fr) minmax(130px,.8fr) minmax(130px,.8fr) auto; align-items: end; gap: 10px; padding: 14px; margin: 12px 0; border: 1px solid #d8e0e8; border-radius: 8px; background: #f8fafc; }
+.party-ledger-filters label { display: flex; flex-direction: column; gap: 5px; color: #344054; font-size: 11px; font-weight: 800; }
+.party-ledger-filters input, .party-ledger-filters select { width: 100%; min-width: 0; height: 36px; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 5px; background: white; color: #101828; font-size: 12px; }
+.party-ledger-filters button { height: 36px; padding: 0 16px; border: 1px solid #1766a5; border-radius: 5px; background: #1766a5; color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.party-ledger-filters button:disabled { opacity: .6; cursor: wait; }
+.party-ledger-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 12px 0; }
+.party-ledger-summary > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 12px; border: 1px solid #dce4ec; border-radius: 7px; background: #fff; }
+.party-ledger-summary span { color: #667085; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.party-ledger-summary strong { color: #173e59; font-size: 15px; overflow-wrap: anywhere; }
+.party-ledger-table { overflow-x: auto; }
+.party-ledger-table .table-head, .party-ledger-table .table-row { grid-template-columns: 95px minmax(120px,.9fr) 95px minmax(110px,.9fr) minmax(180px,1.4fr) minmax(110px,.8fr) minmax(110px,.8fr) minmax(125px,.9fr); gap: 10px; }
+.party-ledger-table .table-row > span:nth-last-child(3), .party-ledger-table .table-row > span:nth-last-child(2), .party-ledger-table .table-row > strong:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 1050px) {
+  .party-ledger-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .party-ledger-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .party-ledger-table .table-head, .party-ledger-table .table-row { min-width: 1100px; }
+}
+@media (max-width: 560px) {
+  .party-ledger-filters { grid-template-columns: minmax(0,1fr); }
+  .party-ledger-summary { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+}
+
 
 `;
