@@ -257,6 +257,71 @@ export async function reverseVoucher(req, res) {
   }
 }
 
+
+
+export async function partyLedgerReport(req, res) {
+  try {
+    const ledgerId = String(req.query.partyLedgerId || "");
+    const reportType = String(req.query.type || "ALL").toUpperCase();
+    const from = req.query.from ? new Date(req.query.from) : null;
+    const to = req.query.to ? new Date(req.query.to) : null;
+    if (!mongoose.isValidObjectId(ledgerId)) return res.status(400).json({ success: false, message: "Select a valid party ledger." });
+    if (!["ALL", "SALE", "PURCHASE"].includes(reportType)) return res.status(400).json({ success: false, message: "Report type must be ALL, SALE or PURCHASE." });
+    if (from && Number.isNaN(from.getTime())) return res.status(400).json({ success: false, message: "Invalid From date." });
+    if (to && Number.isNaN(to.getTime())) return res.status(400).json({ success: false, message: "Invalid To date." });
+    if (from) from.setHours(0, 0, 0, 0);
+    if (to) to.setHours(23, 59, 59, 999);
+    // Include transactions before the selected From date to calculate the correct brought-forward balance.
+    // The To date bounds the query; From is applied only to the visible rows.
+    const dateFilter = {};
+    if (to) dateFilter.date = { $lte: to };
+    const ledger = await Ledger.findById(ledgerId).populate("group", "name nature").lean();
+    if (!ledger) return res.status(404).json({ success: false, message: "Party ledger not found." });
+    const escapeRegex = value => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const nameMatch = new RegExp(`^${escapeRegex(ledger.name)}$`, "i");
+    const companyId = req.user?.companyId || null;
+    const companyFilter = { companyId };
+    const entries = [];
+    const dateInRange = date => {
+      const d = new Date(date || 0);
+      return (!from || d >= from) && (!to || d <= to);
+    };
+    if (reportType !== "PURCHASE") {
+      const sales = await SalesInvoice.find({ ...companyFilter, status: { $ne: "CANCELLED" }, ...dateFilter, $or: [{ customerLedgerId: ledgerId }, { customerName: nameMatch }] }).sort({ date: 1, createdAt: 1 }).lean();
+      for (const row of sales) entries.push({ date: row.date, voucherNo: row.invoiceNo || row.customerInvoiceNo || String(row._id), type: "Sales", referenceNo: row.customerInvoiceNo || "", narration: `Sales invoice · ${row.location || ""}`, debit: money2(row.grandTotal), credit: 0, sourceType: "SALES_INVOICE" });
+    }
+    if (reportType !== "SALE") {
+      const purchases = await RawMaterialPurchase.find({ ...companyFilter, status: { $ne: "CANCELLED" }, ...dateFilter, $or: [{ supplierLedgerId: ledgerId }, { supplierName: nameMatch }] }).sort({ date: 1, createdAt: 1 }).lean();
+      for (const row of purchases) entries.push({ date: row.date, voucherNo: row.purchaseNo || row.supplierInvoiceNo || String(row._id), type: "Purchase", referenceNo: row.supplierInvoiceNo || "", narration: `Purchase bill · ${row.location || ""}`, debit: 0, credit: money2(row.grandTotal), sourceType: "RAW_MATERIAL_PURCHASE" });
+    }
+    const voucherFilter = { "lines.ledger": ledgerId, ...dateFilter, sourceType: { $nin: ["SALES_INVOICE", "RAW_MATERIAL_PURCHASE"] } };
+    const vouchers = await Voucher.find(voucherFilter).sort({ date: 1, createdAt: 1 }).populate("lines.ledger", "name").lean();
+    for (const voucher of vouchers) {
+      for (const line of voucher.lines || []) {
+        if (String(line.ledger?._id || line.ledger) !== ledgerId) continue;
+        const t = String(voucher.type || "");
+        if (reportType === "SALE" && !["Receipt", "Sales", "Credit Note", "Journal", "Payment", "Contra"].includes(t)) continue;
+        if (reportType === "PURCHASE" && !["Payment", "Purchase", "Debit Note", "Journal", "Receipt", "Contra"].includes(t)) continue;
+        entries.push({ date: voucher.date, voucherNo: voucher.voucherNo, type: t, referenceNo: voucher.referenceNo || "", narration: line.narration || voucher.narration || "", debit: money2(line.debit), credit: money2(line.credit), sourceType: voucher.sourceType || "MANUAL" });
+      }
+    }
+    entries.sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.voucherNo).localeCompare(String(b.voucherNo), "en", { numeric: true }));
+    let balance = (ledger.openingType === "Cr" ? -1 : 1) * Number(ledger.openingBalance || 0);
+    const visibleEntries = [];
+    for (const entry of entries) {
+      balance += Number(entry.debit || 0) - Number(entry.credit || 0);
+      entry.balance = money2(balance);
+      entry.balanceType = balance >= 0 ? "Dr" : "Cr";
+      if (dateInRange(entry.date)) visibleEntries.push(entry);
+    }
+    const totalDebit = money2(visibleEntries.reduce((sum, entry) => sum + Number(entry.debit || 0), 0));
+    const totalCredit = money2(visibleEntries.reduce((sum, entry) => sum + Number(entry.credit || 0), 0));
+    return res.json({ success: true, ledger, type: reportType, entries: visibleEntries, totals: { debit: totalDebit, credit: totalCredit }, closingBalance: money2(balance), closingType: balance >= 0 ? "Dr" : "Cr" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Unable to load party ledger report." });
+  }
+}
+
 export async function ledgerStatement(req, res) {
   const ledgerId = req.params.id;
   const ledger = await Ledger.findById(ledgerId).populate("group", "name nature");
