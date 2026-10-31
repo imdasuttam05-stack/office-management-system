@@ -2,7 +2,11 @@ import express from "express";
 import multer from "multer";
 
 import auth from "../middleware/auth.js";
-import { processOcr } from "../controllers/ocrController.js";
+import { ocrLimiter } from "../middleware/rateLimit.js";
+import {
+  checkOcrHealth,
+  processOcr,
+} from "../controllers/ocrController.js";
 
 const router = express.Router();
 
@@ -23,7 +27,9 @@ const imageUpload = multer({
   fileFilter(req, file, callback) {
     if (!ALLOWED_IMAGE_TYPES.has(file.mimetype)) {
       return callback(
-        new Error("Unsupported image format. Please upload JPG, PNG, WEBP, BMP or TIFF."),
+        new Error(
+          "Unsupported image format. Please upload JPG, PNG, WEBP, BMP or TIFF."
+        )
       );
     }
 
@@ -38,20 +44,39 @@ function handleImageUpload(req, res, next) {
     if (error.code === "LIMIT_FILE_SIZE") {
       return res.status(413).json({
         success: false,
+        code: "OCR_FILE_TOO_LARGE",
         message: "Image is too large. Maximum size is 10 MB.",
+      });
+    }
+
+    if (error.code === "LIMIT_UNEXPECTED_FILE") {
+      return res.status(400).json({
+        success: false,
+        code: "OCR_INVALID_UPLOAD_FIELD",
+        message: "Upload the image in the 'file' field.",
       });
     }
 
     return res.status(400).json({
       success: false,
+      code: "OCR_INVALID_UPLOAD",
       message: error.message || "Image upload failed.",
     });
   });
 }
 
-// The browser sends multipart/form-data with the image in the "file" field.
-// Authentication runs before the upload is accepted; processOcr then proxies
-// the validated image to the private Python/Tesseract OCR service.
-router.post("/", auth, handleImageUpload, processOcr);
+// The browser calls this authenticated endpoint to verify that the private
+// Python/Tesseract service is configured and ready on Render.
+router.get("/health", auth, ocrLimiter, checkOcrHealth);
+
+// The browser sends multipart/form-data using the field name "file".
+// The image is validated here and proxied to the private Python OCR service.
+router.post(
+  "/",
+  auth,
+  ocrLimiter,
+  handleImageUpload,
+  processOcr
+);
 
 export default router;

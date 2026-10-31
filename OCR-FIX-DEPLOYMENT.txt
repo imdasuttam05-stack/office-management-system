@@ -1,0 +1,27 @@
+OCR FIX - DEPLOYMENT CHECKLIST
+
+1) Deploy python-ai as a separate Render Web Service:
+   - Runtime: Docker
+   - Root Directory: python-ai
+   - Dockerfile: Dockerfile
+   - Health Check Path: /health
+   - Environment: OCR_API_SECRET=<a long random secret>
+   - Environment: OCR_LANG=eng+ben
+
+2) On the existing Node backend Render service:
+   - OCR_API_URL=https://<your-python-ocr-service>.onrender.com
+   - OCR_API_SECRET=<exact same secret as Python OCR>
+   - Save changes and redeploy.
+
+3) Confirm the Python service /health URL returns {"status":"healthy"}.
+
+4) Log in, then check the Node API endpoint:
+   GET https://office-management-system-ikx8.onrender.com/api/ocr/health
+   Header: Authorization: Bearer <your login token>
+   Expected: HTTP 200 with status "healthy".
+
+5) Test Expense > Upload/Scan.
+
+Do not put OCR_API_SECRET in Vercel, frontend code, GitHub, or this ZIP.
+The OCR_API_URL is the Python service base URL, not the Node backend URL.
+See SECURITY-SETUP.md for full details and troubleshooting codes.

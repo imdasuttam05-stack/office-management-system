@@ -1,22 +1,18 @@
 # Office Management System — Security-1
 
-This package is the security-hardened version of the uploaded project.
+This package includes the security-hardened office management application and a separately deployed Python/Tesseract OCR service.
 
 Main protections:
 - Secure OTP hashing and attempt limits
-- Short-lived JWT access tokens
-- Rotating HttpOnly refresh tokens
-- Exact CORS allowlist
-- Helmet security headers
-- API and authentication rate limits
-- Backend role-based authorization
-- Expense ownership checks
-- Soft delete and audit logging
-- Duplicate override permission checks
-- Node-proxied OCR
-- OCR internal secret
-- Image MIME and magic-byte validation
+- Short-lived JWT access tokens and rotating HttpOnly refresh tokens
+- Exact CORS allowlist and Helmet security headers
+- API, authentication and OCR rate limits
+- Backend role-based authorization and expense ownership checks
+- Soft delete, audit logging and duplicate override permission checks
+- Node-proxied OCR (the browser never calls the Python service directly)
+- OCR internal shared secret, image MIME and magic-byte validation
+- 10 MB upload cap, OCR service health checks and actionable upstream error codes
 - Memory-conscious Tesseract preprocessing
-- Non-root Python Docker container
+- Python OCR container runs as a non-root user
 
-See `SECURITY-SETUP.md` before deploying.
+**Important:** OCR requires two Render services: the existing Node backend and a separate Docker web service deployed from the `python-ai` folder. Set the same `OCR_API_SECRET` in both services and set the Node service's `OCR_API_URL` to the Python service base URL. Follow `SECURITY-SETUP.md` before deployment.
