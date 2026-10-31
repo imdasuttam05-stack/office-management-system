@@ -427,6 +427,11 @@ export default function Expense() {
       setError("");
       setMessage("");
 
+      const expenseDate = String(form.date || "").trim();
+      if (!expenseDate) {
+        throw new Error("Please select expense date.");
+      }
+
       const response =
         await fetch(
           API_URL +
@@ -435,8 +440,10 @@ export default function Expense() {
             method: "POST",
             headers: getAuthHeaders(),
 
+            // Send the date explicitly (not only via the spread object).
             body: JSON.stringify({
               ...form,
+              date: expenseDate,
               forceSave,
             }),
           }
