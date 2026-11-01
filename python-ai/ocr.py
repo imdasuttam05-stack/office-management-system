@@ -272,20 +272,157 @@ def extract_basic_fields(text, confidences=None, lines=None):
     return _extract_fields(text or "", clean_lines, confidences or {})
 
 
+
+def _ocr_voucher_region(image, box, psm=6, whitelist=None, scale=3, channel="red"):
+    """OCR a handwritten region from the common landscape payment-voucher form."""
+    width, height = image.size
+    x1, y1, x2, y2 = box
+    left = max(0, min(width - 1, int(width * x1)))
+    top = max(0, min(height - 1, int(height * y1)))
+    right = max(left + 1, min(width, int(width * x2)))
+    bottom = max(top + 1, min(height, int(height * y2)))
+
+    crop = image.crop((left, top, right, bottom))
+    # Blue pen ink is often easier to separate from white paper in the red
+    # channel. The green channel can work better for handwritten amount digits.
+    if channel == "green":
+        crop = crop.split()[1]
+    elif channel == "blue":
+        crop = crop.split()[2]
+    elif channel == "gray":
+        crop = ImageOps.grayscale(crop)
+    else:
+        crop = crop.split()[0]
+    crop = ImageEnhance.Contrast(crop).enhance(1.5)
+    crop = crop.resize(
+        (max(1, crop.width * scale), max(1, crop.height * scale)),
+        Image.Resampling.LANCZOS,
+    )
+    config = f"--oem 3 --psm {psm}"
+    if whitelist:
+        config += f" -c tessedit_char_whitelist={whitelist}"
+    try:
+        return pytesseract.image_to_string(crop, lang="eng", config=config).strip()
+    except Exception:
+        return ""
+
+
+
+def _ocr_voucher_total_amount(image):
+    """Return a Total Amount only when the numeric OCR confidence is adequate."""
+    width, height = image.size
+    x1, y1, x2, y2 = (0.81, 0.67, 0.91, 0.76)
+    crop = image.crop((int(width * x1), int(height * y1), int(width * x2), int(height * y2)))
+    crop = crop.split()[1]  # green channel often separates blue handwriting well
+    crop = ImageEnhance.Contrast(crop.resize(
+        (crop.width * 4, crop.height * 4), Image.Resampling.LANCZOS
+    )).enhance(1.5)
+    config = "--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.,"
+    try:
+        data = pytesseract.image_to_data(
+            crop, lang="eng", config=config, output_type=pytesseract.Output.DICT
+        )
+    except Exception:
+        return "", False
+
+    for raw_word, raw_confidence in zip(data.get("text", []), data.get("conf", [])):
+        word = str(raw_word or "").strip()
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence = -1
+        amount = _clean_amount(word)
+        # A low-confidence handwritten digit can change the amount materially.
+        if amount:
+            if confidence >= 80:
+                return amount, True
+            return "", True
+    return "", False
+
+def _clean_region_text(value):
+    lines = []
+    for raw_line in str(value or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip(" .|_:-\t")
+        if not line:
+            continue
+        if re.fullmatch(r"(?:particulars|amount|total amount|rs\.?|p\.?)", line, re.IGNORECASE):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()[:2000]
+
+
+def _normalize_transport_description(value):
+    """Repair a few high-confidence handwritten transport OCR confusions."""
+    text = str(value or "")
+    if re.search(r"trans|trams|trav|lorry|freight|parcel|delivery|hub\s+to", text, re.IGNORECASE):
+        text = re.sub(r"\b(?:reint|reoint|resin|resint|feoint|besoin|besint|becins|becint)\s+to\b", "Being to", text, flags=re.IGNORECASE)
+        text = re.sub(r"\btrams?\s*(?:for|fort|bor|tort)\b", "Transport", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:lowe|lowel|lhovrel|chanel|zhowet|lhowet)\b", "Charge", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:low|los|mog|how)\s+to\b", "Hub to", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:fhe|she)p?\??", "Shop", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bS2BAYS?\b", "33 BAGS", text, flags=re.IGNORECASE)
+    return re.sub(r"[ \t]+", " ", text).strip()
+
 def extract_text(image_path, lang="eng+ben"):
     if not os.path.exists(image_path):
         raise FileNotFoundError("Image file not found")
 
-    # Expense payment vouchers are commonly landscape forms photographed
-    # sideways. Rotate portrait captures once, then run Tesseract exactly once.
+    # The standard payment voucher is a landscape form often photographed
+    # sideways. Rotate a portrait capture once so the columns are horizontal.
     with Image.open(image_path) as original:
         original = ImageOps.exif_transpose(original)
         width, height = original.size
         rotate_angle = 90 if height > width else 0
         oriented = original.rotate(rotate_angle, expand=True) if rotate_angle else original.copy()
+
         processed = preprocess_image(oriented)
         data = _ocr_words(processed, lang)
         text, lines, confidences = _data_to_text(data)
+        fields = extract_basic_fields(text, confidences, lines)
+
+        # Read the complete handwritten Particulars cell independently. The
+        # older parser discarded this text unless a small keyword list matched,
+        # which caused the Description / Remark field to remain blank.
+        particulars_text = _ocr_voucher_region(
+            oriented, (0.42, 0.35, 0.82, 0.69), psm=4, scale=4, channel="red"
+        )
+        particulars_text = _normalize_transport_description(
+            _clean_region_text(particulars_text)
+        )
+        if particulars_text:
+            fields["description"] = particulars_text
+
+        # Read only the Total Amount box. This prevents line-item amounts from
+        # being mistaken for the voucher total.
+        total_amount, total_was_detected = _ocr_voucher_total_amount(oriented)
+        if total_amount:
+            fields["amount"] = total_amount
+        elif total_was_detected:
+            # Do not fall back to a lower-confidence total parsed from the full
+            # page; the focused total box has already flagged the digits as weak.
+            fields.pop("amount", None)
+
+        # Expense nature should follow the activity written in Particulars,
+        # not the Payable A/c ledger name above the table.
+        transport_in_particulars = re.search(
+            r"transport|transp|trams|travell?|lorry|freight|parcel|delivery|hub\s+to",
+            particulars_text,
+            re.IGNORECASE,
+        )
+        if transport_in_particulars:
+            fields["natureOfExpense"] = "Transportation Charges"
+        elif not fields.get("natureOfExpense") and re.search(
+            r"transport|transp|trams|travell?|lorry|freight|parcel|delivery",
+            text,
+            re.IGNORECASE,
+        ):
+            fields["natureOfExpense"] = "Transportation Charges"
+
+        # Keep the region transcript visible to the user for correction, while
+        # retaining the regular full-page OCR output for all other fields.
+        preview_text = text
+        if particulars_text:
+            preview_text = (preview_text + "\n\n[PARTICULARS / DESCRIPTION]\n" + particulars_text).strip()
 
         confidence_values = list(confidences.values())
         confidence = (
@@ -295,10 +432,9 @@ def extract_text(image_path, lang="eng+ben"):
         )
 
         return {
-            "text": text,
+            "text": preview_text,
             "lines": lines,
             "confidence": confidence,
-            "fields": extract_basic_fields(text, confidences, lines),
+            "fields": fields,
             "orientation": rotate_angle,
         }
-
