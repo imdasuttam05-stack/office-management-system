@@ -138,6 +138,9 @@ expenseSchema.index({
   date: 1,
 });
 
+expenseSchema.index({ gpayNo: 1, isDeleted: 1 });
+expenseSchema.index({ billNo: 1, payeeName: 1, amount: 1, isDeleted: 1 });
+
 expenseSchema.plugin(companyScopePlugin, { financialYear: true });
 export default mongoose.model(
   "Expense",

@@ -13,6 +13,24 @@ const API_URL =
    AUTH
 ========================================================= */
 
+function getStoredUser() {
+  try {
+    return JSON.parse(
+      localStorage.getItem("user") ||
+      localStorage.getItem("currentUser") ||
+      "null"
+    );
+  } catch {
+    return null;
+  }
+}
+
+function canApproveDuplicate() {
+  const user = getStoredUser();
+  const role = String(user?.role || user?.userRole || "").toLowerCase();
+  return Boolean(user?.isMainAdmin) || ["admin", "manager"].includes(role);
+}
+
 function getAuthHeaders() {
   const token = localStorage.getItem("token");
 
@@ -69,6 +87,7 @@ export default function Expense() {
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [ocrTextPreview, setOcrTextPreview] = useState("");
 
   /* Duplicate */
   const [duplicateExpense, setDuplicateExpense] = useState(null);
@@ -167,6 +186,7 @@ export default function Expense() {
       ...initialForm,
       date: getToday(),
     });
+    setOcrTextPreview("");
 
     setDuplicateExpense(null);
     setShowDuplicate(false);
@@ -369,15 +389,18 @@ export default function Expense() {
         ? data.fields
         : {};
 
+      setOcrTextPreview(extractedText);
       setForm((previous) => ({
         ...previous,
         amount: ocrFields.amount || previous.amount,
-        date: normalizeOcrDate(ocrFields.date) || previous.date,
+        // If OCR cannot read the voucher date, clear today's default so the
+        // user must enter/check the real voucher date before saving.
+        date: normalizeOcrDate(ocrFields.date) || (previous.date === getToday() ? "" : previous.date),
+        natureOfExpense: ocrFields.natureOfExpense || previous.natureOfExpense,
+        gpayNo: ocrFields.gpayNo || previous.gpayNo,
         payeeName: ocrFields.payeeName || previous.payeeName,
         billNo: ocrFields.billNo || previous.billNo,
-        description: extractedText
-          ? extractedText.slice(0, 2000)
-          : previous.description,
+        description: ocrFields.description || previous.description,
       }));
 
       setMessage(
@@ -829,6 +852,13 @@ export default function Expense() {
             {error}
           </span>
         </div>
+      )}
+
+      {ocrTextPreview && (
+        <details className="ocr-text-review">
+          <summary>View raw OCR text for manual checking</summary>
+          <pre>{ocrTextPreview}</pre>
+        </details>
       )}
 
       {/* SUMMARY */}
@@ -1849,10 +1879,14 @@ export default function Expense() {
             </h2>
 
             <p>
-              A similar expense
-              already exists in
-              the system.
+              {"A similar expense already exists in the system. "}
+              {"Please compare the date, payee, amount and reference before deciding."}
             </p>
+            {duplicateExpense?.matchReason && (
+              <p className="duplicate-match-reason">
+                Match: {duplicateExpense.matchReason}
+              </p>
+            )}
 
             {duplicateExpense && (
               <div className="duplicate-details">
@@ -1918,42 +1952,48 @@ export default function Expense() {
                   </strong>
                 </div>
 
+                <div>
+                  <span>
+                    G-Pay / UPI No
+                  </span>
+
+                  <strong>
+                    {
+                      duplicateExpense.gpayNo ||
+                      "-"
+                    }
+                  </strong>
+                </div>
+
               </div>
             )}
 
             <div className="modal-actions">
-
               <button
                 type="button"
                 className="secondary-button"
                 onClick={() => {
-                  setShowDuplicate(
-                    false
-                  );
-
-                  setDuplicateExpense(
-                    null
-                  );
+                  setShowDuplicate(false);
+                  setDuplicateExpense(null);
                 }}
               >
-                Cancel
+                No — Do Not Save
               </button>
 
-              <button
-                type="button"
-                className="primary-button"
-                onClick={
-                  saveDuplicateAnyway
-                }
-                disabled={
-                  savingAnyway
-                }
-              >
-                {savingAnyway
-                  ? "Saving..."
-                  : "Save Anyway"}
-              </button>
-
+              {canApproveDuplicate() ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={saveDuplicateAnyway}
+                  disabled={savingAnyway}
+                >
+                  {savingAnyway ? "Saving..." : "Yes — Allow Entry"}
+                </button>
+              ) : (
+                <p className="duplicate-admin-note">
+                  Duplicate entries can only be allowed by an Admin or Manager. Please ask them to review this voucher.
+                </p>
+              )}
             </div>
 
           </div>
@@ -1969,6 +2009,30 @@ export default function Expense() {
 
         * {
           box-sizing: border-box;
+        }
+
+        .ocr-text-review {
+          margin: 12px 0;
+          padding: 12px 14px;
+          border: 1px solid #dbe3ef;
+          border-radius: 10px;
+          background: #ffffff;
+          color: #334155;
+        }
+
+        .ocr-text-review summary {
+          cursor: pointer;
+          font-weight: 700;
+          font-size: 13px;
+        }
+
+        .ocr-text-review pre {
+          max-height: 220px;
+          overflow: auto;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          margin: 10px 0 0;
+          font: 12px/1.5 Consolas, monospace;
         }
 
         .expense-page {

@@ -19,7 +19,7 @@ function escapeRegex(value) {
 }
 
 function isAdminOrManager(user) {
-  return ["Admin", "Manager"].includes(user?.role);
+  return Boolean(user?.isMainAdmin) || ["Admin", "Manager"].includes(user?.role);
 }
 
 function canSeeAllExpenses(user) {
@@ -238,32 +238,42 @@ export const createExpense = async (
        DUPLICATE DETECTION
     ------------------------- */
 
-    const duplicate =
-      await Expense.findOne({
-        isDeleted: false,
+    // Check the same transaction reference / invoice number exactly, and
+    // check similar payee + amount entries in a +/- 3 calendar-day window.
+    const expenseDay = new Date(Date.UTC(
+      parsedDate.getUTCFullYear(),
+      parsedDate.getUTCMonth(),
+      parsedDate.getUTCDate()
+    ));
+    const dateWindowStart = new Date(expenseDay.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const dateWindowEnd = new Date(expenseDay.getTime() + 3 * 24 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000 - 1);
 
+    const exactReferenceConditions = [];
+    if (cleanGpay) {
+      exactReferenceConditions.push({
+        gpayNo: { $regex: `^${escapeRegex(cleanGpay)}$`, $options: "i" },
+      });
+    }
+    if (cleanBillNo) {
+      exactReferenceConditions.push({
+        billNo: { $regex: `^${escapeRegex(cleanBillNo)}$`, $options: "i" },
+        payeeName: { $regex: `^${escapeRegex(cleanPayee)}$`, $options: "i" },
         amount: expenseAmount,
+      });
+    }
 
-        payeeName: {
-          $regex:
-            escapeRegex(
-              cleanPayee
-            ),
-          $options: "i",
-        },
-
-        natureOfExpense: {
-          $regex:
-            escapeRegex(
-              cleanNature
-            ),
-          $options: "i",
-        },
-      })
-        .sort({
-          createdAt: -1,
-        })
-        .lean();
+    const nearDateCondition = {
+      amount: expenseAmount,
+      payeeName: { $regex: `^${escapeRegex(cleanPayee)}$`, $options: "i" },
+      date: { $gte: dateWindowStart, $lte: dateWindowEnd },
+    };
+    const duplicateConditions = [nearDateCondition, ...exactReferenceConditions];
+    const duplicate = await Expense.findOne({
+      isDeleted: false,
+      $or: duplicateConditions,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
 
     /*
       Only Admin / Manager can bypass
@@ -282,24 +292,24 @@ export const createExpense = async (
     ) {
       let similarity = 85;
 
+      let matchReason = "Same payee and amount within 3 days";
       if (
-        cleanBillNo &&
-        duplicate.billNo &&
-        cleanBillNo.toLowerCase() ===
-          String(
-            duplicate.billNo
-          ).toLowerCase()
+        cleanGpay && duplicate.gpayNo &&
+        cleanGpay.toLowerCase() === String(duplicate.gpayNo).toLowerCase()
+      ) {
+        similarity = 100;
+        matchReason = "Same G-Pay / UPI transaction reference";
+      } else if (
+        cleanBillNo && duplicate.billNo &&
+        cleanBillNo.toLowerCase() === String(duplicate.billNo).toLowerCase()
       ) {
         similarity = 98;
+        matchReason = "Same bill / invoice number, payee and amount";
       } else if (
-        cleanGpay &&
-        duplicate.gpayNo &&
-        cleanGpay.toLowerCase() ===
-          String(
-            duplicate.gpayNo
-          ).toLowerCase()
+        String(duplicate.natureOfExpense || "").toLowerCase() === cleanNature.toLowerCase()
       ) {
-        similarity = 97;
+        similarity = 92;
+        matchReason = "Same payee, amount and expense nature within 3 days";
       }
 
       return res.status(409).json({
@@ -311,6 +321,7 @@ export const createExpense = async (
           "Possible duplicate expense found. Manager or Admin approval is required to save it anyway.",
 
         similarity,
+        matchReason,
 
         existingExpense: {
           id:
@@ -330,6 +341,11 @@ export const createExpense = async (
 
           billNo:
             duplicate.billNo || "",
+
+          gpayNo:
+            duplicate.gpayNo || "",
+
+          matchReason,
         },
       });
     }
