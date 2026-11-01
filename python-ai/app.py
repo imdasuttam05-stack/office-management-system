@@ -15,7 +15,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
 OCR_API_SECRET = os.environ.get("OCR_API_SECRET", "").strip()
-OCR_LANG = os.environ.get("OCR_LANG", "eng+ben").strip() or "eng"
+OCR_LANG = os.environ.get("OCR_LANG", "eng").strip() or "eng"
 
 ALLOWED_EXTENSIONS = {
     ".jpg",

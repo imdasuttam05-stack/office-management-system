@@ -473,22 +473,48 @@ export default function Expense() {
         : {};
 
       setOcrTextPreview(extractedText);
+      // A new voucher scan must not keep values from the previously opened
+      // expense. Fill only values actually detected in this uploaded image.
+      const detectedFields = {
+        date: normalizeOcrDate(ocrFields.date),
+        natureOfExpense: String(ocrFields.natureOfExpense || "").trim(),
+        amount: String(ocrFields.amount || "").trim(),
+        gpayNo: String(ocrFields.gpayNo || "").trim(),
+        payeeName: String(ocrFields.payeeName || "").trim(),
+        billNo: String(ocrFields.billNo || "").trim(),
+        description: String(ocrFields.description || "").trim(),
+      };
+      const fieldLabels = {
+        date: "Date",
+        natureOfExpense: "Nature of Expenses",
+        amount: "Amount",
+        gpayNo: "G-Pay / UPI No",
+        payeeName: "Payee Name",
+        billNo: "Bill / Invoice No",
+        description: "Description / Remark",
+      };
+      const detectedNames = Object.keys(fieldLabels).filter(
+        (key) => Boolean(detectedFields[key])
+      );
+
       setForm((previous) => ({
         ...previous,
-        amount: ocrFields.amount || previous.amount,
-        // If OCR cannot read the voucher date, clear today's default so the
-        // user must enter/check the real voucher date before saving.
-        date: normalizeOcrDate(ocrFields.date) || (previous.date === getToday() ? "" : previous.date),
-        natureOfExpense: ocrFields.natureOfExpense || previous.natureOfExpense,
-        gpayNo: ocrFields.gpayNo || previous.gpayNo,
-        payeeName: ocrFields.payeeName || previous.payeeName,
-        billNo: ocrFields.billNo || previous.billNo,
-        description: ocrFields.description || previous.description,
+        ...detectedFields,
       }));
 
-      setMessage(
-        `Bill scanned successfully${data.confidence != null ? ` (${Number(data.confidence).toFixed(0)}% confidence)` : ""}. Please review the extracted values before saving.`
-      );
+      if (detectedNames.length === 0) {
+        setMessage(
+          "OCR read the image, but could not reliably identify any expense fields. Review the Raw OCR Text and enter the details manually, or upload a clearer, straight-facing image."
+        );
+      } else {
+        const detectedLabels = detectedNames.map((key) => fieldLabels[key]).join(", ");
+        const confidenceText = data.confidence != null
+          ? ` (${Number(data.confidence).toFixed(0)}% text confidence)`
+          : "";
+        setMessage(
+          `OCR detected ${detectedNames.length} of 7 expense fields${confidenceText}: ${detectedLabels}. Please verify the values before saving.`
+        );
+      }
 
       setShowUploadModal(false);
       setSelectedFile(null);
@@ -507,13 +533,13 @@ export default function Expense() {
 
     const raw = String(value).trim();
 
-    let match = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    let match = raw.match(/^(\d{1,2})[.\/|-](\d{1,2})[.\/|-](\d{4})$/);
     if (match) {
       const [, dd, mm, yyyy] = match;
       return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
     }
 
-    match = raw.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    match = raw.match(/^(\d{4})[.\/|-](\d{1,2})[.\/|-](\d{1,2})$/);
     if (match) {
       const [, yyyy, mm, dd] = match;
       return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;

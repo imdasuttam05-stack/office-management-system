@@ -32,13 +32,14 @@ def preprocess_image(image):
 
 
 def _ocr_words(image, lang):
-    # PSM 6 is more reliable for handwritten payment-voucher tables.
-    # Orientation is selected once from the page/photo aspect ratio below.
+    # PSM 11 (sparse text) separates printed labels and handwritten entries
+    # more reliably on photographed voucher forms than treating the whole page
+    # as one paragraph (PSM 6). Field-specific crops handle critical numbers.
     timeout_seconds = max(20, int(os.environ.get("OCR_TESSERACT_TIMEOUT_SECONDS", "150")))
     return pytesseract.image_to_data(
         image,
         lang=lang,
-        config="--oem 1 --psm 6",
+        config="--oem 1 --psm 11",
         output_type=pytesseract.Output.DICT,
         timeout=timeout_seconds,
     )
@@ -99,7 +100,7 @@ def _clean_amount(value):
 
 
 def _extract_date(text):
-    date_pattern = r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})"
+    date_pattern = r"(\d{1,2}[./|\\-]\d{1,2}[./|\\-]\d{2,4}|\d{4}[./|\\-]\d{1,2}[./|\\-]\d{1,2})"
     labeled = re.search(
         rf"(?:date|dated)\s*[:#.-]?\s*{date_pattern}",
         text,
@@ -182,7 +183,7 @@ def _extract_fields(text, lines, confidences):
 
     # Voucher / bill / invoice reference.
     bill_match = re.search(
-        r"(?:bill\s*(?:no|number)|invoice\s*(?:no|number)|inv\s*(?:no|number)|v\.?\s*r\.?\s*no|voucher\s*(?:no|number)|receipt\s*(?:no|number))\s*[:#.-]?\s*([A-Z0-9/-]{2,30})",
+        r"(?:bill\s*(?:no|number)|invoice\s*(?:no|number)|inv\s*(?:no|number)|v\.?\s*r\.?\s*no\.?|vr\s*no\.?|voucher\s*(?:no|number)|receipt\s*(?:no|number))\s*[:#.-]?\s*([A-Z0-9/-]{2,30})",
         joined,
         flags=re.IGNORECASE,
     )
@@ -231,7 +232,20 @@ def _extract_fields(text, lines, confidences):
         payee = re.sub(r"\b(?:particulars|amount|rs\.?|p\.)\b.*$", "", payee, flags=re.IGNORECASE).strip()
         letter_count = len(re.findall(r"[A-Za-z\u0980-\u09FF]", payee))
         # Do not fill names from short, noisy handwriting fragments.
-        if 4 <= letter_count <= 80 and not re.search(r"\d{2,}", payee) and 2 <= len(payee) <= 150:
+        looks_like_description = re.search(
+            r"\b(being|transport|charge|loading|unloading|goods|delivered|hub|travelled|traveling|expense)\b",
+            payee,
+            flags=re.IGNORECASE,
+        )
+        is_short_business_code = bool(re.fullmatch(r"[A-Za-z]{2,5}", payee))
+        if (
+            (letter_count >= 4 or is_short_business_code)
+            and letter_count <= 80
+            and not re.search(r"\d{2,}", payee)
+            and 2 <= len(payee) <= 100
+            and not looks_like_description
+            and payee.strip().lower() not in {"particulars", "amount", "date", "bank", "cash", "cheque"}
+        ):
             fields["payeeName"] = payee
 
     # Keep only the handwritten particulars area as the suggested remark.
@@ -316,39 +330,45 @@ def _ocr_voucher_region(image, box, psm=6, whitelist=None, scale=3, channel="red
 
 
 def _ocr_voucher_total_amount(image):
-    """Return a Total Amount only when the numeric OCR confidence is adequate."""
+    """Read only the printed Total Amount row, excluding item amounts above it."""
     width, height = image.size
-    x1, y1, x2, y2 = (0.81, 0.67, 0.91, 0.76)
+    # The Agri Rise landscape payment voucher has the total in the bottom
+    # amount row. The previous crop included the whole amount column, so OCR
+    # often selected 1500 / 88 / 33 instead of the actual total 4621.
+    box = (0.82, 0.69, 0.92, 0.755)
+    x1, y1, x2, y2 = box
     crop = image.crop((int(width * x1), int(height * y1), int(width * x2), int(height * y2)))
-    crop = crop.split()[1]  # green channel often separates blue handwriting well
-    crop = ImageEnhance.Contrast(crop.resize(
-        (crop.width * 4, crop.height * 4), Image.Resampling.LANCZOS
-    )).enhance(1.5)
-    config = "--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.,"
-    try:
-        data = pytesseract.image_to_data(
-            crop,
-            lang="eng",
-            config=config,
-            output_type=pytesseract.Output.DICT,
-            timeout=max(15, int(os.environ.get("OCR_REGION_TIMEOUT_SECONDS", "75"))),
+
+    candidates = []
+    for channel_name, channel in (("gray", ImageOps.grayscale(crop)), ("red", crop.split()[0])):
+        prepared = ImageOps.autocontrast(channel)
+        prepared = prepared.resize(
+            (max(1, prepared.width * 6), max(1, prepared.height * 6)),
+            Image.Resampling.LANCZOS,
         )
-    except Exception:
+        try:
+            raw = pytesseract.image_to_string(
+                prepared,
+                lang="eng",
+                config="--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789.,",
+                timeout=max(10, int(os.environ.get("OCR_REGION_TIMEOUT_SECONDS", "75"))),
+            )
+        except Exception:
+            continue
+
+        for token in re.findall(r"(?<!\d)[0-9][0-9,.]{0,10}", raw):
+            cleaned = _clean_amount(token)
+            # This is a tightly cropped, single-value total row. Restrict the
+            # number of digits to avoid filling from stray OCR artifacts.
+            if cleaned and re.fullmatch(r"\d{1,9}(?:\.\d{1,2})?", cleaned):
+                candidates.append(cleaned)
+
+    if not candidates:
         return "", False
 
-    for raw_word, raw_confidence in zip(data.get("text", []), data.get("conf", [])):
-        word = str(raw_word or "").strip()
-        try:
-            confidence = float(raw_confidence)
-        except (TypeError, ValueError):
-            confidence = -1
-        amount = _clean_amount(word)
-        # A low-confidence handwritten digit can change the amount materially.
-        if amount:
-            if confidence >= 80:
-                return amount, True
-            return "", True
-    return "", False
+    # If channels disagree, prefer the first exact numeric token from the
+    # grayscale crop; the second channel is only a fallback.
+    return candidates[0], True
 
 def _clean_region_text(value):
     lines = []
@@ -374,7 +394,7 @@ def _normalize_transport_description(value):
         text = re.sub(r"\bS2BAYS?\b", "33 BAGS", text, flags=re.IGNORECASE)
     return re.sub(r"[ \t]+", " ", text).strip()
 
-def extract_text(image_path, lang="eng+ben"):
+def extract_text(image_path, lang="eng"):
     if not os.path.exists(image_path):
         raise FileNotFoundError("Image file not found")
 
@@ -402,6 +422,14 @@ def extract_text(image_path, lang="eng+ben"):
         )
         if particulars_text:
             fields["description"] = particulars_text
+            if not fields.get("billNo"):
+                particulars_invoice = re.search(
+                    r"\b(?:invoice|inv\.?|bill)\s*(?:no\.?|number)?\s*[:#-]?\s*([A-Z0-9/-]{2,30})",
+                    particulars_text,
+                    flags=re.IGNORECASE,
+                )
+                if particulars_invoice:
+                    fields["billNo"] = particulars_invoice.group(1).strip("- /")
 
         # Read only the Total Amount box. This prevents line-item amounts from
         # being mistaken for the voucher total.
