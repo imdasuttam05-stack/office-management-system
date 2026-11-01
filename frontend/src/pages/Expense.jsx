@@ -84,6 +84,7 @@ export default function Expense() {
   const [loading, setLoading] = useState(false);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrStage, setOcrStage] = useState("");
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -322,6 +323,57 @@ export default function Expense() {
      TESSERACT OCR
   ========================================================= */
 
+  async function prepareOcrUpload(file) {
+    // Keep ordinary voucher scans untouched. Downsize only large phone-camera
+    // images to reduce upload time and OCR CPU without degrading small images.
+    if (typeof createImageBitmap !== "function" || !file.type.startsWith("image/")) {
+      return file;
+    }
+
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+      const maxSide = 2000;
+      const maxBytes = 6 * 1024 * 1024;
+      const longestSide = Math.max(bitmap.width, bitmap.height);
+
+      if (longestSide <= maxSide && file.size <= maxBytes) {
+        bitmap.close?.();
+        return file;
+      }
+
+      const scale = Math.min(1, maxSide / Math.max(longestSide, 1));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d", { alpha: false });
+
+      if (!context) {
+        bitmap.close?.();
+        return file;
+      }
+
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+      bitmap = null;
+
+      const blob = await new Promise((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", 0.86);
+      });
+      if (!blob) return file;
+
+      const baseName = file.name.replace(/\.[^.]+$/, "") || "expense-voucher";
+      return new File([blob], `${baseName}-ocr.jpg`, {
+        type: "image/jpeg",
+        lastModified: Date.now(),
+      });
+    } catch (error) {
+      bitmap?.close?.();
+      console.warn("OCR image optimization skipped:", error);
+      return file;
+    }
+  }
+
   async function useUploadedBill() {
     if (!selectedFile) {
       setError("Please select a bill or invoice first.");
@@ -342,19 +394,50 @@ export default function Expense() {
 
     try {
       setOcrLoading(true);
+      setOcrStage("Connecting to OCR service...");
       setError("");
       setMessage("");
 
-      const formData = new FormData();
-      formData.append("file", selectedFile);
+      const apiBase = API_URL.replace(/\/$/, "");
+      const authHeaders = {
+        Authorization: "Bearer " + token,
+      };
 
+      // Warm the Python OCR service first. Render free instances can sleep
+      // after idle time; warming separates that startup delay from OCR work.
+      const healthResponse = await fetch(apiBase + "/api/ocr/health", {
+        method: "GET",
+        headers: authHeaders,
+      });
+      let healthData = {};
+      try {
+        healthData = await healthResponse.json();
+      } catch {
+        throw new Error("OCR service health check returned an invalid response.");
+      }
+
+      if (healthResponse.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        throw new Error("Your session has expired. Please login again.");
+      }
+      if (!healthResponse.ok || !healthData.success || healthData.status !== "healthy") {
+        throw new Error(
+          healthData.message || "OCR service is not ready. Check the Render OCR service and try again."
+        );
+      }
+
+      setOcrStage("Preparing image...");
+      const uploadFile = await prepareOcrUpload(selectedFile);
+      const formData = new FormData();
+      formData.append("file", uploadFile);
+
+      setOcrStage("Reading voucher...");
       const response = await fetch(
-        API_URL.replace(/\/$/, "") + "/api/ocr",
+        apiBase + "/api/ocr",
         {
           method: "POST",
-          headers: {
-            Authorization: "Bearer " + token,
-          },
+          headers: authHeaders,
           body: formData,
         }
       );
@@ -415,6 +498,7 @@ export default function Expense() {
       setError(err.message || "Unable to scan the bill.");
     } finally {
       setOcrLoading(false);
+      setOcrStage("");
     }
   }
 
@@ -1812,7 +1896,7 @@ export default function Expense() {
                         ⟳
                       </span>
 
-                      Scanning...
+                      {ocrStage || "Scanning..."}
                     </>
                   ) : (
                     <>

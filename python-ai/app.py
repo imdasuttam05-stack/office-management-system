@@ -152,6 +152,20 @@ def ocr():
             "fields": result.get("fields", {}),
         }), 200
 
+    except RuntimeError as error:
+        elapsed = time.monotonic() - started_at
+        if "timeout" in str(error).lower():
+            logger.warning("Tesseract timed out after %.2fs; file=%s", elapsed, extension)
+            return jsonify({
+                "success": False,
+                "code": "OCR_TESSERACT_TIMEOUT",
+                "error": "Tesseract could not finish this image within the processing limit. Try a smaller JPG or PNG.",
+            }), 504
+        logger.exception("OCR image processing failed after %.2fs", elapsed)
+        return jsonify({
+            "success": False,
+            "error": "OCR processing failed. Check that the uploaded image is readable and that Tesseract is healthy.",
+        }), 500
     except Exception:
         logger.exception("OCR image processing failed after %.2fs", time.monotonic() - started_at)
         return jsonify({

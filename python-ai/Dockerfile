@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    OMP_THREAD_LIMIT=1 \
+    OCR_TESSERACT_TIMEOUT_SECONDS=150 \
+    OCR_REGION_TIMEOUT_SECONDS=75 \
     PORT=10000
 
 RUN apt-get update \
@@ -25,4 +28,4 @@ USER appuser
 
 EXPOSE 10000
 
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 2 --timeout 120 --access-logfile - --error-logfile - app:app"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 2 --timeout 210 --access-logfile - --error-logfile - app:app"]

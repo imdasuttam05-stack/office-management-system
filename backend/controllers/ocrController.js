@@ -6,7 +6,8 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/tiff",
 ]);
 
-const OCR_REQUEST_TIMEOUT_MS = 105000;
+const OCR_HEALTH_TIMEOUT_MS = 90000;
+const OCR_REQUEST_TIMEOUT_MS = 180000;
 const MAX_RETURNED_TEXT_LENGTH = 20000;
 const MAX_RETURNED_LINES = 500;
 
@@ -105,11 +106,11 @@ function hasValidMagicBytes(buffer, mime) {
   return false;
 }
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = OCR_REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    OCR_REQUEST_TIMEOUT_MS
+    timeoutMs
   );
 
   try {
@@ -148,7 +149,7 @@ export const checkOcrHealth = async (req, res) => {
       headers: {
         Accept: "application/json",
       },
-    });
+    }, OCR_HEALTH_TIMEOUT_MS);
 
     const data = await readJsonSafely(response);
 
@@ -285,6 +286,16 @@ export const processOcr = async (req, res) => {
         });
       }
 
+      if (response.status === 504) {
+        return res.status(504).json({
+          success: false,
+          code: data.code || "OCR_TESSERACT_TIMEOUT",
+          message:
+            data.error || data.message ||
+            "The Tesseract OCR engine timed out. Check the OCR service logs and try a smaller JPG or PNG.",
+        });
+      }
+
       return res.status(503).json({
         success: false,
         code: "OCR_SERVICE_ERROR",
@@ -328,9 +339,9 @@ export const processOcr = async (req, res) => {
 
     return res.status(timedOut ? 504 : 503).json({
       success: false,
-      code: timedOut ? "OCR_SERVICE_TIMEOUT" : "OCR_SERVICE_UNREACHABLE",
+      code: timedOut ? "OCR_REQUEST_TIMEOUT" : "OCR_SERVICE_UNREACHABLE",
       message: timedOut
-        ? "OCR processing took too long. The OCR Render service timed out; try a smaller or clearer image."
+        ? "The OCR service did not respond within 180 seconds. Check OCR Render logs; a free service may be starting from idle."
         : "The Python OCR service is unavailable. Confirm that it is deployed and running on Render, then check OCR_API_URL and the OCR service logs.",
     });
   }

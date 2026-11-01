@@ -34,11 +34,13 @@ def preprocess_image(image):
 def _ocr_words(image, lang):
     # PSM 6 is more reliable for handwritten payment-voucher tables.
     # Orientation is selected once from the page/photo aspect ratio below.
+    timeout_seconds = max(20, int(os.environ.get("OCR_TESSERACT_TIMEOUT_SECONDS", "150")))
     return pytesseract.image_to_data(
         image,
         lang=lang,
-        config="--oem 3 --psm 6",
+        config="--oem 1 --psm 6",
         output_type=pytesseract.Output.DICT,
+        timeout=timeout_seconds,
     )
 
 
@@ -302,7 +304,12 @@ def _ocr_voucher_region(image, box, psm=6, whitelist=None, scale=3, channel="red
     if whitelist:
         config += f" -c tessedit_char_whitelist={whitelist}"
     try:
-        return pytesseract.image_to_string(crop, lang="eng", config=config).strip()
+        return pytesseract.image_to_string(
+            crop,
+            lang="eng",
+            config=config,
+            timeout=max(15, int(os.environ.get("OCR_REGION_TIMEOUT_SECONDS", "75"))),
+        ).strip()
     except Exception:
         return ""
 
@@ -320,7 +327,11 @@ def _ocr_voucher_total_amount(image):
     config = "--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789.,"
     try:
         data = pytesseract.image_to_data(
-            crop, lang="eng", config=config, output_type=pytesseract.Output.DICT
+            crop,
+            lang="eng",
+            config=config,
+            output_type=pytesseract.Output.DICT,
+            timeout=max(15, int(os.environ.get("OCR_REGION_TIMEOUT_SECONDS", "75"))),
         )
     except Exception:
         return "", False
