@@ -85,6 +85,81 @@ def _orientation_score(text, confidences):
     return average_confidence + keyword_score * 7 + min(len(normalized) / 250, 8)
 
 
+def _orientation_preview(image, lang="eng"):
+    """Score portrait images in both 0° and 90° orientations at low resolution.
+
+    A portrait phone photo of a sideways paper voucher should rotate; a portrait
+    screenshot of a form must remain upright. The previous height>width rule
+    rotated both types indiscriminately.
+    """
+    max_side = max(250, int(os.environ.get("OCR_ORIENTATION_PREVIEW_MAX_SIDE", "900")))
+    scale = min(1.0, max_side / max(image.size))
+    preview = image.convert("L")
+    if scale < 1.0:
+        preview = preview.resize(
+            (max(1, int(preview.width * scale)), max(1, int(preview.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    preview = ImageEnhance.Contrast(preview).enhance(1.35)
+
+    try:
+        data = pytesseract.image_to_data(
+            preview,
+            lang=lang,
+            config="--oem 1 --psm 11",
+            output_type=pytesseract.Output.DICT,
+            timeout=max(5, int(os.environ.get("OCR_ORIENTATION_PREVIEW_TIMEOUT_SECONDS", "15"))),
+        )
+    except Exception:
+        return 0.0, ""
+
+    words = []
+    confidences = []
+    for raw_word, raw_confidence in zip(data.get("text", []), data.get("conf", [])):
+        word = str(raw_word or "").strip()
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence = -1
+        if word and confidence >= 0:
+            words.append(word)
+            confidences.append(confidence)
+
+    extracted = " ".join(words).lower()
+    keyword_hits = sum(1 for keyword in DOCUMENT_KEYWORDS if keyword in extracted)
+    average_confidence = sum(confidences) / len(confidences) if confidences else 0
+    score = len(words) + keyword_hits * 5 + average_confidence * 0.25
+    return score, extracted
+
+
+def _select_orientation(image, lang="eng"):
+    """Return the most readable of the original and 90°-rotated orientations."""
+    if image.width >= image.height:
+        return image.copy(), 0, ""
+
+    original_score, original_text = _orientation_preview(image, lang)
+    rotated = image.rotate(90, expand=True)
+    rotated_score, rotated_text = _orientation_preview(rotated, lang)
+
+    if rotated_score > original_score + 5:
+        return rotated, 90, rotated_text
+    return image.copy(), 0, original_text
+
+
+def _looks_like_expense_form_screenshot(text):
+    normalized = re.sub(r"\s+", " ", str(text or "").lower())
+    label_hits = sum(
+        1 for pattern in (
+            r"nature\s+of\s+expenses?",
+            r"g\s*[-/]?\s*pay",
+            r"payee\s+name",
+            r"bill\s*/\s*invoice",
+            r"description\s*/?\s*remark",
+        ) if re.search(pattern, normalized)
+    )
+    return label_hits >= 3
+
+
 def _clean_amount(value):
     raw = str(value or "").replace(",", "").replace("₹", "").strip()
     raw = re.sub(r"[^0-9.]", "", raw)
@@ -124,23 +199,75 @@ def _extract_labeled_value(lines, labels, stop_words=()):
         if not match:
             continue
 
-        value = match.group(1).strip(" .:-|_\t")
+        value = match.group(1).strip(" .:-|_*\t")
         if not value and line_index + 1 < len(lines):
-            value = lines[line_index + 1].strip(" .:-|_\t")
+            value = lines[line_index + 1].strip(" .:-|_*\t")
 
         if stop_pattern:
             value = stop_pattern.split(value)[0]
 
-        value = re.sub(r"\s+", " ", value).strip(" .:-|_")
+        value = re.sub(r"\s+", " ", value).strip(" .:-|_*")
         if len(value) < 2 and line_index + 1 < len(lines):
-            next_value = lines[line_index + 1].strip(" .:-|_\t")
+            next_value = lines[line_index + 1].strip(" .:-|_*\t")
             if stop_pattern:
                 next_value = stop_pattern.split(next_value)[0]
-            value = re.sub(r"\s+", " ", next_value).strip(" .:-|_")
+            value = re.sub(r"\s+", " ", next_value).strip(" .:-|_*")
         if 2 <= len(value) <= 150:
             return value
 
     return ""
+
+
+def _extract_table_description(lines):
+    """Extract a Description/Remark cell from a two-column expense form screenshot.
+
+    Some users upload a screenshot/export of the filled expense form rather than
+    the original paper voucher. In that layout the description text appears above
+    the bottom-row label, so the normal handwritten-Particulars parser cannot find it.
+    """
+    bill_index = -1
+    description_label_index = -1
+    for index, line in enumerate(lines):
+        normalized = re.sub(r"\s+", " ", str(line or "")).strip()
+        if re.search(r"\bbill\s*/\s*invoice\s*(?:no|number)\b", normalized, re.IGNORECASE):
+            bill_index = index
+        if re.search(r"\bdescription\s*/?\s*remark\b", normalized, re.IGNORECASE):
+            description_label_index = index
+            break
+
+    if description_label_index < 0:
+        return ""
+
+    start_index = bill_index + 1 if bill_index >= 0 else 0
+    captured = []
+    skipped_bill_value = False
+    for line in lines[start_index:description_label_index]:
+        value = re.sub(r"\s+", " ", str(line or "")).strip(" |.-")
+        if not value:
+            continue
+        # With PSM 11, the bill number can be emitted on the line immediately
+        # after its label. Do not copy that value into Description / Remark.
+        if bill_index >= 0 and not skipped_bill_value and re.fullmatch(r"[A-Z0-9/-]{2,30}", value, re.IGNORECASE):
+            skipped_bill_value = True
+            continue
+        # Skip actual form labels, but retain narrative phrases such as
+        # "date of 28.10.2026" and "amount paid ..." inside the description.
+        if re.search(r"^\s*(?:date\s*[*:]|nature\s+of\s+expenses?\s*[*:]|amount\s*[*:]|g\s*[-/]?\s*pay(?:\s*/\s*upi)?|upi\s*(?:no|number)|payee\s+name\s*[*:]|bill\s*/\s*invoice)", value, re.IGNORECASE):
+            continue
+        captured.append(value)
+
+    # On a narrow screenshot the final Description / Remark row can contain the
+    # tail of the value to the right of the label (e.g. "Parcel Service").
+    last_line = str(lines[description_label_index] or "")
+    remainder = re.split(r"description\s*/?\s*remark", last_line, flags=re.IGNORECASE, maxsplit=1)
+    if len(remainder) > 1:
+        tail = re.sub(r"^[\s:*|._-]+", "", remainder[1])
+        tail = re.sub(r"[|]+$", "", tail).strip()
+        if tail:
+            captured.append(tail)
+
+    description = re.sub(r"\s+", " ", " ".join(captured)).strip()
+    return description[:2000] if len(description) >= 10 else ""
 
 
 def _extract_fields(text, lines, confidences):
@@ -153,13 +280,13 @@ def _extract_fields(text, lines, confidences):
     # Amount: only trust a number explicitly associated with the total/amount
     # label, and avoid autofilling very low-confidence handwritten OCR tokens.
     amount_match = re.search(
-        r"(?:total\s*amount|grand\s*total|net\s*amount|payment\s*amount)\s*[:=|.-]?\s*(?:rs\.?\s*)?(?:₹\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)",
+        r"(?:total\s*amount|grand\s*total|net\s*amount|payment\s*amount)\s*[*:=|.\-]?\s*(?:rs\.?\s*)?(?:₹\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)",
         joined,
         flags=re.IGNORECASE,
     )
     if not amount_match:
         amount_match = re.search(
-            r"(?:amount\s*paid|amount)\s*[:=|.-]?\s*(?:rs\.?\s*)?(?:₹\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)",
+            r"(?:amount\s*paid|amount)\s*[*:=|.\-]?\s*(?:rs\.?\s*)?(?:₹\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)",
             joined,
             flags=re.IGNORECASE,
         )
@@ -174,7 +301,7 @@ def _extract_fields(text, lines, confidences):
     # Payment reference: do not guess a UPI number when the voucher does not
     # contain an explicit UPI / transaction-reference label.
     upi_match = re.search(
-        r"(?:g\s*[-]?\s*pay|gpay|upi(?:\s*(?:id|no|number))?|transaction\s*(?:id|no|number)|txn\s*(?:id|no)|utr|rrn|bank\s*ref(?:erence)?|ref(?:erence)?\s*no)\s*[:#.-]?\s*([A-Z0-9-]{8,30})",
+        r"(?:g\s*[-]?\s*pay\s*/\s*upi(?:\s*(?:id|no|number))?|gpay(?:\s*/\s*upi)?(?:\s*(?:id|no|number))?|upi(?:\s*(?:id|no|number))?|transaction\s*(?:id|no|number)|txn\s*(?:id|no)|utr|rrn|bank\s*ref(?:erence)?|ref(?:erence)?\s*no)\s*[*:#.\-]?\s*([A-Z0-9-]{8,30})",
         joined,
         flags=re.IGNORECASE,
     )
@@ -183,7 +310,7 @@ def _extract_fields(text, lines, confidences):
 
     # Voucher / bill / invoice reference.
     bill_match = re.search(
-        r"(?:bill\s*(?:no|number)|invoice\s*(?:no|number)|inv\s*(?:no|number)|v\.?\s*r\.?\s*no\.?|vr\s*no\.?|voucher\s*(?:no|number)|receipt\s*(?:no|number))\s*[:#.-]?\s*([A-Z0-9/-]{2,30})",
+        r"(?:bill\s*/\s*invoice\s*(?:no|number)|bill\s*(?:no|number)|invoice\s*(?:no|number)|inv\s*(?:no|number)|v\.?\s*r\.?\s*no\.?|vr\s*no\.?|voucher\s*(?:no|number)|receipt\s*(?:no|number))\s*[*:#.\-]?\s*([A-Z0-9/-]{2,30})",
         joined,
         flags=re.IGNORECASE,
     )
@@ -279,6 +406,13 @@ def _extract_fields(text, lines, confidences):
     )
     if description and any(term in description.lower() for term in readable_description_terms):
         fields["description"] = description[:2000]
+
+    # Key/value expense-form screenshots have the description before the
+    # "Description / Remark" footer label instead of a "Particulars" heading.
+    if not fields.get("description"):
+        table_description = _extract_table_description(lines)
+        if table_description:
+            fields["description"] = table_description
 
     return fields
 
@@ -398,70 +532,77 @@ def extract_text(image_path, lang="eng"):
     if not os.path.exists(image_path):
         raise FileNotFoundError("Image file not found")
 
-    # The standard payment voucher is a landscape form often photographed
-    # sideways. Rotate a portrait capture once so the columns are horizontal.
+    # Portrait images may be upright screenshots OR sideways paper vouchers.
+    # Compare quick low-resolution OCR scores instead of rotating every portrait
+    # upload by default.
     with Image.open(image_path) as original:
-        original = ImageOps.exif_transpose(original)
-        width, height = original.size
-        rotate_angle = 90 if height > width else 0
-        oriented = original.rotate(rotate_angle, expand=True) if rotate_angle else original.copy()
+        original = ImageOps.exif_transpose(original).convert("RGB")
+        oriented, rotate_angle, orientation_preview_text = _select_orientation(original, lang)
 
         processed = preprocess_image(oriented)
         data = _ocr_words(processed, lang)
         text, lines, confidences = _data_to_text(data)
         fields = extract_basic_fields(text, confidences, lines)
+        is_form_screenshot = _looks_like_expense_form_screenshot(text + " " + orientation_preview_text)
 
-        # Read the complete handwritten Particulars cell independently. The
+        # A screenshot/export of the expense form is already a key/value table.
+        # Its description cell is extracted by labels and must not be overridden
+        # by fixed coordinates intended for the original printed paper voucher.
+        if not is_form_screenshot:
+            # Read the complete handwritten Particulars cell independently. The
         # older parser discarded this text unless a small keyword list matched,
         # which caused the Description / Remark field to remain blank.
-        particulars_text = _ocr_voucher_region(
-            oriented, (0.42, 0.35, 0.82, 0.69), psm=4, scale=4, channel="red"
-        )
-        particulars_text = _normalize_transport_description(
-            _clean_region_text(particulars_text)
-        )
-        if particulars_text:
-            fields["description"] = particulars_text
-            if not fields.get("billNo"):
-                particulars_invoice = re.search(
-                    r"\b(?:invoice|inv\.?|bill)\s*(?:no\.?|number)?\s*[:#-]?\s*([A-Z0-9/-]{2,30})",
-                    particulars_text,
-                    flags=re.IGNORECASE,
-                )
-                if particulars_invoice:
-                    fields["billNo"] = particulars_invoice.group(1).strip("- /")
+            particulars_text = _ocr_voucher_region(
+                oriented, (0.42, 0.35, 0.82, 0.69), psm=4, scale=4, channel="red"
+            )
+            particulars_text = _normalize_transport_description(
+                _clean_region_text(particulars_text)
+            )
+            if particulars_text:
+                fields["description"] = particulars_text
+                if not fields.get("billNo"):
+                    particulars_invoice = re.search(
+                        r"\b(?:invoice|inv\.?|bill)\s*(?:no\.?|number)?\s*[:#-]?\s*([A-Z0-9/-]{2,30})",
+                        particulars_text,
+                        flags=re.IGNORECASE,
+                    )
+                    if particulars_invoice:
+                        fields["billNo"] = particulars_invoice.group(1).strip("- /")
 
-        # Read only the Total Amount box. This prevents line-item amounts from
-        # being mistaken for the voucher total.
-        total_amount, total_was_detected = _ocr_voucher_total_amount(oriented)
-        if total_amount:
-            fields["amount"] = total_amount
-        elif total_was_detected:
-            # Do not fall back to a lower-confidence total parsed from the full
-            # page; the focused total box has already flagged the digits as weak.
-            fields.pop("amount", None)
+            # Read only the Total Amount box. This prevents line-item amounts from
+            # being mistaken for the voucher total.
+            total_amount, total_was_detected = _ocr_voucher_total_amount(oriented)
+            if total_amount:
+                fields["amount"] = total_amount
+            elif total_was_detected:
+                # Do not fall back to a lower-confidence total parsed from the full
+                # page; the focused total box has already flagged the digits as weak.
+                fields.pop("amount", None)
 
-        # Expense nature should follow the activity written in Particulars,
-        # not the Payable A/c ledger name above the table.
-        transport_in_particulars = re.search(
-            r"transport|transp|trams|travell?|lorry|freight|parcel|delivery|hub\s+to",
-            particulars_text,
-            re.IGNORECASE,
-        )
-        if transport_in_particulars:
-            fields["natureOfExpense"] = "Transportation Charges"
-        elif not fields.get("natureOfExpense") and re.search(
-            r"transport|transp|trams|travell?|lorry|freight|parcel|delivery",
-            text,
-            re.IGNORECASE,
-        ):
-            fields["natureOfExpense"] = "Transportation Charges"
+            # Expense nature should follow the activity written in Particulars,
+            # not the Payable A/c ledger name above the table.
+            transport_in_particulars = re.search(
+                r"transport|transp|trams|travell?|lorry|freight|parcel|delivery|hub\s+to",
+                particulars_text,
+                re.IGNORECASE,
+            )
+            if transport_in_particulars:
+                fields["natureOfExpense"] = "Transportation Charges"
+            elif not fields.get("natureOfExpense") and re.search(
+                r"transport|transp|trams|travell?|lorry|freight|parcel|delivery",
+                text,
+                re.IGNORECASE,
+            ):
+                fields["natureOfExpense"] = "Transportation Charges"
 
-        # Keep the region transcript visible to the user for correction, while
-        # retaining the regular full-page OCR output for all other fields.
-        preview_text = text
-        if particulars_text:
-            preview_text = (preview_text + "\n\n[PARTICULARS / DESCRIPTION]\n" + particulars_text).strip()
+            # Keep the region transcript visible to the user for correction, while
+            # retaining the regular full-page OCR output for all other fields.
+            preview_text = text
+            if particulars_text:
+                preview_text = (preview_text + "\n\n[PARTICULARS / DESCRIPTION]\n" + particulars_text).strip()
+
+        if is_form_screenshot:
+            preview_text = text
 
         confidence_values = list(confidences.values())
         confidence = (
