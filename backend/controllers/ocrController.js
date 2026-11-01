@@ -224,6 +224,7 @@ export const processOcr = async (req, res) => {
     });
   }
 
+  const ocrStartedAt = Date.now();
   try {
     const formData = new FormData();
     const blob = new Blob([req.file.buffer], {
@@ -245,6 +246,7 @@ export const processOcr = async (req, res) => {
     });
 
     const data = await readJsonSafely(response);
+    console.info("OCR service response:", response.status, "durationMs:", Date.now() - ocrStartedAt);
 
     if (!response.ok) {
       console.error("OCR SERVICE ERROR STATUS:", response.status);
@@ -320,7 +322,8 @@ export const processOcr = async (req, res) => {
     const timedOut = error?.name === "AbortError";
     console.error(
       "OCR PROXY ERROR:",
-      timedOut ? "request timed out" : error?.message || error
+      timedOut ? "request timed out" : error?.message || error,
+      "durationMs:", Date.now() - ocrStartedAt
     );
 
     return res.status(timedOut ? 504 : 503).json({

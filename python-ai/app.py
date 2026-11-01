@@ -2,6 +2,7 @@ import hmac
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 
 import pytesseract
@@ -129,6 +130,7 @@ def ocr():
         }), 400
 
     temp_path = None
+    started_at = time.monotonic()
     try:
         with tempfile.NamedTemporaryFile(
             mode="wb",
@@ -139,6 +141,8 @@ def ocr():
             temp_path = temp_file.name
 
         result = extract_text(temp_path, lang=OCR_LANG)
+        elapsed_seconds = time.monotonic() - started_at
+        logger.info("OCR completed in %.2fs; file=%s", elapsed_seconds, extension)
 
         return jsonify({
             "success": True,
@@ -149,7 +153,7 @@ def ocr():
         }), 200
 
     except Exception:
-        logger.exception("OCR image processing failed")
+        logger.exception("OCR image processing failed after %.2fs", time.monotonic() - started_at)
         return jsonify({
             "success": False,
             "error": "OCR processing failed. Check that the uploaded image is readable and that Tesseract is healthy.",

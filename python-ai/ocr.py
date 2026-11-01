@@ -12,23 +12,28 @@ DOCUMENT_KEYWORDS = (
 
 
 def preprocess_image(image):
+    """Prepare a bounded-size image for one OCR pass."""
     image = ImageOps.exif_transpose(image)
     image = image.convert("L")
-    image = ImageEnhance.Contrast(image).enhance(1.8)
-    image = image.filter(ImageFilter.SHARPEN)
 
     width, height = image.size
-    if width < 1600:
-        scale = 1600 / max(width, 1)
+    longest_side = max(width, height)
+    target_side = 1600
+    if longest_side != target_side:
+        scale = target_side / max(longest_side, 1)
         image = image.resize(
-            (int(width * scale), int(height * scale)),
+            (max(1, int(width * scale)), max(1, int(height * scale))),
             Image.Resampling.LANCZOS,
         )
 
+    image = ImageEnhance.Contrast(image).enhance(1.7)
+    image = image.filter(ImageFilter.SHARPEN)
     return image
 
 
 def _ocr_words(image, lang):
+    # PSM 6 is more reliable for handwritten payment-voucher tables.
+    # Orientation is selected once from the page/photo aspect ratio below.
     return pytesseract.image_to_data(
         image,
         lang=lang,
@@ -271,36 +276,18 @@ def extract_text(image_path, lang="eng+ben"):
     if not os.path.exists(image_path):
         raise FileNotFoundError("Image file not found")
 
+    # Expense payment vouchers are commonly landscape forms photographed
+    # sideways. Rotate portrait captures once, then run Tesseract exactly once.
     with Image.open(image_path) as original:
         original = ImageOps.exif_transpose(original)
-        best_score = float("-inf")
-        best_image = original.copy()
-        best_confidences = {}
-        best_angle = 0
+        width, height = original.size
+        rotate_angle = 90 if height > width else 0
+        oriented = original.rotate(rotate_angle, expand=True) if rotate_angle else original.copy()
+        processed = preprocess_image(oriented)
+        data = _ocr_words(processed, lang)
+        text, lines, confidences = _data_to_text(data)
 
-        # Voucher photos are often captured sideways. Compare likely
-        # orientations and select the one whose OCR resembles a document.
-        for angle in (0, 90, 270):
-            candidate = original.rotate(angle, expand=True) if angle else original.copy()
-            processed = preprocess_image(candidate)
-            data = _ocr_words(processed, lang)
-            candidate_text, _, candidate_confidences = _data_to_text(data)
-            score = _orientation_score(candidate_text, candidate_confidences)
-            if score > best_score:
-                best_score = score
-                best_image = candidate.copy()
-                best_confidences = candidate_confidences
-                best_angle = angle
-
-        processed = preprocess_image(best_image)
-        text = pytesseract.image_to_string(
-            processed,
-            lang=lang,
-            config="--oem 3 --psm 6",
-        ).strip()
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-
-        confidence_values = list(best_confidences.values())
+        confidence_values = list(confidences.values())
         confidence = (
             round(sum(confidence_values) / len(confidence_values), 2)
             if confidence_values
@@ -311,6 +298,7 @@ def extract_text(image_path, lang="eng+ben"):
             "text": text,
             "lines": lines,
             "confidence": confidence,
-            "fields": extract_basic_fields(text, best_confidences, lines),
-            "orientation": best_angle,
+            "fields": extract_basic_fields(text, confidences, lines),
+            "orientation": rotate_angle,
         }
+
